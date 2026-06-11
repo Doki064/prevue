@@ -98,13 +98,39 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (populated by roadmap) | | |
+| DIFF-01 | Phase 1 | Pending |
+| ENGN-01 | Phase 1 | Pending |
+| ENGN-02 | Phase 1 | Pending |
+| OUTP-01 | Phase 1 | Pending |
+| SECR-01 | Phase 1 | Pending |
+| DIFF-02 | Phase 2 | Pending |
+| CLSF-01 | Phase 2 | Pending |
+| CLSF-03 | Phase 2 | Pending |
+| ROUT-01 | Phase 2 | Pending |
+| SKIL-01 | Phase 3 | Pending |
+| SKIL-02 | Phase 3 | Pending |
+| SKIL-04 | Phase 3 | Pending |
+| ENGN-03 | Phase 4 | Pending |
+| OUTP-02 | Phase 4 | Pending |
+| OUTP-03 | Phase 4 | Pending |
+| NOIS-02 | Phase 4 | Pending |
+| NOIS-03 | Phase 4 | Pending |
+| WKFL-01 | Phase 5 | Pending |
+| WKFL-02 | Phase 5 | Pending |
+| WKFL-03 | Phase 5 | Pending |
+| WKFL-04 | Phase 5 | Pending |
+| CLSF-02 | Phase 5 | Pending |
+| NOIS-01 | Phase 5 | Pending |
+| SKIL-03 | Phase 6 | Pending |
+| SECR-02 | Phase 6 | Pending |
+| OUTP-04 | Phase 6 | Pending |
+| DIFF-03 | Phase 6 | Pending |
 
 **Coverage:**
-- v1 requirements: 26 total
-- Mapped to phases: 0
-- Unmapped: 26 ⚠️
+- v1 requirements: 27 total
+- Mapped to phases: 27
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-12*
-*Last updated: 2026-06-12 after initial definition*
+*Last updated: 2026-06-12 after roadmap creation*
