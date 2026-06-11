@@ -1,0 +1,35 @@
+{
+  "action": "opened",
+  "number": 99,
+  "pull_request": {
+    "number": 99,
+    "head": {
+      "sha": "fork123def456789012345678901234567890abcd",
+      "ref": "feature/from-fork",
+      "repo": {
+        "full_name": "contributor/prevue",
+        "name": "prevue",
+        "owner": {
+          "login": "contributor",
+          "type": "User"
+        }
+      }
+    },
+    "base": {
+      "sha": "base000def456789012345678901234567890abcd",
+      "ref": "main",
+      "repo": {
+        "full_name": "owner/prevue",
+        "name": "prevue",
+        "owner": {
+          "login": "owner",
+          "type": "User"
+        }
+      }
+    }
+  },
+  "repository": {
+    "full_name": "owner/prevue",
+    "name": "prevue"
+  }
+}

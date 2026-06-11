@@ -1,0 +1,26 @@
+[
+  {
+    "sha": "bbcd538c8ea72a5e5a290ecef3ea1817ee92b564",
+    "filename": "src/prevue/github/diff.py",
+    "status": "added",
+    "additions": 24,
+    "deletions": 0,
+    "changes": 24,
+    "blob_url": "https://api.github.com/repos/owner/prevue/git/blobs/bbcd538c8ea72a5e5a290ecef3ea1817ee92b564",
+    "raw_url": "https://github.com/owner/prevue/raw/abc123/src/prevue/github/diff.py",
+    "contents_url": "https://api.github.com/repos/owner/prevue/contents/src/prevue/github/diff.py?ref=abc123",
+    "patch": "@@ -0,0 +1,24 @@\n+\"\"\"Fetch PR diff via GitHub REST API (no checkout).\"\"\"\n+\n+import json\n+import os\n+\n+from github import Auth, Github\n+\n+from prevue.models import ChangedFile, DiffBundle\n+\n+\n+def load_pr_context() -> tuple[str, int]:\n+    repo_full = os.environ[\"GITHUB_REPOSITORY\"]\n+    with open(os.environ[\"GITHUB_EVENT_PATH\"]) as f:\n+        event = json.load(f)\n+    return repo_full, event[\"pull_request\"][\"number\"]\n+\n+\n+def fetch_diff() -> DiffBundle:\n+    repo_full, number = load_pr_context()\n+    gh = Github(auth=Auth.Token(os.environ[\"GITHUB_TOKEN\"]))\n+    pr = gh.get_repo(repo_full).get_pull(number)\n+    files = [\n+        ChangedFile(\n+            path=f.filename,\n+            status=f.status,\n+            additions=f.additions,\n+            deletions=f.deletions,\n+            patch=getattr(f, \"patch\", None),\n+        )\n+        for f in pr.get_files()\n+    ]\n+    return DiffBundle(\n+        pr_number=number,\n+        base_sha=pr.base.sha,\n+        head_sha=pr.head.sha,\n+        files=files,\n+    )"
+  },
+  {
+    "sha": "a1b2c3d4e5f6789012345678abcdef0123456789",
+    "filename": "assets/logo.png",
+    "status": "added",
+    "additions": 0,
+    "deletions": 0,
+    "changes": 0,
+    "blob_url": "https://api.github.com/repos/owner/prevue/git/blobs/a1b2c3d4e5f6789012345678abcdef0123456789",
+    "raw_url": "https://github.com/owner/prevue/raw/abc123/assets/logo.png",
+    "contents_url": "https://api.github.com/repos/owner/prevue/contents/assets/logo.png?ref=abc123",
+    "patch": null
+  }
+]

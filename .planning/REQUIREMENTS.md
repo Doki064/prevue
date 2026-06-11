@@ -16,9 +16,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Diff Fetching
 
-- [ ] **DIFF-01**: Pipeline fetches the PR diff and changed-file metadata via the GitHub API on PR events (no checkout of untrusted code required for diff analysis)
+- [x] **DIFF-01**: Pipeline fetches the PR diff and changed-file metadata via the GitHub API on PR events (no checkout of untrusted code required for diff analysis)
 - [ ] **DIFF-02**: Pipeline applies default path filters (lockfiles, generated, vendored, binaries) and consumer-defined ignore globs before classification
 - [ ] **DIFF-03**: Pipeline enforces a token budget with prioritized file packing and explicitly discloses "N files not reviewed" in the summary
+  - *Note (added 2026-06-11, Phase 1 discussion):* when input and output share a token pool, the budget must reserve tokens for the review output so packed input cannot starve the response
 
 ### Classification
 
@@ -31,18 +32,19 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **ROUT-01**: Router maps classification labels to skill bundles with precedence: consumer override > consumer custom > built-in
 - [ ] **SKIL-01**: Skill loader loads only the matched skill bundles into the review context (SKILL.md-style markdown bundles with routing metadata)
 - [ ] **SKIL-02**: Framework ships built-in skill bundles: security, frontend, backend, data, infra
+  - *Note (added 2026-06-11, Phase 1 discussion):* the built-in security bundle must instruct the review to flag secrets/credentials committed in the diff (alert, not redact)
 - [ ] **SKIL-03**: Consumer repos can add custom skills and override built-in bundles via `.github/prevue/skills/`
 - [ ] **SKIL-04**: Skills are loaded from the trusted base ref only; PR-modified skill files are never executed in the same run
 
 ### Engine Adapter
 
-- [ ] **ENGN-01**: Engine adapters implement a pluggable interface: review context in → structured findings (file, line, severity, message, suggestion) out
-- [ ] **ENGN-02**: GitHub Copilot CLI adapter runs headless on Actions runners (`copilot -p ... -s --no-ask-user`, auth via `COPILOT_GITHUB_TOKEN`, minimal `--allow-tool` set)
+- [x] **ENGN-01**: Engine adapters implement a pluggable interface: review context in → structured findings (file, line, severity, message, suggestion) out
+- [x] **ENGN-02**: GitHub Copilot CLI adapter runs headless on Actions runners (`copilot -p ... -s --no-ask-user`, auth via `COPILOT_GITHUB_TOKEN`, minimal `--allow-tool` set)
 - [ ] **ENGN-03**: Engine output is schema-validated with retry-then-degrade handling; a parse failure produces a neutral check, never a crash or false block
 
 ### Output
 
-- [ ] **OUTP-01**: Review posts a sticky summary comment (updated in place on subsequent runs) with verdict, classification labels, and findings overview
+- [x] **OUTP-01**: Review posts a sticky summary comment (updated in place on subsequent runs) with verdict, classification labels, and findings overview
 - [ ] **OUTP-02**: Review posts inline line-level comments via the Reviews API, with finding positions validated against diff hunks (invalid positions fall back to the summary)
 - [ ] **OUTP-03**: Review reports pass/fail/neutral status usable as a merge gate (blocking is opt-in via severity threshold)
 - [ ] **OUTP-04**: Summary comment includes token/cost transparency: tokens used, skills loaded vs skipped
@@ -55,7 +57,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Security
 
-- [ ] **SECR-01**: Workflow uses the `pull_request` trigger only (no `pull_request_target`); fork PRs are documented as unsupported in v1
+- [x] **SECR-01**: Workflow uses the `pull_request` trigger only (no `pull_request_target`); fork PRs are documented as unsupported in v1
 - [ ] **SECR-02**: Untrusted PR text (titles, bodies, comments) is never interpolated into engine prompts as instructions; prompt-injection mitigations documented and tested
 
 ## v2 Requirements
@@ -98,11 +100,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DIFF-01 | Phase 1 | Pending |
-| ENGN-01 | Phase 1 | Pending |
-| ENGN-02 | Phase 1 | Pending |
-| OUTP-01 | Phase 1 | Pending |
-| SECR-01 | Phase 1 | Pending |
+| DIFF-01 | Phase 1 | Complete |
+| ENGN-01 | Phase 1 | Complete |
+| ENGN-02 | Phase 1 | Complete |
+| OUTP-01 | Phase 1 | Complete |
+| SECR-01 | Phase 1 | Complete |
 | DIFF-02 | Phase 2 | Pending |
 | CLSF-01 | Phase 2 | Pending |
 | CLSF-03 | Phase 2 | Pending |
@@ -127,6 +129,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | DIFF-03 | Phase 6 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 27 total
 - Mapped to phases: 27
 - Unmapped: 0 ✓
