@@ -1,0 +1,38 @@
+[project]
+name = "prevue"
+version = "0.1.0"
+description = "Token-efficient AI PR review framework for GitHub Actions"
+readme = "README.md"
+authors = [
+    { name = "Doki064", email = "minhdiep1280@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic==2.13.*",
+    "pygithub==2.9.*",
+]
+
+[project.scripts]
+prevue = "prevue.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.11.20,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[dependency-groups]
+dev = [
+    "pytest==9.*",
+    "pytest-cov==7.*",
+    "responses==0.26.*",
+    "ruff==0.15.*",
+]

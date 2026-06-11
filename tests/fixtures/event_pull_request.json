@@ -1,0 +1,35 @@
+{
+  "action": "opened",
+  "number": 42,
+  "pull_request": {
+    "number": 42,
+    "head": {
+      "sha": "abc123def456789012345678901234567890abcd",
+      "ref": "feature/walking-skeleton",
+      "repo": {
+        "full_name": "owner/prevue",
+        "name": "prevue",
+        "owner": {
+          "login": "owner",
+          "type": "User"
+        }
+      }
+    },
+    "base": {
+      "sha": "base000def456789012345678901234567890abcd",
+      "ref": "main",
+      "repo": {
+        "full_name": "owner/prevue",
+        "name": "prevue",
+        "owner": {
+          "login": "owner",
+          "type": "User"
+        }
+      }
+    }
+  },
+  "repository": {
+    "full_name": "owner/prevue",
+    "name": "prevue"
+  }
+}
