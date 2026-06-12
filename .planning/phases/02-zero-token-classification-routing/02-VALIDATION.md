@@ -3,8 +3,9 @@ phase: 2
 slug: zero-token-classification-routing
 status: approved
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-06-11
+updated: 2026-06-12
 ---
 
 # Phase 2 — Validation Strategy
@@ -41,13 +42,13 @@ Mock approach: `responses` for GitHub REST (existing Phase 1 pattern). classify/
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 02-01-01 | 01 | 1 | CLSF-03 (packaging) | T-02-01 / T-02-04 / T-02-SC | `yaml.safe_load` only (never `yaml.load`); malformed rules → pydantic ValidationError (fail-closed); `default_rules.yml` resolves via `importlib.resources` (never `__file__`) after wheel build | unit + integration | `uv run pytest tests/test_classify_rules.py -x -q` | ❌ W0 (`tests/test_classify_rules.py`) | ⬜ pending |
-| 02-01-02 | 01 | 1 | DIFF-02, CLSF-01, ROUT-01 | T-02-02 / T-02-03 | Pure functions only (no I/O/subprocess/network); never mutate input `DiffBundle` (`model_copy`); matched-glob provenance via `check_file().index`; no 0.12-era `gitwildmatch` factory | unit | `uv run pytest tests/test_classify_filter.py tests/test_classify_classifier.py tests/test_classify_router.py -x -q` | ❌ W0 (`tests/test_classify_filter.py`, `tests/test_classify_classifier.py`, `tests/test_classify_router.py`) | ⬜ pending |
-| 02-01-03 | 01 | 1 | DIFF-02 (D-08), CLSF-01, CLSF-03 (D-09) | T-02-03 | Engine receives a **reduced** `DiffBundle` (filtered files dropped, D-08); dropped lockfile produces no entry in `ClassificationResult.labels` (D-08 classification half); classify stage makes zero subprocess/network calls | unit | `uv run pytest tests/test_review_flow.py tests/test_comments.py -x -q` | ⚠️ extend existing (`tests/test_review_flow.py`, `tests/test_comments.py`) | ⬜ pending |
-| 02-02-01 | 02 | 2 | CLSF-01 (D-01/D-02/D-03), CLSF-03 (D-09) | T-02-05 / T-02-06 | D-03 `general` fallback so no file is silently un-reviewed; D-01 union so secondary domains are not dropped; fixed `CANONICAL_LABEL_ORDER` → deterministic, churn-free audit | unit | `uv run pytest tests/test_classify_classifier.py -x -q` | ❌ W0 (`tests/test_classify_classifier.py`) | ⬜ pending |
-| 02-02-02 | 02 | 2 | ROUT-01 (D-06), CLSF-03 (D-09) | T-02-06 | `route` handles `general` (1:1, override-able, D-06); Metadata renders labels + bundles in `CANONICAL_LABEL_ORDER` (deterministic, no nondeterministic churn) | unit | `uv run pytest tests/test_classify_router.py tests/test_comments.py -x -q` | ❌ W0 (`tests/test_classify_router.py`) / ⚠️ extend (`tests/test_comments.py`) | ⬜ pending |
-| 02-03-01 | 03 | 3 | CLSF-03 (D-05/D-07), ROUT-01 (D-06) | T-02-08 / T-02-09 / T-02-10 | `yaml.safe_load` for consumer config; result validated into pydantic `RuleSet` (fail-closed on malformed); consumer config read from **trusted base ref only** (no PR-head read path); additive merge so built-in security globs survive unless explicitly overridden | unit | `uv run pytest tests/test_classify_rules.py -x -q` | ⚠️ extend existing (`tests/test_classify_rules.py`) | ⬜ pending |
-| 02-03-02 | 03 | 3 | DIFF-02 (D-10/D-08), CLSF-03 (D-09) | T-02-11 | D-10 filter-first ordering: `if not reduced.files: upsert_skip_note(); return` gates BEFORE the engine call → zero engine tokens on all-noise PRs; dropped count disclosed in the D-09 audit trail (suppression is visible, never silent) | unit | `uv run pytest tests/test_review_flow.py tests/test_comments.py -x -q` | ⚠️ extend existing (`tests/test_review_flow.py`, `tests/test_comments.py`) | ⬜ pending |
+| 02-01-01 | 01 | 1 | CLSF-03 (packaging) | T-02-01 / T-02-04 / T-02-SC | `yaml.safe_load` only (never `yaml.load`); malformed rules → pydantic ValidationError (fail-closed); `default_rules.yml` resolves via `importlib.resources` (never `__file__`) after wheel build | unit + integration | `uv run pytest tests/test_classify_rules.py -x -q` | ✅ | ✅ green |
+| 02-01-02 | 01 | 1 | DIFF-02, CLSF-01, ROUT-01 | T-02-02 / T-02-03 | Pure functions only (no I/O/subprocess/network); never mutate input `DiffBundle` (`model_copy`); matched-glob provenance via `check_file().index`; no 0.12-era `gitwildmatch` factory | unit | `uv run pytest tests/test_classify_filter.py tests/test_classify_classifier.py tests/test_classify_router.py -x -q` | ✅ | ✅ green |
+| 02-01-03 | 01 | 1 | DIFF-02 (D-08), CLSF-01, CLSF-03 (D-09) | T-02-03 | Engine receives a **reduced** `DiffBundle` (filtered files dropped, D-08); dropped lockfile produces no entry in `ClassificationResult.labels` (D-08 classification half); classify stage makes zero subprocess/network calls | unit | `uv run pytest tests/test_review_flow.py tests/test_comments.py -x -q` | ✅ | ✅ green |
+| 02-02-01 | 02 | 2 | CLSF-01 (D-01/D-02/D-03), CLSF-03 (D-09) | T-02-05 / T-02-06 | D-03 `general` fallback so no file is silently un-reviewed; D-01 union so secondary domains are not dropped; fixed `CANONICAL_LABEL_ORDER` → deterministic, churn-free audit | unit | `uv run pytest tests/test_classify_classifier.py -x -q` | ✅ | ✅ green |
+| 02-02-02 | 02 | 2 | ROUT-01 (D-06), CLSF-03 (D-09) | T-02-06 | `route` handles `general` (1:1, override-able, D-06); Metadata renders labels + bundles in `CANONICAL_LABEL_ORDER` (deterministic, no nondeterministic churn) | unit | `uv run pytest tests/test_classify_router.py tests/test_comments.py -x -q` | ✅ | ✅ green |
+| 02-03-01 | 03 | 3 | CLSF-03 (D-05/D-07), ROUT-01 (D-06) | T-02-08 / T-02-09 / T-02-10 | `yaml.safe_load` for consumer config; result validated into pydantic `RuleSet` (fail-closed on malformed); consumer config read from **trusted base ref only** (no PR-head read path); additive merge so built-in security globs survive unless explicitly overridden | unit | `uv run pytest tests/test_classify_rules.py -x -q` | ✅ | ✅ green |
+| 02-03-02 | 03 | 3 | DIFF-02 (D-10/D-08), CLSF-03 (D-09) | T-02-11 | D-10 filter-first ordering: `if not reduced.files: upsert_skip_note(); return` gates BEFORE the engine call → zero engine tokens on all-noise PRs; dropped count disclosed in the D-09 audit trail (suppression is visible, never silent) | unit | `uv run pytest tests/test_review_flow.py tests/test_comments.py -x -q` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -59,15 +60,15 @@ Requirement coverage (all four phase requirement IDs mapped): **DIFF-02** (02-01
 
 New test files (RED-first; created by the task that owns them per the plan's TDD flow):
 
-- [ ] `tests/test_classify_filter.py` — DIFF-02 filter behavior, additive consumer ignores, dropped-count (created in 02-01 Task 2)
-- [ ] `tests/test_classify_classifier.py` — CLSF-01 label assignment, D-01 union, D-03 general, provenance (created in 02-01 Task 2)
-- [ ] `tests/test_classify_rules.py` — CLSF-03 YAML load + packaged-resource load + additive merge (created in 02-01 Task 1)
-- [ ] `tests/test_classify_router.py` — ROUT-01 routing map + precedence D-06 (created in 02-01 Task 2)
+- [x] `tests/test_classify_filter.py` — DIFF-02 filter behavior, additive consumer ignores, dropped-count (created in 02-01 Task 2)
+- [x] `tests/test_classify_classifier.py` — CLSF-01 label assignment, D-01 union, D-03 general, provenance (created in 02-01 Task 2)
+- [x] `tests/test_classify_rules.py` — CLSF-03 YAML load + packaged-resource load + additive merge (created in 02-01 Task 1)
+- [x] `tests/test_classify_router.py` — ROUT-01 routing map + precedence D-06 (created in 02-01 Task 2)
 
 Extensions to existing Phase 1 test files (no new file; extend in place):
 
-- [ ] Extend `tests/test_review_flow.py` — D-08 reduced bundle reaches engine (`-k filtered`); D-10 neutral skip branch (`-k empty_skip`)
-- [ ] Extend `tests/test_comments.py` — D-09 Metadata renders labels + matched rules + dropped count (`-k metadata`); skip-note idempotency (`-k skip`)
+- [x] Extend `tests/test_review_flow.py` — D-08 reduced bundle reaches engine (`-k filtered`); D-10 neutral skip branch (`-k empty_skip`)
+- [x] Extend `tests/test_comments.py` — D-09 Metadata renders labels + matched rules + dropped count (`-k metadata`); skip-note idempotency (`-k skip`)
 
 Test data fixtures: sample `ChangedFile` lists per scenario (frontend-only, mixed-domain, lockfile-only, no-match) — plain Python literals, no I/O.
 
@@ -94,4 +95,14 @@ Framework install: none — pytest/pytest-cov already in the dev group; runtime 
 - [x] Feedback latency < 10s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** approved 2026-06-11
+**Approval:** approved 2026-06-12 — all automated requirements covered; 113 tests green
+
+## Validation Audit 2026-06-12
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+Audit notes: VALIDATION.md was stale (pre-execution W0 placeholders). All 7 tasks, 4 Wave 0 files, and 2 extensions verified present; per-task commands and full suite (`uv run pytest -q`) pass.
