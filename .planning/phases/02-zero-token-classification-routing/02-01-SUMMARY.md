@@ -78,7 +78,7 @@ Each task was committed atomically:
 2. **Task 2: filter + classify + route pure functions** - `49ddd4d` (test RED), `9943361` (feat GREEN)
 3. **Task 3: Wire run_review + Metadata render** - `8370ba3` (test RED), `690af5b` (feat GREEN)
 
-**Plan metadata:** pending (docs commit)
+**Plan metadata:** `c15f104` (docs: complete plan)
 
 ## TDD Gate Compliance
 
