@@ -27,10 +27,19 @@ def render_body(
     metadata = f"Engine: copilot-cli · model: {model} · {duration}s"
     if classification is not None:
         if classification.labels:
-            labels_line = ", ".join(
-                f"{label} (matched `{classification.labels[label]}`)"
+            ordered_labels = [
+                label
                 for label in CANONICAL_LABEL_ORDER
                 if label in classification.labels
+            ]
+            ordered_labels.extend(
+                label
+                for label in classification.labels
+                if label not in set(ordered_labels)
+            )
+            labels_line = ", ".join(
+                f"{label} (matched `{classification.labels[label]}`)"
+                for label in ordered_labels
             )
             metadata += f"\nLabels: {labels_line}"
         if classification.bundles:
