@@ -84,8 +84,13 @@ def test_run_review_happy_path_calls_upsert_once(fake_engine) -> None:
 
     req = captured["req"]
     assert [f.path for f in req.diff.files] == [f.path for f in sample_diff.files]
-    assert req.instructions == BASELINE_INSTRUCTIONS
+    assert req.instructions.startswith(BASELINE_INSTRUCTIONS)
+    assert "## Skill:" in req.instructions
     assert req.budget_seconds == 300
+
+    loaded = mock_upsert.call_args.kwargs.get("loaded_skills")
+    assert loaded
+    assert any("(security)" in entry or "(backend)" in entry for entry in loaded)
 
 
 def test_run_review_filtered_diff_and_classification_metadata() -> None:
