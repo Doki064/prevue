@@ -168,7 +168,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton Review Loop | 7/7 | Complete    | 2026-06-11 |
 | 2. Zero-Token Classification & Routing | 3/3 | Complete    | 2026-06-12 |
-| 3. Selective Skill Loading | 3/3 | Complete   | 2026-06-12 |
+| 3. Selective Skill Loading | 3/3 | Complete    | 2026-06-12 |
 | 4. Structured Findings & Merge Gate | 0/TBD | Not started | - |
 | 5. Reusable Workflow & Hybrid Classification | 0/TBD | Not started | - |
 | 6. Customization & Hardening | 0/TBD | Not started | - |
