@@ -102,10 +102,11 @@ def test_copilot_token_env_separate_from_github_token() -> None:
 
 
 SETUP_UV_SHA = "fac544c07dec837d0ccb6301d7b5580bf5edae39"
+CHECKOUT_SHA = "df4cb1c069e1874edd31b4311f1884172cec0e10"
 COPILOT_CLI_VERSION = "1.0.61"
 
 
-def test_checkout_uses_version_tag() -> None:
+def test_checkout_is_sha_pinned() -> None:
     wf = _load_review_workflow()
     checkout_uses = None
     for job in wf.get("jobs", {}).values():
@@ -113,7 +114,7 @@ def test_checkout_uses_version_tag() -> None:
             uses = step.get("uses", "")
             if "checkout" in uses:
                 checkout_uses = uses
-    assert checkout_uses == "actions/checkout@v6"
+    assert checkout_uses == f"actions/checkout@{CHECKOUT_SHA}"
 
 
 def test_setup_uv_is_sha_pinned() -> None:
