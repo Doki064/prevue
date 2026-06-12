@@ -46,7 +46,8 @@ def test_backend_only_pr_selects_backend_not_frontend(fixture_skills) -> None:
     """SKIL-01: .py-only paths select backend/security skills, not frontend .tsx."""
     matched = select_skills(fixture_skills, ["src/example.py"])
     bundles = {s.bundle for s in matched}
-    assert "backend" in bundles or "security" in bundles
+    assert "backend" in bundles
+    assert "security" in bundles
     assert "frontend" not in bundles
 
 
