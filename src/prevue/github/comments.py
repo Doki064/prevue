@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from prevue.classify.models import CANONICAL_LABEL_ORDER, ClassificationResult, canonical_index
 from prevue.models import ReviewResult
 
@@ -53,18 +55,23 @@ def render_body(
 
 
 def _is_trusted_sticky_actor(comment) -> bool:
-    """Accept legacy GitHub Actions plus app/automation bot identities."""
+    """Accept only explicitly trusted sticky owners."""
     try:
         user = comment.user
         login = user.login
     except (AttributeError, TypeError):
         return False
 
-    if login in BOT_LOGINS or (isinstance(login, str) and login.endswith("[bot]")):
-        return True
+    if not isinstance(login, str):
+        return False
 
-    user_type = getattr(user, "type", None)
-    return user_type == "Bot"
+    # Optional runtime extension for dedicated app identities.
+    configured_logins = {
+        value.strip()
+        for value in os.environ.get("PREVUE_STICKY_OWNER_LOGINS", "").split(",")
+        if value.strip()
+    }
+    return login in (BOT_LOGINS | configured_logins)
 
 
 def _is_prevue_sticky(comment) -> bool:

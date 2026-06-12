@@ -148,7 +148,10 @@ def test_upsert_sticky_edits_existing_marker_comment() -> None:
     assert "no verdict in v1" in body.lower()
 
 
-def test_upsert_sticky_edits_existing_marker_comment_for_app_bot_login() -> None:
+def test_upsert_sticky_edits_existing_marker_comment_for_configured_owner(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("PREVUE_STICKY_OWNER_LOGINS", "prevue-review[bot]")
     existing = MagicMock()
     existing.body = f"{MARKER}\nold content"
     existing.user.login = "prevue-review[bot]"
@@ -160,6 +163,20 @@ def test_upsert_sticky_edits_existing_marker_comment_for_app_bot_login() -> None
 
     existing.edit.assert_called_once()
     pr.create_issue_comment.assert_not_called()
+
+
+def test_upsert_sticky_does_not_edit_unrelated_bot_with_marker() -> None:
+    unrelated_bot = MagicMock()
+    unrelated_bot.body = f"{MARKER}\nthird-party bot sticky"
+    unrelated_bot.user.login = "other-bot[bot]"
+
+    pr = MagicMock()
+    pr.get_issue_comments.return_value = [unrelated_bot]
+
+    upsert_sticky(pr, _sample_result())
+
+    unrelated_bot.edit.assert_not_called()
+    pr.create_issue_comment.assert_called_once()
 
 
 def test_upsert_sticky_skips_non_marker_comments() -> None:
