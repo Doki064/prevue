@@ -76,7 +76,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Foundation + thin end-to-end slice: deps (pathspec/PyYAML), default_rules.yml, RuleSet/ClassificationResult models, filter/classify/route wired into run_review with labels in the sticky Metadata (TDD)
+- [x] 02-01-PLAN.md — Foundation + thin end-to-end slice: deps (pathspec/PyYAML), default_rules.yml, RuleSet/ClassificationResult models, filter/classify/route wired into run_review with labels in the sticky Metadata (TDD)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -155,7 +155,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton Review Loop | 7/7 | Complete    | 2026-06-11 |
-| 2. Zero-Token Classification & Routing | 0/3 | Not started | - |
+| 2. Zero-Token Classification & Routing | 1/3 | In Progress|  |
 | 3. Selective Skill Loading | 0/TBD | Not started | - |
 | 4. Structured Findings & Merge Gate | 0/TBD | Not started | - |
 | 5. Reusable Workflow & Hybrid Classification | 0/TBD | Not started | - |
