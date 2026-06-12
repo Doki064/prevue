@@ -15,6 +15,14 @@ CANONICAL_LABEL_ORDER: tuple[str, ...] = (
 GENERAL_LABEL = "general"
 
 
+def canonical_index(name: str) -> int:
+    """Return sort rank for a label/bundle name; unknown names sort last."""
+    try:
+        return CANONICAL_LABEL_ORDER.index(name)
+    except ValueError:
+        return len(CANONICAL_LABEL_ORDER)
+
+
 class RuleSet(BaseModel):
     """Built-in + consumer classification rules (D-04, ROUT-01)."""
 
