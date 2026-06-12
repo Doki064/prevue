@@ -2,23 +2,39 @@
 
 from __future__ import annotations
 
+from prevue.classify.models import ClassificationResult
 from prevue.models import ReviewResult
 
 MARKER = "<!-- prevue:sticky -->"
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
 
 
-def render_body(result: ReviewResult) -> str:
+def render_body(
+    result: ReviewResult,
+    *,
+    classification: ClassificationResult | None = None,
+) -> str:
     """Sectioned sticky body: Verdict / Review / Metadata (D-04, D-05)."""
     model = result.engine_meta.get("model", "unknown")
     duration = result.engine_meta.get("duration_s", "?")
+    metadata = f"Engine: copilot-cli · model: {model} · {duration}s"
+    if classification is not None:
+        if classification.labels:
+            labels_line = ", ".join(
+                f"{label} (matched `{glob}`)"
+                for label, glob in sorted(classification.labels.items())
+            )
+            metadata += f"\nLabels: {labels_line}"
+        if classification.bundles:
+            bundles_line = ", ".join(sorted(classification.bundles))
+            metadata += f"\nBundles: {bundles_line}"
     return (
         f"{MARKER}\n"
         "## Prevue Review\n\n"
         "### Verdict\n"
         "_No verdict in v1 — informational review only._\n\n"
         f"### Review\n{result.summary_markdown}\n\n"
-        f"### Metadata\nEngine: copilot-cli · model: {model} · {duration}s\n"
+        f"### Metadata\n{metadata}\n"
     )
 
 
@@ -33,9 +49,14 @@ def _is_prevue_sticky(comment) -> bool:
     return (comment.body or "").lstrip().startswith(MARKER)
 
 
-def upsert_sticky(pr, result: ReviewResult) -> None:
+def upsert_sticky(
+    pr,
+    result: ReviewResult,
+    *,
+    classification: ClassificationResult | None = None,
+) -> None:
     """Create one sticky comment or edit in place when marker exists (D-06)."""
-    body = render_body(result)
+    body = render_body(result, classification=classification)
     for comment in pr.get_issue_comments():
         if _is_prevue_sticky(comment):
             comment.edit(body)

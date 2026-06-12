@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+from prevue.classify.models import ClassificationResult
 from prevue.github.comments import (
     BOT_LOGINS,
     MARKER,
@@ -11,7 +12,6 @@ from prevue.github.comments import (
     render_body,
     upsert_sticky,
 )
-from prevue.classify.models import ClassificationResult
 from prevue.models import ReviewResult
 
 
