@@ -2,7 +2,17 @@
 
 from __future__ import annotations
 
+from prevue.classify.models import CANONICAL_LABEL_ORDER
+
+
+def _canonical_index(label: str) -> int:
+    try:
+        return CANONICAL_LABEL_ORDER.index(label)
+    except ValueError:
+        return len(CANONICAL_LABEL_ORDER)
+
 
 def route(labels: list[str], routing_map: dict[str, str]) -> list[str]:
-    """Map each label to a bundle id; consumer override wins, else 1:1 by name."""
-    return [routing_map.get(label, label) for label in labels]
+    """Map each label to a bundle id; preserve canonical label order."""
+    ordered = sorted(labels, key=_canonical_index)
+    return [routing_map.get(label, label) for label in ordered]

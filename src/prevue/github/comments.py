@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
-from prevue.classify.models import ClassificationResult
+from prevue.classify.models import CANONICAL_LABEL_ORDER, ClassificationResult
 from prevue.models import ReviewResult
 
 MARKER = "<!-- prevue:sticky -->"
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
+
+
+def _canonical_index(name: str) -> int:
+    try:
+        return CANONICAL_LABEL_ORDER.index(name)
+    except ValueError:
+        return len(CANONICAL_LABEL_ORDER)
 
 
 def render_body(
@@ -21,12 +28,15 @@ def render_body(
     if classification is not None:
         if classification.labels:
             labels_line = ", ".join(
-                f"{label} (matched `{glob}`)"
-                for label, glob in sorted(classification.labels.items())
+                f"{label} (matched `{classification.labels[label]}`)"
+                for label in CANONICAL_LABEL_ORDER
+                if label in classification.labels
             )
             metadata += f"\nLabels: {labels_line}"
         if classification.bundles:
-            bundles_line = ", ".join(sorted(classification.bundles))
+            bundles_line = ", ".join(
+                sorted(classification.bundles, key=_canonical_index)
+            )
             metadata += f"\nBundles: {bundles_line}"
     return (
         f"{MARKER}\n"
