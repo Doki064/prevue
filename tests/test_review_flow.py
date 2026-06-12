@@ -78,10 +78,67 @@ def test_run_review_happy_path_calls_upsert_once(fake_engine) -> None:
     result = mock_upsert.call_args[0][1]
     assert result.summary_markdown == "## Canned review\n\nNo issues found."
 
+    classification = mock_upsert.call_args.kwargs.get("classification")
+    assert classification is not None
+    assert classification.labels == {"backend": "**/*.py"}
+
     req = captured["req"]
-    assert req.diff == sample_diff
+    assert [f.path for f in req.diff.files] == [f.path for f in sample_diff.files]
     assert req.instructions == BASELINE_INSTRUCTIONS
     assert req.budget_seconds == 300
+
+
+def test_run_review_filtered_diff_and_classification_metadata() -> None:
+    """D-08: lockfile filtered from engine diff and never classified."""
+    mock_pr = MagicMock()
+    mixed_diff = DiffBundle(
+        pr_number=PR_NUMBER,
+        base_sha=BASE_SHA,
+        head_sha=HEAD_SHA,
+        files=[
+            ChangedFile(
+                path="src/App.tsx",
+                status="modified",
+                additions=1,
+                deletions=0,
+                patch="@@",
+            ),
+            ChangedFile(
+                path="pkg/uv.lock",
+                status="modified",
+                additions=10,
+                deletions=0,
+                patch="@@",
+            ),
+        ],
+    )
+    captured: dict[str, ReviewRequest] = {}
+
+    class CaptureEngine:
+        name = "capture"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            captured["req"] = req
+            return ReviewResult(
+                summary_markdown="ok",
+                findings=[],
+                engine_meta={"model": "fake", "duration_s": 0.1},
+            )
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=mixed_diff),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.upsert_sticky") as mock_upsert,
+    ):
+        run_review(adapter=CaptureEngine())
+
+    req = captured["req"]
+    assert [f.path for f in req.diff.files] == ["src/App.tsx"]
+    classification = mock_upsert.call_args.kwargs["classification"]
+    assert classification.labels == {"frontend": "**/*.tsx"}
+    assert "uv.lock" not in str(classification.labels)
+    assert "lock" not in classification.labels
 
 
 def test_engine_failure_propagates_without_upsert() -> None:

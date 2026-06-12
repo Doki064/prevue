@@ -11,6 +11,7 @@ from prevue.github.comments import (
     render_body,
     upsert_sticky,
 )
+from prevue.classify.models import ClassificationResult
 from prevue.models import ReviewResult
 
 
@@ -34,6 +35,19 @@ def test_render_body_contains_marker_and_sections() -> None:
     assert "### Metadata" in body
     assert "fake" in body
     assert "0.1" in body
+
+
+def test_render_body_metadata_shows_labels_and_matched_globs() -> None:
+    classification = ClassificationResult(
+        labels={"frontend": "**/*.tsx"},
+        bundles=["frontend"],
+    )
+    body = render_body(_sample_result(), classification=classification)
+
+    assert "### Metadata" in body
+    assert "frontend" in body
+    assert "**/*.tsx" in body
+    assert "Bundles:" in body
 
 
 def test_upsert_sticky_creates_when_no_marker() -> None:
