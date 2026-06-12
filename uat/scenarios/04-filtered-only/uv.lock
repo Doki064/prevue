@@ -1,0 +1,3 @@
+# UAT scenario 04 — lockfile-only PR (D-10 neutral skip; not baseline-only).
+
+version = 1
