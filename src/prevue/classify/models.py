@@ -4,6 +4,16 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+CANONICAL_LABEL_ORDER: tuple[str, ...] = (
+    "security",
+    "frontend",
+    "backend",
+    "data",
+    "infra",
+    "general",
+)
+GENERAL_LABEL = "general"
+
 
 class RuleSet(BaseModel):
     """Built-in + consumer classification rules (D-04, ROUT-01)."""

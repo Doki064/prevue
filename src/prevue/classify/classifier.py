@@ -4,16 +4,30 @@ from __future__ import annotations
 
 from pathspec import GitIgnoreSpec
 
-from prevue.classify.models import ClassificationResult
+from prevue.classify.models import (
+    CANONICAL_LABEL_ORDER,
+    GENERAL_LABEL,
+    ClassificationResult,
+)
 from prevue.models import ChangedFile
+
+NO_RULE_MATCHED = "(no rule matched)"
+
+
+def _order_labels(labels: dict[str, str]) -> dict[str, str]:
+    """Emit labels in fixed canonical order (Pitfall 5 determinism)."""
+    return {
+        label: labels[label]
+        for label in CANONICAL_LABEL_ORDER
+        if label in labels
+    }
 
 
 def classify(
     files: list[ChangedFile],
     label_rules: dict[str, list[str]],
 ) -> ClassificationResult:
-    """Single-pass classify: first matching glob per label wins."""
-    # Plan 02: D-01 union, D-03 general, canonical sort
+    """Multi-label union classify with PR-level general fallback (D-01, D-03)."""
     labels: dict[str, str] = {}
     specs = {
         label: GitIgnoreSpec.from_lines(globs)
@@ -21,8 +35,11 @@ def classify(
     }
     for f in files:
         for label, spec in specs.items():
+            if label in labels:
+                continue
             res = spec.check_file(f.path)
             if res.include:
                 labels[label] = label_rules[label][res.index]
-                break
-    return ClassificationResult(labels=labels)
+    if not labels:
+        labels = {GENERAL_LABEL: NO_RULE_MATCHED}
+    return ClassificationResult(labels=_order_labels(labels))

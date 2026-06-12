@@ -5,10 +5,8 @@ from __future__ import annotations
 import pytest
 
 from prevue.classify.classifier import classify
+from prevue.classify.models import CANONICAL_LABEL_ORDER, GENERAL_LABEL
 from prevue.models import ChangedFile
-
-GENERAL_LABEL = "general"
-CANONICAL_LABEL_ORDER = ("security", "frontend", "backend", "data", "infra", "general")
 
 FRONTEND_RULES = {"frontend": ["**/*.tsx", "**/*.css"]}
 BACKEND_RULES = {"backend": ["**/*.py"]}
