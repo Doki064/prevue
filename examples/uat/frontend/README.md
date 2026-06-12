@@ -1,7 +1,8 @@
-# UAT fixture: frontend classification
+# UAT fixtures: Phase 2 classification
 
-Dummy React components for Phase 2 upstream testing.
+Dummy files for Phase 2 upstream testing.
 
-Open a PR that only touches files under this directory. Prevue should classify the PR as `frontend` (glob `**/*.tsx`) with zero LLM tokens on classification.
+- `examples/uat/frontend/*.tsx` — should match `frontend` (`**/*.tsx`)
+- `examples/uat/infra/*.tf` — should match `infra` (`**/*.tf`)
 
-Delete this directory after UAT completes.
+Together this PR should produce **both** labels (D-01 union). Delete after UAT completes.
