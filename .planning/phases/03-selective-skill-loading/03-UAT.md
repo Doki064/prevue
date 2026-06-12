@@ -16,7 +16,9 @@ uat_scenario: 01-backend-only
 | Branch | `uat/phase-03` |
 | Base | `gsd/phase-03-selective-skill-loading` |
 | Active scenario | `01-backend-only` → `uat/active/sample.py` |
-| Switch | `./uat/switch-scenario.sh <id>` then commit + push |
+| Switch | `./uat/switch-scenario.sh <id>` then `git add uat/active uat/ACTIVE` + push |
+
+**PR diff rule:** only `uat/active/*` may change on this branch — scenario templates stay on base (`uat/scenarios/`).
 
 Scenario map: see `uat/README.md`. Branch updates only for live workflow tests (1, 4, 5 skip, 9).
 
