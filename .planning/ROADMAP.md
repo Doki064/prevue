@@ -102,7 +102,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 1**
 
-- [ ] 03-01-PLAN.md — Wave 0 scaffold: add python-frontmatter (legitimacy checkpoint), skills-fixture tree + conftest, failing loader/builtin test scaffolds (RED)
+- [x] 03-01-PLAN.md — Wave 0 scaffold: add python-frontmatter (legitimacy checkpoint), skills-fixture tree + conftest, failing loader/builtin test scaffolds (RED)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -168,7 +168,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton Review Loop | 7/7 | Complete    | 2026-06-11 |
 | 2. Zero-Token Classification & Routing | 3/3 | Complete    | 2026-06-12 |
-| 3. Selective Skill Loading | 0/3 | Not started | - |
+| 3. Selective Skill Loading | 1/3 | In Progress|  |
 | 4. Structured Findings & Merge Gate | 0/TBD | Not started | - |
 | 5. Reusable Workflow & Hybrid Classification | 0/TBD | Not started | - |
 | 6. Customization & Hardening | 0/TBD | Not started | - |
