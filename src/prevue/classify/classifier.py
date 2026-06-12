@@ -16,11 +16,15 @@ NO_RULE_MATCHED = "(no rule matched)"
 
 def _order_labels(labels: dict[str, str]) -> dict[str, str]:
     """Emit labels in fixed canonical order (Pitfall 5 determinism)."""
-    return {
+    ordered = {
         label: labels[label]
         for label in CANONICAL_LABEL_ORDER
         if label in labels
     }
+    for label, glob in labels.items():
+        if label not in ordered:
+            ordered[label] = glob
+    return ordered
 
 
 def classify(
