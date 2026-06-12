@@ -15,4 +15,12 @@ def _canonical_index(label: str) -> int:
 def route(labels: list[str], routing_map: dict[str, str]) -> list[str]:
     """Map each label to a bundle id; preserve canonical label order."""
     ordered = sorted(labels, key=_canonical_index)
-    return [routing_map.get(label, label) for label in ordered]
+    bundles: list[str] = []
+    seen: set[str] = set()
+    for label in ordered:
+        bundle = routing_map.get(label, label)
+        if bundle in seen:
+            continue
+        seen.add(bundle)
+        bundles.append(bundle)
+    return bundles
