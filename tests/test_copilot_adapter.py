@@ -185,9 +185,7 @@ class TestPromptSizeGuard:
 
 
 class TestAuthGuard:
-    def test_missing_token_raises_copilot_auth_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_missing_token_raises_copilot_auth_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("COPILOT_GITHUB_TOKEN", raising=False)
         adapter = CopilotCliAdapter()
         with pytest.raises(CopilotAuthError):

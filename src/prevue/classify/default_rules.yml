@@ -1,0 +1,49 @@
+ignore:
+  - "**/*.lock"
+  - "**/package-lock.json"
+  - "**/yarn.lock"
+  - "**/pnpm-lock.yaml"
+  - "**/poetry.lock"
+  - "**/uv.lock"
+  - "**/Cargo.lock"
+  - "**/*.min.js"
+  - "**/*.min.css"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/vendor/**"
+  - "**/node_modules/**"
+  - "**/*.png"
+  - "**/*.jpg"
+  - "**/*.gif"
+  - "**/*.pdf"
+  - "**/*.woff2"
+
+labels:
+  frontend:
+    - "**/*.tsx"
+    - "**/*.jsx"
+    - "**/*.vue"
+    - "**/*.css"
+    - "**/*.scss"
+  backend:
+    - "**/*.py"
+    - "**/*.go"
+    - "**/*.rb"
+    - "**/*.java"
+  infra:
+    - "**/*.tf"
+    - "terraform/**"
+    - "**/Dockerfile"
+    - ".github/workflows/**"
+    - "**/k8s/**"
+  data:
+    - "**/migrations/**"
+    - "**/*.sql"
+    - "**/schema.prisma"
+  security:
+    - "**/auth/**"
+    - "**/*.pem"
+    - "**/.env*"
+    - "**/secrets/**"
+
+routing: {}
