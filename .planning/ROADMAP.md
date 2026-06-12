@@ -14,7 +14,7 @@ Prevue ships as a vertical MVP: Phase 1 stands up a complete working review loop
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Walking Skeleton Review Loop** - End-to-end PR review: fetch diff via API, Copilot CLI review, sticky summary comment, secure trigger posture (completed 2026-06-11)
-- [ ] **Phase 2: Zero-Token Classification & Routing** - Deterministic glob/path classifier with path filters and auditable label→bundle routing
+- [x] **Phase 2: Zero-Token Classification & Routing** - Deterministic glob/path classifier with path filters and auditable label→bundle routing (completed 2026-06-12)
 - [ ] **Phase 3: Selective Skill Loading** - SKILL.md bundle loader, five built-in bundles, trusted-ref-only loading
 - [ ] **Phase 4: Structured Findings & Merge Gate** - Schema-validated findings, position-validated inline comments, severity thresholds, comment budget, pass/fail/neutral check
 - [ ] **Phase 5: Reusable Workflow & Hybrid Classification** - `workflow_call` packaging, consumer config, LLM classification fallback, skip conditions — first shippable
@@ -72,7 +72,19 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Classification rules live in data (configurable/overridable), and the review output shows which labels were assigned and which rules matched
   4. Labels resolve to skill bundles with documented precedence: consumer override > consumer custom > built-in
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+**Wave 1**
+
+- [x] 02-01-PLAN.md — Foundation + thin end-to-end slice: deps (pathspec/PyYAML), default_rules.yml, RuleSet/ClassificationResult models, filter/classify/route wired into run_review with labels in the sticky Metadata (TDD)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 02-02-PLAN.md — Classifier refinement: multi-label union (D-01), PR-level `general` fallback (D-03), canonical ordering + matched-rule provenance, general routing (TDD)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 02-03-PLAN.md — Edge cases + configurability: consumer additive merge (D-05/D-06/D-07), D-10 empty-PR neutral skip, dropped-count audit (TDD)
 
 ### Phase 3: Selective Skill Loading
 
@@ -143,7 +155,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton Review Loop | 7/7 | Complete    | 2026-06-11 |
-| 2. Zero-Token Classification & Routing | 0/TBD | Not started | - |
+| 2. Zero-Token Classification & Routing | 3/3 | Complete    | 2026-06-12 |
 | 3. Selective Skill Loading | 0/TBD | Not started | - |
 | 4. Structured Findings & Merge Gate | 0/TBD | Not started | - |
 | 5. Reusable Workflow & Hybrid Classification | 0/TBD | Not started | - |
