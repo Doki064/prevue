@@ -50,6 +50,20 @@ def test_render_body_metadata_shows_labels_and_matched_globs() -> None:
     assert "Bundles:" in body
 
 
+def test_render_body_metadata_canonical_label_order() -> None:
+    """Pitfall 5: Metadata renders labels in CANONICAL_LABEL_ORDER, not alphabetical."""
+    classification = ClassificationResult(
+        labels={"infra": "**/*.tf", "security": "**/.env*"},
+        bundles=["infra", "security"],
+    )
+    body = render_body(_sample_result(), classification=classification)
+
+    labels_section = body.split("Labels: ", 1)[1].split("\nBundles:", 1)[0]
+    assert labels_section.index("security") < labels_section.index("infra")
+    bundles_section = body.split("Bundles: ", 1)[1].split("\n", 1)[0]
+    assert bundles_section.index("security") < bundles_section.index("infra")
+
+
 def test_upsert_sticky_creates_when_no_marker() -> None:
     pr = MagicMock()
     pr.get_issue_comments.return_value = []

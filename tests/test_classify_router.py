@@ -15,6 +15,20 @@ def test_route_consumer_override_wins() -> None:
     assert route(["frontend"], {"frontend": "fe-custom"}) == ["fe-custom"]
 
 
+def test_route_general_one_to_one_default() -> None:
+    """D-06: general label maps to general bundle by default."""
+    assert route(["general"], {}) == ["general"]
+
+
+def test_route_general_consumer_override() -> None:
+    assert route(["general"], {"general": "baseline"}) == ["baseline"]
+
+
+def test_route_preserves_canonical_order() -> None:
+    """Deterministic bundle order follows canonical label order, not alphabetical."""
+    assert route(["infra", "frontend"], {}) == ["frontend", "infra"]
+
+
 @pytest.mark.parametrize(
     ("labels", "routing_map", "expected"),
     [
