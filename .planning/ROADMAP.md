@@ -15,7 +15,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Walking Skeleton Review Loop** - End-to-end PR review: fetch diff via API, Copilot CLI review, sticky summary comment, secure trigger posture (completed 2026-06-11)
 - [x] **Phase 2: Zero-Token Classification & Routing** - Deterministic glob/path classifier with path filters and auditable label→bundle routing (completed 2026-06-12)
-- [ ] **Phase 3: Selective Skill Loading** - SKILL.md bundle loader, five built-in bundles, trusted-ref-only loading
+- [x] **Phase 3: Selective Skill Loading** - SKILL.md bundle loader, five built-in bundles, trusted-ref-only loading (completed 2026-06-12)
 - [ ] **Phase 4: Structured Findings & Merge Gate** - Schema-validated findings, position-validated inline comments, severity thresholds, comment budget, pass/fail/neutral check
 - [ ] **Phase 5: Reusable Workflow & Hybrid Classification** - `workflow_call` packaging, consumer config, LLM classification fallback, skip conditions — first shippable
 - [ ] **Phase 6: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget
@@ -106,11 +106,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03-02-PLAN.md — Loader core + security bundle wired end-to-end: Skill model, load/select/order/dedupe/assemble (GREEN), security skills, run_review + sticky-audit (D-13) (TDD)
+- [x] 03-02-PLAN.md — Loader core + security bundle wired end-to-end: Skill model, load/select/order/dedupe/assemble (GREEN), security skills, run_review + sticky-audit (D-13) (TDD)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 03-03-PLAN.md — Broaden to frontend/backend/data/infra bundles + finalize SKIL-02 builtin tests + test_review_flow behavior-change update
+- [x] 03-03-PLAN.md — Broaden to frontend/backend/data/infra bundles + finalize SKIL-02 builtin tests + test_review_flow behavior-change update
 
 ### Phase 4: Structured Findings & Merge Gate
 
@@ -168,7 +168,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton Review Loop | 7/7 | Complete    | 2026-06-11 |
 | 2. Zero-Token Classification & Routing | 3/3 | Complete    | 2026-06-12 |
-| 3. Selective Skill Loading | 1/3 | In Progress|  |
+| 3. Selective Skill Loading | 3/3 | Complete   | 2026-06-12 |
 | 4. Structured Findings & Merge Gate | 0/TBD | Not started | - |
 | 5. Reusable Workflow & Hybrid Classification | 0/TBD | Not started | - |
 | 6. Customization & Hardening | 0/TBD | Not started | - |
