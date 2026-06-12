@@ -2,24 +2,20 @@
 
 from __future__ import annotations
 
-from prevue.classify.models import CANONICAL_LABEL_ORDER, ClassificationResult
+import os
+
+from prevue.classify.models import CANONICAL_LABEL_ORDER, ClassificationResult, canonical_index
 from prevue.models import ReviewResult
 
 MARKER = "<!-- prevue:sticky -->"
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
 
 
-def _canonical_index(name: str) -> int:
-    try:
-        return CANONICAL_LABEL_ORDER.index(name)
-    except ValueError:
-        return len(CANONICAL_LABEL_ORDER)
-
-
 def render_body(
     result: ReviewResult,
     *,
     classification: ClassificationResult | None = None,
+    loaded_skills: list[str] | None = None,
 ) -> str:
     """Sectioned sticky body: Verdict / Review / Metadata (D-04, D-05)."""
     model = result.engine_meta.get("model", "unknown")
@@ -38,10 +34,14 @@ def render_body(
             )
             metadata += f"\nLabels: {labels_line}"
         if classification.bundles:
-            bundles_line = ", ".join(sorted(classification.bundles, key=_canonical_index))
+            bundles_line = ", ".join(sorted(classification.bundles, key=canonical_index))
             metadata += f"\nBundles: {bundles_line}"
         if classification.dropped_count:
             metadata += f"\nFiltered: {classification.dropped_count} filtered"
+        if loaded_skills:
+            metadata += f"\nSkills: {', '.join(loaded_skills)}"
+        elif classification is not None:
+            metadata += "\nSkills: none (baseline only)"
     return (
         f"{MARKER}\n"
         "## Prevue Review\n\n"
@@ -52,15 +52,31 @@ def render_body(
     )
 
 
-def _is_prevue_sticky(comment) -> bool:
-    """True only for bot-authored comments whose body starts with our marker."""
+def _is_trusted_sticky_actor(comment) -> bool:
+    """Accept only explicitly trusted sticky owners."""
     try:
-        login = comment.user.login
+        user = comment.user
+        login = user.login
     except (AttributeError, TypeError):
         return False
-    if login not in BOT_LOGINS:
+
+    if not isinstance(login, str):
         return False
-    return (comment.body or "").lstrip().startswith(MARKER)
+
+    # Optional runtime extension for dedicated app identities.
+    configured_logins = {
+        value.strip()
+        for value in os.environ.get("PREVUE_STICKY_OWNER_LOGINS", "").split(",")
+        if value.strip()
+    }
+    return login in (BOT_LOGINS | configured_logins)
+
+
+def _is_prevue_sticky(comment) -> bool:
+    """True for trusted automation comments whose body starts with marker."""
+    if not (comment.body or "").lstrip().startswith(MARKER):
+        return False
+    return _is_trusted_sticky_actor(comment)
 
 
 def _upsert_marker_comment(pr, body: str) -> None:
@@ -87,7 +103,12 @@ def upsert_sticky(
     result: ReviewResult,
     *,
     classification: ClassificationResult | None = None,
+    loaded_skills: list[str] | None = None,
 ) -> None:
     """Create one sticky comment or edit in place when marker exists (D-06)."""
-    body = render_body(result, classification=classification)
+    body = render_body(
+        result,
+        classification=classification,
+        loaded_skills=loaded_skills,
+    )
     _upsert_marker_comment(pr, body)

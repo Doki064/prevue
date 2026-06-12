@@ -65,6 +65,19 @@ def test_render_body_metadata_canonical_label_order() -> None:
     assert bundles_section.index("security") < bundles_section.index("infra")
 
 
+def test_render_body_loaded_skills() -> None:
+    body = render_body(
+        _sample_result(),
+        classification=ClassificationResult(
+            labels={"security": "**/*"},
+            bundles=["security"],
+        ),
+        loaded_skills=["Committed Secrets & Credentials (security)"],
+    )
+
+    assert "Skills: Committed Secrets & Credentials (security)" in body
+
+
 def test_render_body_metadata_shows_dropped_count() -> None:
     """D-09: dropped-file count surfaced in Metadata audit trail."""
     classification = ClassificationResult(
@@ -133,6 +146,37 @@ def test_upsert_sticky_edits_existing_marker_comment() -> None:
     body = existing.edit.call_args[0][0]
     assert MARKER in body
     assert "no verdict in v1" in body.lower()
+
+
+def test_upsert_sticky_edits_existing_marker_comment_for_configured_owner(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("PREVUE_STICKY_OWNER_LOGINS", "prevue-review[bot]")
+    existing = MagicMock()
+    existing.body = f"{MARKER}\nold content"
+    existing.user.login = "prevue-review[bot]"
+
+    pr = MagicMock()
+    pr.get_issue_comments.return_value = [existing]
+
+    upsert_sticky(pr, _sample_result())
+
+    existing.edit.assert_called_once()
+    pr.create_issue_comment.assert_not_called()
+
+
+def test_upsert_sticky_does_not_edit_unrelated_bot_with_marker() -> None:
+    unrelated_bot = MagicMock()
+    unrelated_bot.body = f"{MARKER}\nthird-party bot sticky"
+    unrelated_bot.user.login = "other-bot[bot]"
+
+    pr = MagicMock()
+    pr.get_issue_comments.return_value = [unrelated_bot]
+
+    upsert_sticky(pr, _sample_result())
+
+    unrelated_bot.edit.assert_not_called()
+    pr.create_issue_comment.assert_called_once()
 
 
 def test_upsert_sticky_skips_non_marker_comments() -> None:

@@ -14,6 +14,7 @@ from prevue.github.client import get_authenticated_pull, load_pr_context
 from prevue.github.comments import upsert_skip_note, upsert_sticky
 from prevue.github.diff import fetch_diff
 from prevue.models import ReviewRequest
+from prevue.skills.loader import assemble_instructions, load_skills, select_skills
 
 BASELINE_INSTRUCTIONS = (
     "You are a senior code reviewer. Review the pull request diff below. "
@@ -51,9 +52,13 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     result_cls.bundles = route(list(result_cls.labels.keys()), ruleset.routing_map)
     result_cls.dropped_count = len(dropped)
 
+    skills = load_skills()
+    matched = select_skills(skills, [f.path for f in reduced.files])
+    instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
+
     req = ReviewRequest(
         diff=reduced,
-        instructions=BASELINE_INSTRUCTIONS,
+        instructions=instructions,
         budget_seconds=300,
         model=os.environ.get("COPILOT_MODEL"),
     )
@@ -61,4 +66,9 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     engine = adapter or CopilotCliAdapter()
     result = engine.review(req)
 
-    upsert_sticky(pr, result, classification=result_cls)
+    upsert_sticky(
+        pr,
+        result,
+        classification=result_cls,
+        loaded_skills=[f"{s.name} ({s.bundle})" for s in matched],
+    )
