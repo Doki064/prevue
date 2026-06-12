@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 from prevue.classify.classifier import classify
 from prevue.classify.filter import filter_diff
@@ -23,6 +24,14 @@ BASELINE_INSTRUCTIONS = (
 
 FORK_UNSUPPORTED_MSG = "Fork PRs are unsupported in v1; skipping review."
 
+DEFAULT_CONFIG_PATH = ".github/prevue.yml"
+
+
+def _consumer_config_path() -> str | None:
+    """Resolve optional consumer prevue.yml (Phase 5: trusted base ref fetch)."""
+    path = os.environ.get("PREVUE_CONFIG", DEFAULT_CONFIG_PATH)
+    return path if Path(path).is_file() else None
+
 
 class ForkPrUnsupported(Exception):
     """Raised when head repo differs from base repo (SECR-01)."""
@@ -39,7 +48,7 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         raise ForkPrUnsupported()
 
     diff = fetch_diff()
-    ruleset = load_ruleset()
+    ruleset = load_ruleset(_consumer_config_path())
     reduced, dropped = filter_diff(diff, ruleset.ignore_globs)
     pr = get_authenticated_pull(ctx)
 

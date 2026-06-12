@@ -1,0 +1,11 @@
+# Consumer rules for Phase 2 UAT (test 6)
+
+ignore:
+  - "examples/uat/general-only/fixture.meta"
+
+labels:
+  data:
+    - "examples/uat/**/*.txt"
+
+routing:
+  data: data-uat-bundle
