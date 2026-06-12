@@ -148,6 +148,20 @@ def test_upsert_sticky_edits_existing_marker_comment() -> None:
     assert "no verdict in v1" in body.lower()
 
 
+def test_upsert_sticky_edits_existing_marker_comment_for_app_bot_login() -> None:
+    existing = MagicMock()
+    existing.body = f"{MARKER}\nold content"
+    existing.user.login = "prevue-review[bot]"
+
+    pr = MagicMock()
+    pr.get_issue_comments.return_value = [existing]
+
+    upsert_sticky(pr, _sample_result())
+
+    existing.edit.assert_called_once()
+    pr.create_issue_comment.assert_not_called()
+
+
 def test_upsert_sticky_skips_non_marker_comments() -> None:
     other = MagicMock()
     other.body = "Unrelated bot comment"

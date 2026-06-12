@@ -52,15 +52,26 @@ def render_body(
     )
 
 
-def _is_prevue_sticky(comment) -> bool:
-    """True only for bot-authored comments whose body starts with our marker."""
+def _is_trusted_sticky_actor(comment) -> bool:
+    """Accept legacy GitHub Actions plus app/automation bot identities."""
     try:
-        login = comment.user.login
+        user = comment.user
+        login = user.login
     except (AttributeError, TypeError):
         return False
-    if login not in BOT_LOGINS:
+
+    if login in BOT_LOGINS or (isinstance(login, str) and login.endswith("[bot]")):
+        return True
+
+    user_type = getattr(user, "type", None)
+    return user_type == "Bot"
+
+
+def _is_prevue_sticky(comment) -> bool:
+    """True for trusted automation comments whose body starts with marker."""
+    if not (comment.body or "").lstrip().startswith(MARKER):
         return False
-    return (comment.body or "").lstrip().startswith(MARKER)
+    return _is_trusted_sticky_actor(comment)
 
 
 def _upsert_marker_comment(pr, body: str) -> None:
