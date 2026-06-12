@@ -36,11 +36,21 @@ requirements: [DIFF-01, ENGN-01, ENGN-02, OUTP-01, SECR-01]
 | Prevue Review run | ✅ success | https://github.com/Doki064/prevue/actions/runs/27378511750/job/80908947334?pr=2 |
 | Spike workflow removed | ✅ | `spike-copilot.yml` deleted in e47e499 |
 
+## UAT (2026-06-12)
+
+Conversational UAT via `/gsd-verify-work 1` — see `01-UAT.md`.
+
+| Result | Count |
+|--------|-------|
+| Passed | 8 |
+| Skipped | 1 (fork PR — cannot fork repo manually) |
+| Issues | 0 |
+
 ## Gaps
 
 None blocking phase completion.
 
 ## Next Steps
 
-1. Merge [PR #2](https://github.com/Doki064/prevue/pull/2) → land `review.yml` + `ci.yml` on `main`
-2. `/gsd-discuss-phase 2` or `/gsd-plan-phase 2` for classification/routing
+1. Phase 01 shipped — merged via [PR #2](https://github.com/Doki064/prevue/pull/2)
+2. `/gsd-plan-phase 2` or `/gsd-execute-phase 2` for classification/routing
