@@ -40,6 +40,12 @@ def fake_engine() -> FakeEngine:
 
 
 @pytest.fixture
+def skills_fixture_root() -> Path:
+    """Path to the skills fixture tree for loader unit tests."""
+    return Path(__file__).parent / "fixtures" / "skills"
+
+
+@pytest.fixture
 def event_json() -> dict:
     """Load sample GITHUB_EVENT_PATH pull_request payload."""
     with (FIXTURES_DIR / "event_pull_request.json").open() as f:
