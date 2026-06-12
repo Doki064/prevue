@@ -17,19 +17,19 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Diff Fetching
 
 - [x] **DIFF-01**: Pipeline fetches the PR diff and changed-file metadata via the GitHub API on PR events (no checkout of untrusted code required for diff analysis)
-- [ ] **DIFF-02**: Pipeline applies default path filters (lockfiles, generated, vendored, binaries) and consumer-defined ignore globs before classification
+- [x] **DIFF-02**: Pipeline applies default path filters (lockfiles, generated, vendored, binaries) and consumer-defined ignore globs before classification
 - [ ] **DIFF-03**: Pipeline enforces a token budget with prioritized file packing and explicitly discloses "N files not reviewed" in the summary
   - *Note (added 2026-06-11, Phase 1 discussion):* when input and output share a token pool, the budget must reserve tokens for the review output so packed input cannot starve the response
 
 ### Classification
 
-- [ ] **CLSF-01**: Deterministic classifier assigns category labels (security, frontend, backend, data, infra) from file globs, paths, lockfiles, and extensions at zero token cost
+- [x] **CLSF-01**: Deterministic classifier assigns category labels (security, frontend, backend, data, infra) from file globs, paths, lockfiles, and extensions at zero token cost
 - [ ] **CLSF-02**: Ambiguous diffs fall back to a cheap/fast LLM classification call; clear-cut PRs spend no classification tokens
-- [ ] **CLSF-03**: Classification rules are data (configurable/overridable), and the resulting labels + matched rules are auditable in the review output
+- [x] **CLSF-03**: Classification rules are data (configurable/overridable), and the resulting labels + matched rules are auditable in the review output
 
 ### Routing & Skills
 
-- [ ] **ROUT-01**: Router maps classification labels to skill bundles with precedence: consumer override > consumer custom > built-in
+- [x] **ROUT-01**: Router maps classification labels to skill bundles with precedence: consumer override > consumer custom > built-in
 - [ ] **SKIL-01**: Skill loader loads only the matched skill bundles into the review context (SKILL.md-style markdown bundles with routing metadata)
 - [ ] **SKIL-02**: Framework ships built-in skill bundles: security, frontend, backend, data, infra
   - *Note (added 2026-06-11, Phase 1 discussion):* the built-in security bundle must instruct the review to flag secrets/credentials committed in the diff (alert, not redact)
@@ -105,10 +105,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ENGN-02 | Phase 1 | Complete |
 | OUTP-01 | Phase 1 | Complete |
 | SECR-01 | Phase 1 | Complete |
-| DIFF-02 | Phase 2 | Pending |
-| CLSF-01 | Phase 2 | Pending |
-| CLSF-03 | Phase 2 | Pending |
-| ROUT-01 | Phase 2 | Pending |
+| DIFF-02 | Phase 2 | Complete |
+| CLSF-01 | Phase 2 | Complete |
+| CLSF-03 | Phase 2 | Complete |
+| ROUT-01 | Phase 2 | Complete |
 | SKIL-01 | Phase 3 | Pending |
 | SKIL-02 | Phase 3 | Pending |
 | SKIL-04 | Phase 3 | Pending |
