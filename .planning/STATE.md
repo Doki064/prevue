@@ -5,7 +5,7 @@ milestone_name: milestone
 status: "Phase 02 shipped — PR #5"
 stopped_at: Completed 02-03-PLAN.md
 last_updated: "2026-06-12T12:38:22.945Z"
-last_activity: 2026-06-12
+last_activity: 2026-06-12 -- Phase 01 shipped (PR #2 merged); Phase 02 shipped (PR #5)
 progress:
   total_phases: 6
   completed_phases: 2
@@ -83,7 +83,7 @@ Recent decisions affecting current work:
 - [Phase 01]: run_review() orchestration with fork guard + D-09 fail-closed (Plan 06)
 - [Phase 01]: prevue review CLI — fork no-op exit 0, engine failure exit 1 (Plan 06)
 - [Phase 01]: Copilot prompt via stdin (ARG_MAX fix); live E2E on PR #2 (Plan 07)
-- [Phase 01]: setup-uv SHA-pinned; checkout@v6; copilot@1.0.61; spike deleted post-E2E
+- [Phase 01]: setup-uv SHA-pinned; checkout SHA-pinned (# v6); copilot@1.0.61; spike deleted post-E2E
 - [02-01]: GitIgnoreSpec.from_lines for pathspec 1.x classify stage
 - [02-01]: ClassificationResult threaded to upsert_sticky Metadata (D-09)
 - [02-01]: filter→classify→route wired into run_review; engine gets reduced diff (D-08)
