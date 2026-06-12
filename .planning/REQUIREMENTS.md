@@ -30,11 +30,11 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Routing & Skills
 
 - [x] **ROUT-01**: Router maps classification labels to skill bundles with precedence: consumer override > consumer custom > built-in
-- [ ] **SKIL-01**: Skill loader loads only the matched skill bundles into the review context (SKILL.md-style markdown bundles with routing metadata)
-- [ ] **SKIL-02**: Framework ships built-in skill bundles: security, frontend, backend, data, infra
+- [x] **SKIL-01**: Skill loader loads only the matched skill bundles into the review context (SKILL.md-style markdown bundles with routing metadata)
+- [x] **SKIL-02**: Framework ships built-in skill bundles: security, frontend, backend, data, infra
   - *Note (added 2026-06-11, Phase 1 discussion):* the built-in security bundle must instruct the review to flag secrets/credentials committed in the diff (alert, not redact)
 - [ ] **SKIL-03**: Consumer repos can add custom skills and override built-in bundles via `.github/prevue/skills/`
-- [ ] **SKIL-04**: Skills are loaded from the trusted base ref only; PR-modified skill files are never executed in the same run
+- [x] **SKIL-04**: Skills are loaded from the trusted base ref only; PR-modified skill files are never executed in the same run
 
 ### Engine Adapter
 
@@ -109,9 +109,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CLSF-01 | Phase 2 | Complete |
 | CLSF-03 | Phase 2 | Complete |
 | ROUT-01 | Phase 2 | Complete |
-| SKIL-01 | Phase 3 | Pending |
-| SKIL-02 | Phase 3 | Pending |
-| SKIL-04 | Phase 3 | Pending |
+| SKIL-01 | Phase 3 | Complete |
+| SKIL-02 | Phase 3 | Complete |
+| SKIL-04 | Phase 3 | Complete |
 | ENGN-03 | Phase 4 | Pending |
 | OUTP-02 | Phase 4 | Pending |
 | OUTP-03 | Phase 4 | Pending |
