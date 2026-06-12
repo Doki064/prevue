@@ -1,0 +1,4 @@
+Phase 2 UAT fixture — unclassifiable file (no label rule match).
+
+This plain-text file should not match security, frontend, backend, data, or infra globs.
+Prevue should assign only the general fallback label.
