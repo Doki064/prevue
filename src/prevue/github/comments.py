@@ -38,6 +38,8 @@ def render_body(
                 sorted(classification.bundles, key=_canonical_index)
             )
             metadata += f"\nBundles: {bundles_line}"
+        if classification.dropped_count:
+            metadata += f"\nFiltered: {classification.dropped_count} filtered"
     return (
         f"{MARKER}\n"
         "## Prevue Review\n\n"
@@ -59,6 +61,29 @@ def _is_prevue_sticky(comment) -> bool:
     return (comment.body or "").lstrip().startswith(MARKER)
 
 
+def _upsert_marker_comment(pr, body: str) -> None:
+    """Create or edit the single bot sticky comment identified by MARKER."""
+    for comment in pr.get_issue_comments():
+        if _is_prevue_sticky(comment):
+            comment.edit(body)
+            return
+    pr.create_issue_comment(body)
+
+
+def render_skip_body(dropped_count: int) -> str:
+    """Neutral skip body for all-filtered PRs (D-10)."""
+    return (
+        f"{MARKER}\n"
+        "## Prevue Review\n\n"
+        f"no reviewable files ({dropped_count} filtered)"
+    )
+
+
+def upsert_skip_note(pr, dropped_count: int) -> None:
+    """Post idempotent sticky note when every file was filtered (D-10)."""
+    _upsert_marker_comment(pr, render_skip_body(dropped_count))
+
+
 def upsert_sticky(
     pr,
     result: ReviewResult,
@@ -67,8 +92,4 @@ def upsert_sticky(
 ) -> None:
     """Create one sticky comment or edit in place when marker exists (D-06)."""
     body = render_body(result, classification=classification)
-    for comment in pr.get_issue_comments():
-        if _is_prevue_sticky(comment):
-            comment.edit(body)
-            return
-    pr.create_issue_comment(body)
+    _upsert_marker_comment(pr, body)
