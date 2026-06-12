@@ -65,6 +65,19 @@ def test_render_body_metadata_canonical_label_order() -> None:
     assert bundles_section.index("security") < bundles_section.index("infra")
 
 
+def test_render_body_loaded_skills() -> None:
+    body = render_body(
+        _sample_result(),
+        classification=ClassificationResult(
+            labels={"security": "**/*"},
+            bundles=["security"],
+        ),
+        loaded_skills=["Committed Secrets & Credentials (security)"],
+    )
+
+    assert "Skills: Committed Secrets & Credentials (security)" in body
+
+
 def test_render_body_metadata_shows_dropped_count() -> None:
     """D-09: dropped-file count surfaced in Metadata audit trail."""
     classification = ClassificationResult(
