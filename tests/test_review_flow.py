@@ -139,6 +139,44 @@ def test_run_review_filtered_diff_and_classification_metadata() -> None:
     assert classification.labels == {"frontend": "**/*.tsx"}
     assert "uv.lock" not in str(classification.labels)
     assert "lock" not in classification.labels
+    assert classification.dropped_count == 1
+
+
+def test_run_review_empty_skip_no_engine_call() -> None:
+    """D-10: all-filtered PR skips engine; posts neutral sticky note."""
+    mock_pr = MagicMock()
+    lockfile_only = DiffBundle(
+        pr_number=PR_NUMBER,
+        base_sha=BASE_SHA,
+        head_sha=HEAD_SHA,
+        files=[
+            ChangedFile(
+                path="pkg/uv.lock",
+                status="modified",
+                additions=10,
+                deletions=0,
+                patch="@@",
+            ),
+        ],
+    )
+
+    class SpyEngine:
+        name = "spy"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            raise AssertionError("engine must not be called on all-filtered PR")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=lockfile_only),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.upsert_skip_note") as mock_skip,
+        patch("prevue.review.upsert_sticky") as mock_sticky,
+    ):
+        run_review(adapter=SpyEngine())
+
+    mock_skip.assert_called_once_with(mock_pr, dropped_count=1)
+    mock_sticky.assert_not_called()
 
 
 def test_engine_failure_propagates_without_upsert() -> None:

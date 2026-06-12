@@ -10,6 +10,7 @@ from prevue.github.comments import (
     MARKER,
     _is_prevue_sticky,
     render_body,
+    upsert_skip_note,
     upsert_sticky,
 )
 from prevue.models import ReviewResult
@@ -62,6 +63,47 @@ def test_render_body_metadata_canonical_label_order() -> None:
     assert labels_section.index("security") < labels_section.index("infra")
     bundles_section = body.split("Bundles: ", 1)[1].split("\n", 1)[0]
     assert bundles_section.index("security") < bundles_section.index("infra")
+
+
+def test_render_body_metadata_shows_dropped_count() -> None:
+    """D-09: dropped-file count surfaced in Metadata audit trail."""
+    classification = ClassificationResult(
+        labels={"frontend": "**/*.tsx"},
+        bundles=["frontend"],
+        dropped_count=2,
+    )
+    body = render_body(_sample_result(), classification=classification)
+
+    assert "2 filtered" in body
+
+
+def test_upsert_skip_note_creates_sticky_with_dropped_count() -> None:
+    pr = MagicMock()
+    pr.get_issue_comments.return_value = []
+
+    upsert_skip_note(pr, dropped_count=3)
+
+    pr.create_issue_comment.assert_called_once()
+    body = pr.create_issue_comment.call_args[0][0]
+    assert body.startswith(MARKER)
+    assert "no reviewable files" in body
+    assert "3 filtered" in body
+
+
+def test_upsert_skip_note_edits_existing_marker_comment() -> None:
+    existing = MagicMock()
+    existing.body = f"{MARKER}\nold skip note"
+    existing.user.login = "github-actions[bot]"
+
+    pr = MagicMock()
+    pr.get_issue_comments.return_value = [existing]
+
+    upsert_skip_note(pr, dropped_count=5)
+
+    existing.edit.assert_called_once()
+    pr.create_issue_comment.assert_not_called()
+    body = existing.edit.call_args[0][0]
+    assert "5 filtered" in body
 
 
 def test_upsert_sticky_creates_when_no_marker() -> None:
