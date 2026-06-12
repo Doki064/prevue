@@ -49,8 +49,7 @@ def _escape_line(value: str) -> str:
 
 def _build_prompt(req: ReviewRequest) -> str:
     files = "\n".join(
-        f"- path={_escape_line(f.path)} status={_escape_line(f.status)}"
-        for f in req.diff.files
+        f"- path={_escape_line(f.path)} status={_escape_line(f.status)}" for f in req.diff.files
     )
     hunks = "\n\n".join(
         f"### {f.path}\n{_safe_diff_block(f.patch)}" for f in req.diff.files if f.patch
@@ -92,8 +91,7 @@ class CopilotCliAdapter(EngineAdapter):
         prompt_bytes = len(prompt.encode("utf-8"))
         if prompt_bytes > MAX_PROMPT_BYTES:
             raise EngineFailure(
-                f"Prompt exceeds 1MB ({prompt_bytes:,} bytes); "
-                "use file-based fallback in Phase 6"
+                f"Prompt exceeds 1MB ({prompt_bytes:,} bytes); use file-based fallback in Phase 6"
             )
 
         cmd = ["copilot", "-s", "--no-ask-user"]
@@ -112,8 +110,7 @@ class CopilotCliAdapter(EngineAdapter):
 
         if proc.returncode != 0:
             raise EngineFailure(
-                f"Copilot CLI exited {proc.returncode}: "
-                f"{_sanitize_stderr(proc.stderr, token)}"
+                f"Copilot CLI exited {proc.returncode}: {_sanitize_stderr(proc.stderr, token)}"
             )
 
         review_text = proc.stdout.strip()
