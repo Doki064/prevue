@@ -5,7 +5,7 @@ milestone_name: milestone
 status: ready
 stopped_at: Completed 01-07-PLAN.md — Phase 01 verified
 last_updated: "2026-06-12T00:00:00.000Z"
-last_activity: 2026-06-12 -- Phase 01 complete (live E2E approved)
+last_activity: 2026-06-12 -- Phase 01 UAT complete (8 passed, 1 skipped)
 progress:
   total_phases: 6
   completed_phases: 1
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-12)
 Phase: 01 (walking-skeleton-review-loop) — COMPLETE
 Plan: 7 of 7
 Status: Verified — ready for Phase 02
-Last activity: 2026-06-12 -- Phase 01 complete (live E2E approved on PR #2)
+Last activity: 2026-06-12 -- Phase 01 shipped (PR #2 merged); UAT complete
 
 Progress: [██████████] 100% (Phase 01)
 
