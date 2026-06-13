@@ -19,8 +19,8 @@ Live UAT via `uat/phase-05` **cleaned up** 2026-06-13. PR #11 closed. Test fixtu
 
 ### 1. Claude Code adapter live review on sandbox PR
 expected: Sticky + check published; diff-only review; clean exit with --bare
-result: skipped
-reason: Pro subscription — no ANTHROPIC_API_KEY available for live CLI auth
+result: override_accepted
+reason: ANTHROPIC_API_KEY unavailable — override accepted; contract suite green
 
 ### 2. Cursor adapter live review on sandbox PR
 expected: Sticky + check; cursor-agent from official installer; no hang; no file writes
@@ -35,9 +35,10 @@ result: pass
 
 total: 3
 passed: 2
+override_accepted: 1
 issues: 0
 pending: 0
-skipped: 1
+skipped: 0
 blocked: 0
 
 ## Gaps

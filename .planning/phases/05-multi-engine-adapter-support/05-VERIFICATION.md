@@ -1,19 +1,25 @@
 ---
 phase: 05-multi-engine-adapter-support
-verified: 2026-06-13T18:30:00Z
-status: human_needed
-score: 10/11 must-haves verified
-overrides_applied: 0
+verified: 2026-06-13T19:00:00Z
+status: passed
+score: 11/11 must-haves verified (1 override)
+overrides_applied: 1
+overrides:
+  - must_have: "D-12 Claude Code adapter live E2E on sandbox PR"
+    reason: "ANTHROPIC_API_KEY unavailable (Pro subscription). Adapter contract tests green; Cursor + unknown-engine live UAT passed. Environmental constraint, not code gap."
+    accepted_by: "user"
+    accepted_at: "2026-06-13T19:00:00Z"
 re_verification:
   previous_status: human_needed
-  previous_score: 6/6 automated
+  previous_score: 10/11 automated
   gaps_closed: []
   gaps_remaining: []
   regressions: []
 human_verification:
   - test: "Sandbox PR with PREVUE_ENGINE=claude-code-cli and ANTHROPIC_API_KEY — confirm sticky comment + check, diff-only review, clean exit"
     expected: "Review references only PR diff content (--bare); sticky upsert + prevue/review check published"
-    why_human: "D-12 live CLI + real auth; UAT skipped (no ANTHROPIC_API_KEY). CI mocks subprocess per D-11"
+    result: override_accepted
+    why_human: "D-12 live CLI + real auth; UAT skipped (no ANTHROPIC_API_KEY). Override accepted — contract suite green."
   - test: "Sandbox PR with PREVUE_ENGINE=cursor-cli and CURSOR_API_KEY — confirm sticky + check, no hang, no repo writes"
     expected: "cursor-agent resolves via official installer; completes within budget_seconds; read-only (no --force)"
     why_human: "D-12 live CLI; UAT pass on PR #11 — spot re-run optional for regression confidence"
@@ -26,9 +32,9 @@ human_verification:
 
 **Phase Goal:** EngineAdapter abstraction proven engine-agnostic — Claude Code, Cursor, and Gemini skeleton registered, selectable via PREVUE_ENGINE, sharing prompt/flow/parsing
 
-**Verified:** 2026-06-13T18:30:00Z  
-**Status:** human_needed (Claude D-12 live run skipped in UAT)  
-**Score:** 10/11 must-haves verified
+**Verified:** 2026-06-13T19:00:00Z  
+**Status:** passed (1 override — Claude D-12 live E2E environmental skip accepted)  
+**Score:** 11/11 must-haves verified
 
 ## Goal Achievement
 
@@ -44,11 +50,11 @@ human_verification:
 | 6 | Workflow curl installs only; npm impostor rejected | ✓ VERIFIED | `review.yml:47-52` curl for Claude/Cursor; `test_workflow_yaml.py` asserts `cursor.com/install` present and `npm install -g cursor-agent` absent |
 | 7 | ROADMAP SC: three adapters + contract tests | ✓ VERIFIED | All four in `ENGINES`; `test_engine_contract.py` parametrizes `FUNCTIONAL` (excludes gemini-cli skeleton) |
 | 8 | ROADMAP SC: engine selectable via config; unknown fails closed | ✓ VERIFIED | `review.yml:35-39` resolves `vars.PREVUE_ENGINE`; registry fail-closed; live UAT typo pass |
-| 9 | ROADMAP SC: each adapter headless on Actions with own auth env | ? UNCERTAIN | Cursor live pass (UAT); Claude live **skipped** (no key); Gemini skeleton N/A; workflow maps per-engine secrets |
+| 9 | ROADMAP SC: each adapter headless on Actions with own auth env | PASSED (override) | Cursor live pass (UAT); Claude live override accepted (contract green, no key); Gemini skeleton N/A; workflow maps per-engine secrets |
 | 10 | ROADMAP SC: no orchestration/findings/gate interface leak | ✓ VERIFIED | `git diff 9a1e2f7..78c4951` — gate/checks/comments formatting-only; `review.py` registry wiring only |
-| 11 | D-12: both new adapters live E2E on sandbox PR | ✗ PARTIAL | Cursor pass + unknown pass (UAT); Claude **skipped** — `05-UAT.md` test 1 |
+| 11 | D-12: both new adapters live E2E on sandbox PR | PASSED (override) | Cursor pass + unknown pass (UAT); Claude override accepted — contract suite green, `ANTHROPIC_API_KEY` unavailable |
 
-**Score:** 10/11 truths verified (1 partial — Claude live D-12)
+**Score:** 11/11 truths verified (1 override)
 
 ### Roadmap Success Criteria
 
@@ -56,7 +62,7 @@ human_verification:
 |---|-----------|--------|----------|
 | 1 | Three additional adapters implement EngineAdapter + pass contract tests | ✓ | Claude, Cursor functional; Gemini skeleton registered; contract suite green |
 | 2 | Active engine selectable via config; unknown fails closed | ✓ | `PREVUE_ENGINE` in workflow + registry |
-| 3 | Each adapter headless on Actions with own auth + shared retry-degrade | ? | Automated contract green; Claude live not executed |
+| 3 | Each adapter headless on Actions with own auth + shared retry-degrade | PASSED (override) | Automated contract green; Claude live override accepted (environmental) |
 | 4 | No orchestration/findings/gate layer changes (abstraction held) | ✓ | Only registry wiring + ruff formatting |
 
 ### Required Artifacts
@@ -130,11 +136,11 @@ No TBD/FIXME/XXX in phase-modified source files.
 
 ### Human Verification Required
 
-#### 1. Claude Code adapter live review (BLOCKING for full D-12 sign-off)
+#### 1. Claude Code adapter live review — OVERRIDE ACCEPTED
 
 **Test:** Sandbox PR with `PREVUE_ENGINE=claude-code-cli` and valid `ANTHROPIC_API_KEY`  
 **Expected:** Sticky comment + check published; review references diff only (`--bare`); clean exit  
-**Why human:** UAT test 1 **skipped** — "Pro subscription — no ANTHROPIC_API_KEY available". Automated contract suite mocks subprocess.
+**Status:** PASSED (override) — accepted by user 2026-06-13. `ANTHROPIC_API_KEY` unavailable; contract suite green.
 
 #### 2. Cursor adapter live review (UAT pass — optional re-run)
 
@@ -152,9 +158,7 @@ See also `.planning/phases/05-multi-engine-adapter-support/05-UAT.md`.
 
 ### Gaps Summary
 
-Automated implementation complete — 259 tests pass, all plan artifacts substantive and wired. **One live gap remains:** Claude Code D-12 end-to-end verification was skipped in UAT due to missing `ANTHROPIC_API_KEY`. Cursor live + unknown-engine fail-closed both passed. Phase cannot reach `passed` until Claude live run completes or an override is accepted for environmental unavailability.
-
-**Not a code gap:** Implementation and contract tests for Claude are green; blocker is live credential availability, not missing adapter logic.
+Automated implementation complete — 259 tests pass, all plan artifacts substantive and wired. Claude Code D-12 live E2E override accepted (environmental — no `ANTHROPIC_API_KEY`). Cursor live + unknown-engine fail-closed both passed. Phase status: **passed**.
 
 ---
 
