@@ -45,14 +45,11 @@ class CursorAdapter(EngineAdapter):
                     timeout=budget_seconds,
                 )
             except subprocess.TimeoutExpired as e:
-                raise EngineFailure(
-                    f"Cursor CLI timed out after {budget_seconds}s"
-                ) from e
+                raise EngineFailure(f"Cursor CLI timed out after {budget_seconds}s") from e
 
             if proc.returncode != 0:
                 raise EngineFailure(
-                    f"Cursor CLI exited {proc.returncode}: "
-                    f"{sanitize_stderr(proc.stderr, secret)}"
+                    f"Cursor CLI exited {proc.returncode}: {sanitize_stderr(proc.stderr, secret)}"
                 )
 
             review_text = proc.stdout.strip()

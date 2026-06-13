@@ -43,6 +43,19 @@ jobs:
           curl https://cursor.com/install -fsS | bash
           command -v cursor-agent
 
+      - name: Resolve PREVUE_ENGINE
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ENGINE="${{ vars.PREVUE_ENGINE }}"
+          if [ "${{ github.head_ref }}" = "uat/phase-05" ]; then
+            ACTIVE=$(gh api "repos/${{ github.repository }}/contents/uat/phase-05/ACTIVE?ref=${{ github.head_ref }}" --jq .content 2>/dev/null | base64 -d | tr -d '\n' || true)
+            if [ -n "$ACTIVE" ]; then
+              ENGINE="$ACTIVE"
+            fi
+          fi
+          echo "PREVUE_ENGINE=${ENGINE:-copilot-cli}" >> "$GITHUB_ENV"
+
       - name: Run review
         run: uv run prevue review
         env:
@@ -50,4 +63,3 @@ jobs:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
-          PREVUE_ENGINE: ${{ inputs.engine || vars.PREVUE_ENGINE || 'copilot-cli' }}
