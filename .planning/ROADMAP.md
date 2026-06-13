@@ -2,7 +2,7 @@
 
 ## Overview
 
-Prevue ships as a vertical MVP: Phase 1 stands up a complete working review loop (fetch diff → AI review → PR summary comment) on the riskiest integration (Copilot CLI on Actions runners) with the security posture locked in from day one. Phases 2–4 then slice in the core thesis — zero-token classification, selective skill loading, and structured findings with a merge gate — each keeping the loop working end-to-end. Phase 5 packages everything as a consumable reusable workflow with hybrid classification and config surface (the first externally shippable milestone), and Phase 6 hardens it into a framework: consumer custom skills, prompt-injection verification, token transparency, and large-PR budgets.
+Prevue ships as a vertical MVP: Phase 1 stands up a complete working review loop (fetch diff → AI review → PR summary comment) on the riskiest integration (Copilot CLI on Actions runners) with the security posture locked in from day one. Phases 2–4 then slice in the core thesis — zero-token classification, selective skill loading, and structured findings with a merge gate — each keeping the loop working end-to-end. Phase 5 proves the engine abstraction is genuinely engine-agnostic with additional adapters (Claude Code, Cursor) before any consumer-facing surface locks. Phase 6 then packages everything as a consumable reusable workflow with hybrid classification and config surface (the first externally shippable milestone), and Phase 7 hardens it into a framework: consumer custom skills, prompt-injection verification, token transparency, and large-PR budgets.
 
 ## Phases
 
@@ -17,8 +17,9 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Zero-Token Classification & Routing** - Deterministic glob/path classifier with path filters and auditable label→bundle routing (completed 2026-06-12)
 - [x] **Phase 3: Selective Skill Loading** - SKILL.md bundle loader, five built-in bundles, trusted-ref-only loading (completed 2026-06-12)
 - [x] **Phase 4: Structured Findings & Merge Gate** - Schema-validated findings, position-validated inline comments, severity thresholds, comment budget, pass/fail/neutral check (completed 2026-06-13)
-- [ ] **Phase 5: Reusable Workflow & Hybrid Classification** - `workflow_call` packaging, consumer config, LLM classification fallback, skip conditions — first shippable
-- [ ] **Phase 6: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget
+- [ ] **Phase 5: Multi-Engine Adapter Support** - Additional `EngineAdapter`s (Claude Code, Cursor, Gemini) via the same interface, config-selectable, validating engine-agnosticism before public packaging
+- [ ] **Phase 6: Reusable Workflow & Hybrid Classification** - `workflow_call` packaging, consumer config, LLM classification fallback, skip conditions — first shippable
+- [ ] **Phase 7: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget
 
 ## Phase Details
 
@@ -31,7 +32,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Success Criteria** (what must be TRUE):
 
   1. Opening or updating a PR triggers a run that fetches the diff and changed-file metadata via the GitHub API, without checking out untrusted PR code for analysis
-  2. The Copilot CLI adapter runs headless on a real Actions runner (auth via `COPILOT_GITHUB_TOKEN`) and returns a review through the pluggable `EngineAdapter` interface
+  2. The pluggable `EngineAdapter` interface is engine-agnostic by design; the Copilot CLI adapter (the first adapter) runs headless on a real Actions runner (auth via `COPILOT_GITHUB_TOKEN`) and returns a review through that interface — additional adapters (Claude Code, Cursor) land in Phase 5
   3. A summary comment appears on the PR and is updated in place (not duplicated) on subsequent runs
   4. The workflow uses the `pull_request` trigger only, and fork PRs are documented as unsupported
 
@@ -149,11 +150,26 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] 04-05-PLAN.md — `prevue/review` check run + run_review post-engine wiring + `checks: write` permission (TDD)
 
-### Phase 5: Reusable Workflow & Hybrid Classification
+### Phase 5: Multi-Engine Adapter Support
+
+**Goal**: The `EngineAdapter` abstraction is proven engine-agnostic — Claude Code, Cursor, and Gemini adapters run headless through the same interface as Copilot, selectable via config, before the public reusable workflow locks the engine-selection surface
+**Mode:** mvp
+**Depends on**: Phase 4
+**Requirements**: ENGN-04
+**Success Criteria** (what must be TRUE):
+
+  1. Three additional adapters (Claude Code CLI, Cursor CLI, Gemini CLI) implement the same `EngineAdapter` interface and pass the same contract tests as the Copilot adapter
+  2. The active engine is selectable via config (workflow input / `prevue.yml`) with Copilot as the default; an unknown engine name fails closed with a clear error
+  3. Each adapter runs headless on an Actions runner with its own auth env var and returns schema-valid findings through the shared retry-then-degrade path
+  4. Adding the new adapters required no change to the orchestration, findings, or gate layers — confirming the abstraction boundary held (any interface leak is fixed here, not in consumer-facing packaging)
+
+**Plans**: TBD
+
+### Phase 6: Reusable Workflow & Hybrid Classification
 
 **Goal**: Any repo can adopt Prevue with a minimal caller snippet — the workflow self-checkouts, runs the full hybrid pipeline under minimal permissions, and respects consumer config and skip conditions
 **Mode:** mvp
-**Depends on**: Phase 4
+**Depends on**: Phase 5
 **Requirements**: WKFL-01, WKFL-02, WKFL-03, WKFL-04, CLSF-02, NOIS-01
 **Success Criteria** (what must be TRUE):
 
@@ -165,11 +181,11 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Plans**: TBD
 
-### Phase 6: Customization & Hardening
+### Phase 7: Customization & Hardening
 
 **Goal**: Prevue behaves as a framework — consumers extend and override skills safely, prompt-injection defenses are verified, and every review proves the token-efficiency thesis with transparent budgets
 **Mode:** mvp
-**Depends on**: Phase 5
+**Depends on**: Phase 6
 **Requirements**: SKIL-03, SECR-02, OUTP-04, DIFF-03
 **Success Criteria** (what must be TRUE):
 
@@ -183,16 +199,17 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Walking Skeleton Review Loop | 7/7 | Complete    | 2026-06-11 |
 | 2. Zero-Token Classification & Routing | 3/3 | Complete    | 2026-06-12 |
 | 3. Selective Skill Loading | 4/4 | Complete    | 2026-06-12 |
-| 4. Structured Findings & Merge Gate | 1/5 | In Progress|  |
-| 5. Reusable Workflow & Hybrid Classification | 0/TBD | Not started | - |
-| 6. Customization & Hardening | 0/TBD | Not started | - |
+| 4. Structured Findings & Merge Gate | 5/5 | Complete    | 2026-06-13 |
+| 5. Multi-Engine Adapter Support | 0/TBD | Not started | - |
+| 6. Reusable Workflow & Hybrid Classification | 0/TBD | Not started | - |
+| 7. Customization & Hardening | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2026-06-12*

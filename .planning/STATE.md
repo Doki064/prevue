@@ -7,7 +7,7 @@ stopped_at: Completed 04-05-PLAN.md
 last_updated: "2026-06-13T15:05:33.941Z"
 last_activity: 2026-06-13
 progress:
-  total_phases: 6
+  total_phases: 7
   completed_phases: 3
   total_plans: 19
   completed_plans: 19
@@ -110,6 +110,7 @@ Recent decisions affecting current work:
 - [04-05]: load_review_config before fetch_diff — D-16 fail-closed before engine spend
 - [04-05]: Write order inline → sticky → check; check links to sticky html_url (D-10)
 - [04-05]: checks:write pinned in workflow; fork PR creates no check (D-09 absence holds pending)
+- [Roadmap 2026-06-13]: Inserted Phase 5 "Multi-Engine Adapter Support" (ENGN-04, promoted from CUST-03) — Claude Code + Cursor adapters validate the engine abstraction BEFORE public packaging; old Phase 5→6, 6→7. Phase 1 criterion 2 reworded to engine-agnostic (--force edit)
 
 ### Pending Todos
 
