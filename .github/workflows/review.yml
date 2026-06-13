@@ -46,10 +46,13 @@ jobs:
       - name: Resolve PREVUE_ENGINE
         env:
           GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.head_ref }}
+          REPO: ${{ github.repository }}
+          PREVUE_ENGINE_VAR: ${{ vars.PREVUE_ENGINE }}
         run: |
-          ENGINE="${{ vars.PREVUE_ENGINE }}"
-          if [ "${{ github.head_ref }}" = "uat/phase-05" ]; then
-            ACTIVE=$(gh api "repos/${{ github.repository }}/contents/uat/phase-05/ACTIVE?ref=${{ github.head_ref }}" --jq .content 2>/dev/null | base64 -d | tr -d '\n' || true)
+          ENGINE="$PREVUE_ENGINE_VAR"
+          if [ "$HEAD_REF" = "uat/phase-05" ]; then
+            ACTIVE=$(gh api "repos/$REPO/contents/uat/phase-05/ACTIVE?ref=$HEAD_REF" --jq .content 2>/dev/null | base64 -d | tr -d '\n' || true)
             if [ -n "$ACTIVE" ]; then
               ENGINE="$ACTIVE"
             fi
