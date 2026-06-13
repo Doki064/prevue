@@ -8,6 +8,8 @@ Branch-scoped fixtures for live `/gsd-verify-work` runs. Each `uat/phase-NN` bra
 
 **Fixture:** `uat/phase-05/sample.py` — small Python diff with an intentional missing-validation pattern for engines to review.
 
+**Active test:** see `uat/phase-05/ACTIVE` (currently `cursor-cli` — Test 2).
+
 ### Prerequisites (repo Settings → Secrets and variables → Actions)
 
 | Name | Type | Required for |
@@ -36,7 +38,7 @@ git commit --allow-empty -m "chore(uat): re-trigger review" && git push
 
 | # | Set `PREVUE_ENGINE` | Pass criteria |
 |---|---------------------|---------------|
-| 1 | `claude-code-cli` | Sticky comment + `prevue/review` check published; review references `sample.py` / missing validation; job exits 0 |
+| 1 | `claude-code-cli` | *(skipped — Pro sub, no API key)* |
 | 2 | `cursor-cli` | Sticky + check; `cursor-agent` from official installer; completes within budget; no repo file writes |
 | 3 | `typo-engine` | Job fails; logs show `UnknownEngineError` naming bad value and listing valid engines |
 
