@@ -162,3 +162,8 @@ def test_run_review_env_includes_new_engine_secrets() -> None:
     assert "${{ secrets.ANTHROPIC_API_KEY }}" in str(env["ANTHROPIC_API_KEY"])
     assert "${{ secrets.CURSOR_API_KEY }}" in str(env["CURSOR_API_KEY"])
 
+
+def test_uat_branch_engine_resolution_step() -> None:
+    text = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+    assert "Resolve PREVUE_ENGINE" in text
+    assert "uat/phase-05/ACTIVE" in text

@@ -180,4 +180,3 @@ def test_cursor_model_mapping_and_prompt_file(monkeypatch: pytest.MonkeyPatch) -
     assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "text"]
     assert ["-m", "sonnet-4"] == cmd[-2:]
     assert "src/main.py" in captured["prompt"]
-

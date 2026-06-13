@@ -44,8 +44,7 @@ class ClaudeCodeAdapter(EngineAdapter):
 
         if proc.returncode != 0:
             raise EngineFailure(
-                f"Claude Code CLI exited {proc.returncode}: "
-                f"{sanitize_stderr(proc.stderr, secret)}"
+                f"Claude Code CLI exited {proc.returncode}: {sanitize_stderr(proc.stderr, secret)}"
             )
 
         review_text = proc.stdout.strip()
