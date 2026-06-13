@@ -55,6 +55,16 @@ def test_draft_if_guard() -> None:
     assert "if:" in text
 
 
+def test_fork_pr_job_guard() -> None:
+    """Reusable job must self-guard fork PRs (v1 forks-skip), not rely on callers."""
+    wf = _load_reusable_workflow()
+    guards = [str(job.get("if", "")) for job in wf.get("jobs", {}).values()]
+    assert any(
+        "github.event.pull_request.head.repo.full_name == github.repository" in guard
+        for guard in guards
+    )
+
+
 def test_named_secrets_not_required() -> None:
     wf = _load_reusable_workflow()
     on = wf.get("on") or wf.get(True)
