@@ -36,3 +36,15 @@ def test_fork_pr_exits_early_without_side_effects(fork_github_env: None) -> None
         mock_fetch.assert_not_called()
         mock_adapter_cls.assert_not_called()
         mock_upsert.assert_not_called()
+
+
+def test_cli_fork_returns_exit_zero(
+    fork_github_env: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from prevue.cli import main
+
+    with patch("prevue.cli.run_review", side_effect=ForkPrUnsupported()):
+        code = main(["review"])
+
+    assert code == 0
+    assert FORK_UNSUPPORTED_MSG in capsys.readouterr().err
