@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: "Phase 05 shipped — PR #12"
-stopped_at: Phase 5 context gathered
-last_updated: "2026-06-13T16:40:27.421Z"
+status: "Phase 06 shipped — PR #13"
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-06-13T21:18:13.716Z"
 last_activity: 2026-06-13
 progress:
   total_phases: 7
-  completed_phases: 4
-  total_plans: 22
-  completed_plans: 22
+  completed_phases: 6
+  total_plans: 26
+  completed_plans: 26
   percent: 86
 ---
 
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-12)
 
 **Core value:** Optimal memory context and token usage when integrating with AI — load only the review skills the PR actually needs — while keeping review quality on par with a full-context review.
-**Current focus:** Phase 05 — multi-engine adapter support
+**Current focus:** Phase 07 — customization & hardening
 
 ## Current Position
 
-Phase: 5
-Plan: 3 of 3 (all plans executed)
-Status: Phase 05 shipped — PR #12
+Phase: 7 (customization-&-hardening)
+Plan: Not started
+Status: Phase 06 shipped — PR #13
 Last activity: 2026-06-13
 
-Progress: [██████████] 100% (Phase 05 plans)
+Progress: [██████████████] 86% (6/7 phases)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 23
+- Total plans completed: 28
 - Average duration: 9 min
 - Total execution time: 1.28 hours
 
@@ -49,6 +49,7 @@ Progress: [██████████] 100% (Phase 05 plans)
 | 02 | 3 | - | - |
 | 03 | 3 | - | - |
 | 3 | 3 | - | - |
+| 06 | 4 | - | - |
 
 **Recent Trend:**
 
@@ -67,6 +68,9 @@ Progress: [██████████] 100% (Phase 05 plans)
 *Updated after each plan completion*
 | Phase 01-walking-skeleton-review-loop P05 | 15min | 2 tasks | 3 files |
 | Phase 01-walking-skeleton-review-loop P06 | 12min | 2 tasks | 5 files |
+| Phase 06-reusable-workflow-hybrid-classification P01 | 12min | 3 tasks | 9 files |
+| Phase 06-reusable-workflow-hybrid-classification P02 | 1min | 2 tasks | 5 files |
+| Phase 06-reusable-workflow-hybrid-classification P03 | 15min | 3 tasks | 10 files |
 
 ## Accumulated Context
 
@@ -111,6 +115,13 @@ Recent decisions affecting current work:
 - [04-05]: Write order inline → sticky → check; check links to sticky html_url (D-10)
 - [04-05]: checks:write pinned in workflow; fork PR creates no check (D-09 absence holds pending)
 - [Roadmap 2026-06-13]: Inserted Phase 5 "Multi-Engine Adapter Support" (ENGN-04, promoted from CUST-03) — Claude Code + Cursor adapters validate the engine abstraction BEFORE public packaging; old Phase 5→6, 6→7. Phase 1 criterion 2 reworded to engine-agnostic (--force edit)
+- [06-01]: PrevueConfig single-read bundle (ruleset+review+skip+fallback+engine); SkipConfig skip_labels default ["skip-review"]
+- [06-01]: EngineAdapter.classify() default-raising; build_classify_prompt fences paths; ClassificationResult.unmatched per-file signal
+- [06-02]: Shippable prevue-review.yml workflow_call; self-checkout v0.6.0 + consumer base.sha; named secrets no inherit
+- [06-02]: review.yml thin dogfood caller; docs/consumer-setup.md with skip≠auto-merge note
+- [06-03]: llm_classify(unmatched, adapter, model) -> (labels, disclosure); degrade to general on failure (D-12)
+- [06-03]: run_review single-read load_config(.github/prevue.yml); same adapter for fallback (D-10)
+- [06-03]: Classification disclosure on sticky Metadata line (Open Question 3 lock)
 
 ### Pending Todos
 
@@ -132,6 +143,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-13T07:00:36.642Z
-Stopped at: Phase 5 context gathered
-Resume file: .planning/phases/05-multi-engine-adapter-support/05-CONTEXT.md
+Last session: 2026-06-14T00:15:00.000Z
+Stopped at: Completed 06-03-PLAN.md
+Resume file: .planning/phases/06-reusable-workflow-hybrid-classification/06-CONTEXT.md

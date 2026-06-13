@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Selective Skill Loading** - SKILL.md bundle loader, five built-in bundles, trusted-ref-only loading (completed 2026-06-12)
 - [x] **Phase 4: Structured Findings & Merge Gate** - Schema-validated findings, position-validated inline comments, severity thresholds, comment budget, pass/fail/neutral check (completed 2026-06-13)
 - [x] **Phase 5: Multi-Engine Adapter Support** - Additional `EngineAdapter`s (Claude Code, Cursor, Gemini) via the same interface, config-selectable, validating engine-agnosticism before public packaging (completed 2026-06-13)
-- [ ] **Phase 6: Reusable Workflow & Hybrid Classification** - `workflow_call` packaging, consumer config, LLM classification fallback, skip conditions — first shippable
+- [x] **Phase 6: Reusable Workflow & Hybrid Classification** - `workflow_call` packaging, consumer config, LLM classification fallback, skip conditions — first shippable (completed 2026-06-13)
 - [ ] **Phase 7: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget
 
 ## Phase Details
@@ -191,7 +191,20 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. Ambiguous diffs fall back to a cheap LLM classification call; clear-cut PRs still spend zero classification tokens
   5. Draft PRs, bot authors (e.g. dependabot), and title/label-filtered PRs are skipped by default (configurable), and required token scopes are minimal and documented
 
-**Plans**: TBD
+**Plans**: 4 plans
+
+**Wave 1**
+
+- [x] 06-01-PLAN.md — Foundation: classify() ABC capability + label prompt + single-read .github/prevue.yml config loader + classifier surfaces unmatched paths + Wave 0 RED scaffolds (WKFL-03, CLSF-02, TDD)
+
+**Wave 2** *(parallel, blocked on Wave 1 completion)*
+
+- [x] 06-02-PLAN.md — Reusable workflow_call workflow + thin pull_request caller (dogfood) + consumer-setup docs + static YAML guards (WKFL-01/02/04)
+- [x] 06-03-PLAN.md — Hybrid per-file LLM fallback: per-engine classify() + llm_fallback degrade-to-general + run_review single-read config wiring (CLSF-02, WKFL-03, TDD)
+
+**Wave 3** *(blocked on Wave 2 completion; not autonomous — live sandbox verify)*
+
+- [x] 06-04-PLAN.md — Skip pipeline: should_skip bot/label/title + neutral skip check/sticky reason + run_review skip hook + live consumer-repo verification (NOIS-01, WKFL-01/02, TDD)
 
 ### Phase 7: Customization & Hardening
 
@@ -220,7 +233,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 3. Selective Skill Loading | 4/4 | Complete    | 2026-06-12 |
 | 4. Structured Findings & Merge Gate | 5/5 | Complete    | 2026-06-13 |
 | 5. Multi-Engine Adapter Support | 3/3 | Complete   | 2026-06-13 |
-| 6. Reusable Workflow & Hybrid Classification | 0/TBD | Not started | - |
+| 6. Reusable Workflow & Hybrid Classification | 4/4 | Complete    | 2026-06-13 |
 | 7. Customization & Hardening | 0/TBD | Not started | - |
 
 ---

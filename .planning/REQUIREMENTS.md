@@ -9,10 +9,10 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Workflow Packaging
 
-- [ ] **WKFL-01**: Consumer can call Prevue as a GitHub reusable workflow (`workflow_call`) from any repo with a minimal caller snippet
-- [ ] **WKFL-02**: Reusable workflow self-checkouts the Prevue repo (pinned ref) and the consumer repo, then runs the pipeline via a single CLI invocation
-- [ ] **WKFL-03**: Consumer can configure run behavior via workflow inputs and a `.github/prevue.yml` config file read from the trusted base ref
-- [ ] **WKFL-04**: Workflow runs with minimal token scopes (read contents, write PR comments/checks) and documents required permissions
+- [x] **WKFL-01**: Consumer can call Prevue as a GitHub reusable workflow (`workflow_call`) from any repo with a minimal caller snippet
+- [x] **WKFL-02**: Reusable workflow self-checkouts the Prevue repo (pinned ref) and the consumer repo, then runs the pipeline via a single CLI invocation
+- [x] **WKFL-03**: Consumer can configure run behavior via workflow inputs and a `.github/prevue.yml` config file read from the trusted base ref
+- [x] **WKFL-04**: Workflow runs with minimal token scopes (read contents, write PR comments/checks) and documents required permissions
 
 ### Diff Fetching
 
@@ -24,7 +24,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Classification
 
 - [x] **CLSF-01**: Deterministic classifier assigns category labels (security, frontend, backend, data, infra) from file globs, paths, lockfiles, and extensions at zero token cost
-- [ ] **CLSF-02**: Ambiguous diffs fall back to a cheap/fast LLM classification call; clear-cut PRs spend no classification tokens
+- [x] **CLSF-02**: Ambiguous diffs fall back to a cheap/fast LLM classification call; clear-cut PRs spend no classification tokens
 - [x] **CLSF-03**: Classification rules are data (configurable/overridable), and the resulting labels + matched rules are auditable in the review output
 
 ### Routing & Skills
@@ -52,7 +52,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Noise Control
 
-- [ ] **NOIS-01**: Review skips draft PRs, bot authors (e.g. dependabot), and title/label-filtered PRs by default (configurable)
+- [x] **NOIS-01**: Review skips draft PRs, bot authors (e.g. dependabot), and title/label-filtered PRs by default (configurable)
 - [x] **NOIS-02**: Findings carry severity levels; consumer configures min-severity-to-comment and min-severity-to-fail thresholds
 - [x] **NOIS-03**: Review enforces a hard per-review comment budget so the bot never floods a PR
 
@@ -119,12 +119,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | NOIS-02 | Phase 4 | Complete (04-03) |
 | NOIS-03 | Phase 4 | Complete (04-03/04-05) |
 | ENGN-04 | Phase 5 | Pending |
-| WKFL-01 | Phase 6 | Pending |
-| WKFL-02 | Phase 6 | Pending |
-| WKFL-03 | Phase 6 | Pending |
-| WKFL-04 | Phase 6 | Pending |
-| CLSF-02 | Phase 6 | Pending |
-| NOIS-01 | Phase 6 | Pending |
+| WKFL-01 | Phase 6 | Complete |
+| WKFL-02 | Phase 6 | Complete |
+| WKFL-03 | Phase 6 | Complete |
+| WKFL-04 | Phase 6 | Complete |
+| CLSF-02 | Phase 6 | Complete |
+| NOIS-01 | Phase 6 | Complete |
 | SKIL-03 | Phase 7 | Pending |
 | SECR-02 | Phase 7 | Pending |
 | OUTP-04 | Phase 7 | Pending |
