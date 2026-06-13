@@ -20,12 +20,17 @@ Branch-scoped fixtures for live `/gsd-verify-work` runs. Each `uat/phase-NN` bra
 
 ### Engine selection
 
-The review workflow reads `PREVUE_ENGINE` from **repository variables** (Settings → Secrets and variables → Actions → **Variables** tab):
+Priority order:
+
+1. **`uat/phase-05/ACTIVE`** on the UAT PR head (read via GitHub API — no repo variable needed)
+2. Repository variable `PREVUE_ENGINE` (Settings → Variables)
+3. Default `copilot-cli`
+
+Edit `uat/phase-05/ACTIVE` and push to switch engines:
 
 ```
-PREVUE_ENGINE = claude-code-cli   # Test 1
-PREVUE_ENGINE = cursor-cli        # Test 2
-PREVUE_ENGINE = typo-engine       # Test 3 (fail-closed)
+cursor-cli        # Test 2 (current)
+typo-engine       # Test 3 (fail-closed)
 ```
 
 After each test, re-run the **Prevue Review** workflow on the UAT PR (Actions → workflow run → Re-run jobs), or push an empty commit:
@@ -36,8 +41,8 @@ git commit --allow-empty -m "chore(uat): re-trigger review" && git push
 
 ### Test checklist
 
-| # | Set `PREVUE_ENGINE` | Pass criteria |
-|---|---------------------|---------------|
+| # | Set engine | Pass criteria |
+|---|------------|---------------|
 | 1 | `claude-code-cli` | *(skipped — Pro sub, no API key)* |
 | 2 | `cursor-cli` | Sticky + check; `cursor-agent` from official installer; completes within budget; no repo file writes |
 | 3 | `typo-engine` | Job fails; logs show `UnknownEngineError` naming bad value and listing valid engines |
