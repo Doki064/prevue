@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from github import Auth, Github
 from github.PullRequest import PullRequest
+from github.Repository import Repository
 
 
 @dataclass(frozen=True)
@@ -36,3 +37,9 @@ def get_authenticated_pull(ctx: PrContext) -> PullRequest:
     """Resolve the PR via PyGithub REST API (no checkout)."""
     gh = Github(auth=Auth.Token(os.environ["GITHUB_TOKEN"]))
     return gh.get_repo(ctx.repo_full).get_pull(ctx.pr_number)
+
+
+def get_repo(ctx: PrContext) -> Repository:
+    """Resolve the repository for repo-scoped APIs (e.g. Checks)."""
+    gh = Github(auth=Auth.Token(os.environ["GITHUB_TOKEN"]))
+    return gh.get_repo(ctx.repo_full)

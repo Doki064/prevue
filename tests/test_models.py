@@ -17,7 +17,32 @@ from prevue.models import (
 def test_review_result_defaults_findings_and_engine_meta() -> None:
     result = ReviewResult(summary_markdown="x")
     assert result.findings == []
+    assert result.degraded is False
+    assert result.dropped_findings == 0
     assert result.engine_meta == {}
+
+
+def test_finding_rejects_non_canonical_severity() -> None:
+    with pytest.raises(ValidationError):
+        Finding(
+            path="src/main.py",
+            line=1,
+            severity="critical",
+            title="t",
+            body="b",
+        )
+
+
+@pytest.mark.parametrize("severity", ["error", "warning", "info"])
+def test_finding_accepts_canonical_severities(severity: str) -> None:
+    finding = Finding(
+        path="src/main.py",
+        line=1,
+        severity=severity,
+        title="t",
+        body="b",
+    )
+    assert finding.severity == severity
 
 
 def test_review_request_requires_diff_and_instructions() -> None:

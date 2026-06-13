@@ -5,15 +5,26 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from prevue.classify.models import ClassificationResult
+from prevue.gate import (
+    GateResult,
+    PlacedFinding,
+    ReviewConfig,
+    severity_counts_line,
+    thresholds_line,
+    verdict_title,
+)
 from prevue.github.comments import (
     BOT_LOGINS,
     MARKER,
+    _escape_table_cell,
     _is_prevue_sticky,
+    post_inline_review,
     render_body,
+    render_inline_comment,
     upsert_skip_note,
     upsert_sticky,
 )
-from prevue.models import ReviewResult
+from prevue.models import Finding, ReviewResult
 
 
 def _sample_result() -> ReviewResult:
@@ -231,6 +242,264 @@ def test_upsert_sticky_creates_when_comment_user_malformed() -> None:
 
     broken.edit.assert_not_called()
     pr.create_issue_comment.assert_called_once()
+
+
+class TestPostInlineReview:
+    def _finding(self, **overrides) -> Finding:
+        defaults = {
+            "path": "src/a.py",
+            "line": 10,
+            "severity": "error",
+            "title": "Issue",
+            "body": "Fix it.",
+        }
+        defaults.update(overrides)
+        return Finding(**defaults)
+
+    def _gate(self, inline: list[Finding]) -> GateResult:
+        placed = [PlacedFinding(finding=f, placement="inline") for f in inline]
+        return GateResult(
+            conclusion="neutral",
+            severity_counts={"error": len(inline), "warning": 0, "info": 0},
+            placed=placed,
+            inline=inline,
+            config=ReviewConfig(),
+        )
+
+    def test_single_batched_comment_review(self) -> None:
+        findings = [
+            self._finding(path="a.py", line=1, title="A"),
+            self._finding(path="b.py", line=2, title="B", severity="warning"),
+        ]
+        gate = self._gate(findings)
+        pr = MagicMock()
+
+        assert post_inline_review(pr, gate) is True
+
+        pr.create_review.assert_called_once()
+        kwargs = pr.create_review.call_args.kwargs
+        assert kwargs["event"] == "COMMENT"
+        assert kwargs["body"] == "Prevue posted 2 inline comment(s) — see the review summary."
+        assert len(kwargs["comments"]) == 2
+        first = kwargs["comments"][0]
+        assert set(first.keys()) == {"path", "line", "side", "body"}
+        assert first["path"] == "a.py"
+        assert first["line"] == 1
+        assert first["body"] == render_inline_comment(findings[0])
+
+    def test_skips_empty_inline(self) -> None:
+        gate = GateResult(
+            conclusion="success",
+            severity_counts={"error": 0, "warning": 0, "info": 0},
+            placed=[],
+            inline=[],
+            config=ReviewConfig(),
+        )
+        pr = MagicMock()
+
+        assert post_inline_review(pr, gate) is True
+        pr.create_review.assert_not_called()
+
+    def test_swallows_github_exception(self, capsys) -> None:
+        from github import GithubException
+
+        gate = self._gate([self._finding()])
+        pr = MagicMock()
+        pr.create_review.side_effect = GithubException(422, {"message": "Validation Failed"}, None)
+
+        assert post_inline_review(pr, gate) is False
+        err = capsys.readouterr().err
+        assert "inline review POST failed" in err
+        assert "1 comment" in err
+
+
+class TestStickyWithGate:
+    def _finding(self, **overrides) -> Finding:
+        defaults = {
+            "path": "src/a.py",
+            "line": 10,
+            "severity": "error",
+            "title": "Issue",
+            "body": "Details here.",
+        }
+        defaults.update(overrides)
+        return Finding(**defaults)
+
+    def _gate(self, **overrides) -> GateResult:
+        findings = [
+            self._finding(path="a.py", line=1, severity="error", title="E1"),
+            self._finding(path="b.py", line=2, severity="warning", title="W1"),
+            self._finding(path="c.py", line=3, severity="info", title="I1"),
+            self._finding(path="d.py", line=4, severity="warning", title="W2"),
+        ]
+        placed = [
+            PlacedFinding(finding=findings[0], placement="inline"),
+            PlacedFinding(finding=findings[1], placement="inline"),
+            PlacedFinding(finding=findings[2], placement="summary-only"),
+            PlacedFinding(finding=findings[3], placement="position-fallback"),
+        ]
+        defaults: dict = {
+            "conclusion": "neutral",
+            "severity_counts": {"error": 1, "warning": 2, "info": 1},
+            "placed": placed,
+            "inline": [findings[0], findings[1]],
+            "config": ReviewConfig(),
+            "degraded": False,
+            "dropped_findings": 0,
+        }
+        defaults.update(overrides)
+        return GateResult(**defaults)
+
+    def test_section_order_with_gate(self) -> None:
+        body = render_body(_sample_result(), gate=self._gate())
+        verdict_idx = body.index("### Verdict")
+        review_idx = body.index("### Review")
+        findings_idx = body.index("### Findings")
+        metadata_idx = body.index("### Metadata")
+        assert verdict_idx < review_idx < findings_idx < metadata_idx
+        assert body.index("<details>") > findings_idx
+
+    def test_verdict_mirrors_gate_helpers(self) -> None:
+        gate = self._gate()
+        body = render_body(_sample_result(), gate=gate)
+
+        assert verdict_title(gate) in body
+        assert severity_counts_line(gate) in body
+        assert thresholds_line(gate) in body
+
+    def test_findings_table_row_count(self) -> None:
+        body = render_body(_sample_result(), gate=self._gate())
+
+        table_lines = [
+            line
+            for line in body.split("\n")
+            if line.startswith("|") and "Severity" not in line and "---" not in line
+        ]
+        assert len(table_lines) == 4
+
+    def test_details_only_for_non_inline(self) -> None:
+        body = render_body(_sample_result(), gate=self._gate())
+
+        assert body.count("<details>") == 2
+        assert "c.py:3 — I1" in body
+        assert "d.py:4 — W2" in body
+
+    def test_degraded_notice_in_metadata(self) -> None:
+        gate = self._gate(degraded=True, placed=[], inline=[])
+        body = render_body(_sample_result(), gate=gate)
+
+        assert "structured findings unavailable (parse failure)" in body
+
+    def test_gate_none_preserves_phase3_output(self) -> None:
+        without_gate = render_body(_sample_result())
+        assert "_No verdict in v1 — informational review only._" in without_gate
+        assert "### Findings" not in without_gate
+
+    def test_table_escapes_pipe_in_title(self) -> None:
+        finding = self._finding(title="bad|pipe", path="x.py", line=5)
+        gate = GateResult(
+            conclusion="neutral",
+            severity_counts={"error": 1, "warning": 0, "info": 0},
+            placed=[PlacedFinding(finding=finding, placement="inline")],
+            inline=[finding],
+            config=ReviewConfig(),
+        )
+        body = render_body(_sample_result(), gate=gate)
+
+        assert "bad\\|pipe" in body
+        assert "| 🔴 error | `x.py:5` | bad\\|pipe | 💬 inline |" in body
+
+    def test_upsert_sticky_returns_created_comment(self) -> None:
+        created = MagicMock()
+        pr = MagicMock()
+        pr.get_issue_comments.return_value = []
+        pr.create_issue_comment.return_value = created
+
+        assert upsert_sticky(pr, _sample_result()) is created
+
+    def test_upsert_sticky_returns_edited_comment(self) -> None:
+        existing = MagicMock()
+        existing.body = f"{MARKER}\nold content"
+        existing.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_issue_comments.return_value = [existing]
+
+        assert upsert_sticky(pr, _sample_result()) is existing
+
+    def test_upsert_skip_note_returns_comment(self) -> None:
+        created = MagicMock()
+        pr = MagicMock()
+        pr.get_issue_comments.return_value = []
+        pr.create_issue_comment.return_value = created
+
+        assert upsert_skip_note(pr, dropped_count=2) is created
+
+
+class TestInlineTemplate:
+    def _finding(self, **overrides) -> Finding:
+        defaults = {
+            "path": "src/a.py",
+            "line": 10,
+            "severity": "error",
+            "title": "SQL injection",
+            "body": "Use parameterized queries.",
+            "suggestion": None,
+        }
+        defaults.update(overrides)
+        return Finding(**defaults)
+
+    def test_error_badge_title_body_footer_no_suggestion(self) -> None:
+        rendered = render_inline_comment(self._finding())
+
+        lines = rendered.split("\n")
+        assert lines[0] == "🔴 **SQL injection**"
+        assert lines[1] == ""
+        assert lines[2] == "Use parameterized queries."
+        assert "**Suggested change**" not in rendered
+        assert rendered.endswith("<sub>posted by Prevue</sub>")
+
+    def test_warning_and_info_badges(self) -> None:
+        warning = render_inline_comment(self._finding(severity="warning", title="Lint"))
+        info = render_inline_comment(self._finding(severity="info", title="Note"))
+
+        assert warning.startswith("🟡 **Lint**")
+        assert info.startswith("🔵 **Note**")
+
+    def test_suggestion_in_four_backtick_fence(self) -> None:
+        rendered = render_inline_comment(
+            self._finding(suggestion="cursor.execute(query, params)")
+        )
+
+        assert "**Suggested change**" in rendered
+        assert "````\ncursor.execute(query, params)\n````" in rendered
+
+    def test_suggestion_escapes_triple_backticks(self) -> None:
+        rendered = render_inline_comment(
+            self._finding(suggestion="code with ``` inside")
+        )
+
+        assert "```" not in rendered.split("````\n", 1)[1].rsplit("\n````", 1)[0]
+        assert "\\`\\`\\`" in rendered
+
+    def test_uniform_template_structure(self) -> None:
+        a = render_inline_comment(self._finding(title="A", body="body A"))
+        b = render_inline_comment(
+            self._finding(severity="warning", title="B", body="body B")
+        )
+
+        def skeleton(text: str) -> list[str]:
+            lines = text.split("\n")
+            return [
+                "BADGE_TITLE" if line.startswith(("🔴", "🟡", "🔵")) else line
+                for line in lines
+                if line not in {"body A", "body B"}
+            ]
+
+        assert skeleton(a) == skeleton(b)
+
+    def test_escape_table_cell_pipes_and_newlines(self) -> None:
+        assert _escape_table_cell("a|b\nc") == "a\\|b c"
+        assert _escape_table_cell("a\r\nb") == "a b"
 
 
 def test_upsert_sticky_skips_bot_comment_when_marker_not_at_start() -> None:

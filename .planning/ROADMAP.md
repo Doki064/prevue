@@ -16,7 +16,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Walking Skeleton Review Loop** - End-to-end PR review: fetch diff via API, Copilot CLI review, sticky summary comment, secure trigger posture (completed 2026-06-11)
 - [x] **Phase 2: Zero-Token Classification & Routing** - Deterministic glob/path classifier with path filters and auditable label→bundle routing (completed 2026-06-12)
 - [x] **Phase 3: Selective Skill Loading** - SKILL.md bundle loader, five built-in bundles, trusted-ref-only loading (completed 2026-06-12)
-- [ ] **Phase 4: Structured Findings & Merge Gate** - Schema-validated findings, position-validated inline comments, severity thresholds, comment budget, pass/fail/neutral check
+- [x] **Phase 4: Structured Findings & Merge Gate** - Schema-validated findings, position-validated inline comments, severity thresholds, comment budget, pass/fail/neutral check (completed 2026-06-13)
 - [ ] **Phase 5: Reusable Workflow & Hybrid Classification** - `workflow_call` packaging, consumer config, LLM classification fallback, skip conditions — first shippable
 - [ ] **Phase 6: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget
 
@@ -134,20 +134,20 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — Wave 0: unidiff dep (audited) + RED contract scaffolds for parsing/positions/gate/checks
+- [x] 04-01-PLAN.md — Wave 0: unidiff dep (audited) + RED contract scaffolds for parsing/positions/gate/checks
 
 **Wave 2** *(parallel, blocked on Wave 1 completion)*
 
-- [ ] 04-02-PLAN.md — Engine JSON contract: fence parsing + strict salvage + rubric/4C prompt + retry-then-degrade (ENGN-03, TDD)
-- [ ] 04-03-PLAN.md — Gate policy: ReviewConfig + conclusion ladder + budget allocation + unidiff position validity (NOIS-02/NOIS-03/OUTP-02/OUTP-03 logic, TDD)
+- [x] 04-02-PLAN.md — Engine JSON contract: fence parsing + strict salvage + rubric/4C prompt + retry-then-degrade (ENGN-03, TDD)
+- [x] 04-03-PLAN.md — Gate policy: ReviewConfig + conclusion ladder + budget allocation + unidiff position validity (NOIS-02/NOIS-03/OUTP-02/OUTP-03 logic, TDD)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-04-PLAN.md — Rendering: D-21 uniform inline template, Verdict/table/details sticky restructure, batched COMMENT review POST (TDD)
+- [x] 04-04-PLAN.md — Rendering: D-21 uniform inline template, Verdict/table/details sticky restructure, batched COMMENT review POST (TDD)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 04-05-PLAN.md — `prevue/review` check run + run_review post-engine wiring + `checks: write` permission (TDD)
+- [x] 04-05-PLAN.md — `prevue/review` check run + run_review post-engine wiring + `checks: write` permission (TDD)
 
 ### Phase 5: Reusable Workflow & Hybrid Classification
 
@@ -190,7 +190,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 1. Walking Skeleton Review Loop | 7/7 | Complete    | 2026-06-11 |
 | 2. Zero-Token Classification & Routing | 3/3 | Complete    | 2026-06-12 |
 | 3. Selective Skill Loading | 4/4 | Complete    | 2026-06-12 |
-| 4. Structured Findings & Merge Gate | 0/5 | Planned | - |
+| 4. Structured Findings & Merge Gate | 1/5 | In Progress|  |
 | 5. Reusable Workflow & Hybrid Classification | 0/TBD | Not started | - |
 | 6. Customization & Hardening | 0/TBD | Not started | - |
 

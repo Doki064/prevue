@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 4 context gathered
-last_updated: "2026-06-13T04:19:30.975Z"
-last_activity: 2026-06-12 — Phase 3 merged
+stopped_at: Completed 04-05-PLAN.md
+last_updated: "2026-06-13T04:53:18.000Z"
+last_activity: 2026-06-13 -- Completed 04-05 check-run merge gate plan; Phase 4 complete
 progress:
   total_phases: 6
-  completed_phases: 3
-  total_plans: 14
-  completed_plans: 14
-  percent: 50
+  completed_phases: 4
+  total_plans: 19
+  completed_plans: 19
+  percent: 100
 ---
 
 # Project State
@@ -21,24 +21,24 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-12)
 
 **Core value:** Optimal memory context and token usage when integrating with AI — load only the review skills the PR actually needs — while keeping review quality on par with a full-context review.
-**Current focus:** Phase 04 — structured-findings-&-merge-gate
+**Current focus:** Phase 05 — reusable workflow & hybrid classification
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-06-12 — Phase 3 merged
+Phase: 04 (structured-findings-merge-gate) — COMPLETE
+Plan: 5 of 5
+Status: Phase 4 complete; ready for Phase 5
+Last activity: 2026-06-13 -- Completed 04-05 check-run merge gate plan
 
-Progress: [██████████] 100% (Phase 03)
+Progress: [██████████] 100% (19/19 plans through Phase 4)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 22
+- Total plans completed: 23
 - Average duration: 9 min
-- Total execution time: 0.95 hours
+- Total execution time: 1.28 hours
 
 **By Phase:**
 
@@ -52,12 +52,17 @@ Progress: [██████████] 100% (Phase 03)
 
 **Recent Trend:**
 
-- Last 5 plans: 01-05 (15 min), 01-04 (12 min), 01-03 (5 min)
+- Last 5 plans: 04-03 (15 min), 04-04 (25 min), 04-05 (20 min)
 - Trend: steady
 
 | Phase 02-zero-token-classification-routing P01 | 12min | 3 tasks | 18 files |
 | Phase 02-zero-token-classification-routing P02 | 8min | 2 tasks | 7 files |
 | Phase 02-zero-token-classification-routing P03 | 2min | 2 tasks | 6 files |
+
+| Phase 04-structured-findings-merge-gate P02 | 35min | 3 tasks | 6 files |
+| Phase 04-structured-findings-merge-gate P03 | 15min | 3 tasks | 3 files |
+| Phase 04-structured-findings-merge-gate P04 | 25min | 3 tasks | 2 files |
+| Phase 04-structured-findings-merge-gate P05 | 20min | 3 tasks | 7 files |
 
 *Updated after each plan completion*
 | Phase 01-walking-skeleton-review-loop P05 | 15min | 2 tasks | 3 files |
@@ -93,6 +98,18 @@ Recent decisions affecting current work:
 - [02-02]: Multi-label union (D-01) + PR-level general fallback (D-03) + canonical Metadata order
 - [02-03]: merge_rules D-07 ignore append, D-05 label replace-by-label, D-06 routing override
 - [02-03]: D-10 filter-first empty-PR skip; upsert_skip_note idempotent sticky; D-09 dropped count audit
+- [04-01]: Wave 0 RED scaffolds pin Phase 4 API contracts; unidiff 0.7.* locked
+- [04-02]: engines/parsing.py prose+fence parser; strict salvage; adapter retry-then-degrade (ENGN-03)
+- [04-02]: Strip all json fences from prose; parse last fence only (decoy defense)
+- [04-02]: Fully-dropped salvage → degraded=True (false-green avoidance)
+- [04-03]: Position validation before budget — unplaceable findings never consume inline slots
+- [04-03]: load_review_config owned by gate.py; unidiff header synthesis for GitHub patch fragments
+- [04-04]: Python owns all findings markdown — D-21 uniform template, gate-aware sticky (D-26), batched COMMENT review (D-20)
+- [04-04]: Markdown-injection hardening — _escape_table_cell, _safe_suggestion_block; verdict strings from gate.py only (D-07)
+- [04-05]: Single completed-only create_check_run — no in_progress dangling check on engine hard-fail
+- [04-05]: load_review_config before fetch_diff — D-16 fail-closed before engine spend
+- [04-05]: Write order inline → sticky → check; check links to sticky html_url (D-10)
+- [04-05]: checks:write pinned in workflow; fork PR creates no check (D-09 absence holds pending)
 
 ### Pending Todos
 
@@ -110,10 +127,10 @@ Items acknowledged and carried forward from previous milestone close:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| *(none)* | | | |
+| lint | Pre-existing ruff E501/I001 in test_copilot_adapter.py, test_positions.py | open | 04-05 |
 
 ## Session Continuity
 
-Last session: 2026-06-12T16:02:21.089Z
-Stopped at: Phase 4 context gathered
-Resume file: .planning/phases/04-structured-findings-merge-gate/04-CONTEXT.md
+Last session: 2026-06-13T04:53:18.000Z
+Stopped at: Completed 04-05-PLAN.md
+Resume file: None
