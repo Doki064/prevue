@@ -381,7 +381,9 @@ class TestPostInlineReview:
         pr.create_review.assert_not_called()
         stale.delete.assert_called_once()
 
-    def test_create_failure_skips_stale_delete(self) -> None:
+    def test_create_failure_still_deletes_stale(self) -> None:
+        """Create failure is non-fatal for cleanup: stale comments must still be
+        removed so the PR does not end with old + new threads coexisting."""
         from github import GithubException
 
         gate = self._gate([self._finding(path="new.py", line=5)])
@@ -397,9 +399,11 @@ class TestPostInlineReview:
 
         assert post_inline_review(pr, gate) is False
 
-        stale.delete.assert_not_called()
+        stale.delete.assert_called_once()
 
-    def test_create_failure_skips_existing_inline_edit(self) -> None:
+    def test_edits_run_before_create_even_if_create_fails(self) -> None:
+        """Existing comments are edited before creating new ones, so a create
+        failure cannot leave the existing thread showing stale content."""
         from github import GithubException
 
         findings = [
@@ -420,7 +424,35 @@ class TestPostInlineReview:
         assert post_inline_review(pr, gate) is False
 
         pr.create_review.assert_called_once()
-        existing.edit.assert_not_called()
+        existing.edit.assert_called_once()
+
+    def test_edit_failure_is_nonfatal_and_still_deletes_stale(self) -> None:
+        """An edit failure marks the run unsuccessful but does not abort the
+        function before stale cleanup runs."""
+        from github import GithubException
+
+        gate = self._gate([self._finding(path="existing.py", line=1, title="Existing")])
+        existing = MagicMock()
+        existing.path = "existing.py"
+        existing.line = 1
+        existing.side = "RIGHT"
+        existing.body = "old\n\n<sub>posted by Prevue</sub>"
+        existing.user.login = "github-actions[bot]"
+        existing.edit.side_effect = GithubException(422, {"message": "Validation Failed"}, None)
+        stale = MagicMock()
+        stale.path = "old.py"
+        stale.line = 9
+        stale.side = "RIGHT"
+        stale.body = "stale\n\n<sub>posted by Prevue</sub>"
+        stale.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [existing, stale]
+
+        assert post_inline_review(pr, gate) is False
+
+        existing.edit.assert_called_once()
+        stale.delete.assert_called_once()
+        pr.create_review.assert_not_called()
 
     def test_stale_delete_failure_does_not_block_post(self) -> None:
         from github import GithubException

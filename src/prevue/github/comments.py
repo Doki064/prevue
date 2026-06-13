@@ -295,6 +295,23 @@ def post_inline_review(pr, gate: GateResult) -> bool:
             }
         )
 
+    # Resilient upsert: edit existing first, then create, then ALWAYS attempt
+    # stale cleanup. A failure in any phase must not strand stale comments
+    # alongside fresh ones — the end state must converge to current findings.
+    ok = True
+
+    for prior, body, finding in to_update:
+        try:
+            prior.edit(body)
+        except GithubException as exc:
+            ok = False
+            status = getattr(exc, "status", "unknown")
+            print(
+                f"prevue: inline comment update failed "
+                f"(HTTP {status}, {finding.path}:{finding.line})",
+                file=sys.stderr,
+            )
+
     if to_create:
         count = len(to_create)
         summary_parts = [f"{count} new inline comment(s)"]
@@ -305,24 +322,12 @@ def post_inline_review(pr, gate: GateResult) -> bool:
         try:
             pr.create_review(body=body, event="COMMENT", comments=to_create)
         except GithubException as exc:
+            ok = False
             status = getattr(exc, "status", "unknown")
             print(
                 f"prevue: inline review POST failed (HTTP {status}, {count} comment(s))",
                 file=sys.stderr,
             )
-            return False
-
-    for prior, body, finding in to_update:
-        try:
-            prior.edit(body)
-        except GithubException as exc:
-            status = getattr(exc, "status", "unknown")
-            print(
-                f"prevue: inline comment update failed "
-                f"(HTTP {status}, {finding.path}:{finding.line})",
-                file=sys.stderr,
-            )
-            return False
 
     _delete_prevue_inline_comments(stale_comments)
-    return True
+    return ok
