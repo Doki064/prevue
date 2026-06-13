@@ -33,6 +33,29 @@ def test_finding_rejects_non_canonical_severity() -> None:
         )
 
 
+def test_finding_rejects_non_positive_line() -> None:
+    with pytest.raises(ValidationError):
+        Finding(
+            path="src/main.py",
+            line=0,
+            severity="warning",
+            title="t",
+            body="b",
+        )
+
+
+def test_finding_rejects_invalid_side() -> None:
+    with pytest.raises(ValidationError):
+        Finding(
+            path="src/main.py",
+            line=1,
+            side="MIDDLE",
+            severity="warning",
+            title="t",
+            body="b",
+        )
+
+
 @pytest.mark.parametrize("severity", ["error", "warning", "info"])
 def test_finding_accepts_canonical_severities(severity: str) -> None:
     finding = Finding(

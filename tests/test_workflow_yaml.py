@@ -2,21 +2,11 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
 import yaml
 
 REVIEW_WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "review.yml"
-
-# Patterns that indicate checkout of untrusted PR head ref (Pitfall 1).
-PR_HEAD_REF_PATTERNS = (
-    re.compile(r"github\.event\.pull_request\.head", re.IGNORECASE),
-    re.compile(r"pull_request\.head\.sha", re.IGNORECASE),
-    re.compile(r"head\.ref", re.IGNORECASE),
-    re.compile(r"head_ref", re.IGNORECASE),
-)
-
 
 def _load_review_workflow() -> dict:
     with REVIEW_WORKFLOW.open(encoding="utf-8") as f:
@@ -61,7 +51,7 @@ def test_no_pull_request_target_in_source() -> None:
     assert "pull_request_target" not in text
 
 
-def test_no_pr_head_checkout() -> None:
+def test_checkout_ref_is_pinned_to_base_sha() -> None:
     wf = _load_review_workflow()
     for job in wf.get("jobs", {}).values():
         for step in job.get("steps", []):
@@ -69,12 +59,8 @@ def test_no_pr_head_checkout() -> None:
             if "checkout" not in uses:
                 continue
             with_block = step.get("with") or {}
-            ref_value = with_block.get("ref", "")
-            ref_str = str(ref_value)
-            for pattern in PR_HEAD_REF_PATTERNS:
-                assert not pattern.search(ref_str), (
-                    f"checkout step must not use PR head ref: {ref_str!r}"
-                )
+            ref_value = str(with_block.get("ref", ""))
+            assert ref_value == "${{ github.event.pull_request.base.sha }}"
 
 
 def test_single_prevue_review_invocation() -> None:

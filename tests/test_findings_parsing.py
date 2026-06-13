@@ -70,6 +70,30 @@ class TestExtractJsonFence:
         assert err is not None
         assert "array" in err.lower()
 
+    def test_accepts_uppercase_json_fence(self) -> None:
+        stdout = (
+            "## Review\n\nLooks good.\n\n"
+            f"```JSON\n{json.dumps([VALID_FINDING])}\n```"
+        )
+        prose, items, err = extract_json_fence(stdout)
+        assert err is None
+        assert items is not None
+        assert len(items) == 1
+        assert items[0]["path"] == VALID_FINDING["path"]
+        assert "```JSON" not in prose
+
+    def test_accepts_crlf_fence_newlines(self) -> None:
+        stdout = (
+            "## Review\r\n\r\nLooks good.\r\n\r\n"
+            f"```json\r\n{json.dumps([VALID_FINDING])}\r\n```"
+        )
+        prose, items, err = extract_json_fence(stdout)
+        assert err is None
+        assert items is not None
+        assert len(items) == 1
+        assert items[0]["path"] == VALID_FINDING["path"]
+        assert "```json" not in prose
+
 
 class TestValidateFindings:
     def test_mixed_list_keeps_valid_and_counts_dropped(self) -> None:

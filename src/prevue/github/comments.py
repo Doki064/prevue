@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 from github import GithubException
@@ -23,9 +24,11 @@ PLACEMENT_BADGES = {
 
 
 def _safe_suggestion_block(text: str) -> str:
-    """Render untrusted suggestion in 4-backtick fence, escape 3-backtick sequences."""
-    normalized = text.replace("```", "\\`\\`\\`")
-    return f"````\n{normalized}\n````"
+    """Render untrusted suggestion with a fence longer than any backtick run."""
+    runs = [len(match.group(0)) for match in re.finditer(r"`+", text)]
+    fence_len = max(4, (max(runs) + 1) if runs else 4)
+    fence = "`" * fence_len
+    return f"{fence}\n{text}\n{fence}"
 
 
 def _escape_table_cell(value: str) -> str:
@@ -34,10 +37,22 @@ def _escape_table_cell(value: str) -> str:
     return escaped.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
 
 
+def _escape_inline_markdown(value: str) -> str:
+    """Escape markdown control chars for short inline title/body snippets."""
+    escaped = value.replace("\\", "\\\\")
+    for token in ("`", "*", "_", "[", "]"):
+        escaped = escaped.replace(token, f"\\{token}")
+    return escaped.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
+
 def render_inline_comment(finding: Finding) -> str:
     """D-21 uniform inline-comment template from Finding fields."""
     badge = SEVERITY_BADGES[finding.severity]
-    parts = [f"{badge} **{finding.title}**", "", finding.body]
+    parts = [
+        f"{badge} **{_escape_inline_markdown(finding.title)}**",
+        "",
+        _escape_inline_markdown(finding.body),
+    ]
     if finding.suggestion is not None:
         parts.extend(["", "**Suggested change**", _safe_suggestion_block(finding.suggestion)])
     parts.extend(["", "<sub>posted by Prevue</sub>"])

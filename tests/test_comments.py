@@ -16,8 +16,10 @@ from prevue.gate import (
 from prevue.github.comments import (
     BOT_LOGINS,
     MARKER,
+    _escape_inline_markdown,
     _escape_table_cell,
     _is_prevue_sticky,
+    _safe_suggestion_block,
     post_inline_review,
     render_body,
     render_inline_comment,
@@ -478,8 +480,14 @@ class TestInlineTemplate:
             self._finding(suggestion="code with ``` inside")
         )
 
-        assert "```" not in rendered.split("````\n", 1)[1].rsplit("\n````", 1)[0]
-        assert "\\`\\`\\`" in rendered
+        assert "````\ncode with ``` inside\n````" in rendered
+
+    def test_suggestion_with_four_backticks_uses_longer_fence(self) -> None:
+        rendered = render_inline_comment(
+            self._finding(suggestion="code with ```` inside")
+        )
+
+        assert "`````\ncode with ```` inside\n`````" in rendered
 
     def test_uniform_template_structure(self) -> None:
         a = render_inline_comment(self._finding(title="A", body="body A"))
@@ -501,6 +509,18 @@ class TestInlineTemplate:
         assert _escape_table_cell("a|b\nc") == "a\\|b c"
         assert _escape_table_cell("a\r\nb") == "a b"
 
+    def test_inline_title_escapes_markdown_control_chars(self) -> None:
+        rendered = render_inline_comment(
+            self._finding(title="bad_*[title]`value`", body="details")
+        )
+        assert "🔴 **bad\\_\\*\\[title\\]\\`value\\`**" in rendered
+
+    def test_inline_body_escapes_markdown_control_chars(self) -> None:
+        rendered = render_inline_comment(
+            self._finding(body="ping [link](x) and `code`")
+        )
+        assert "ping \\[link\\](x) and \\`code\\`" in rendered
+
 
 def test_upsert_sticky_skips_bot_comment_when_marker_not_at_start() -> None:
     bot = MagicMock()
@@ -514,3 +534,13 @@ def test_upsert_sticky_skips_bot_comment_when_marker_not_at_start() -> None:
 
     bot.edit.assert_not_called()
     pr.create_issue_comment.assert_called_once()
+
+
+def test_safe_suggestion_uses_fence_longer_than_backtick_run() -> None:
+    block = _safe_suggestion_block("alpha ``` beta ```` gamma")
+    assert block.startswith("`````")
+    assert block.endswith("`````")
+
+
+def test_escape_inline_markdown_collapses_newlines() -> None:
+    assert _escape_inline_markdown("row1\nrow2") == "row1 row2"

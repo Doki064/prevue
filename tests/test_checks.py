@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from github import GithubException
 from prevue.gate import GateResult, ReviewConfig
 from prevue.github.checks import CHECK_NAME, conclude_review_check, conclude_skip_check
 
@@ -57,6 +58,16 @@ class TestConcludeReviewCheck:
         assert url in summary
         assert f"]({url})" in summary
 
+    def test_returns_false_when_check_run_post_fails(self, capsys) -> None:
+        repo = MagicMock()
+        repo.create_check_run.side_effect = GithubException(502, {"message": "Bad Gateway"}, None)
+        gate = _gate(conclusion="failure")
+
+        assert conclude_review_check(repo, "sha123", gate) is False
+        err = capsys.readouterr().err
+        assert "check-run POST failed" in err
+        assert "conclusion=failure" in err
+
 
 class TestConcludeSkipCheck:
     def test_skip_posts_success_with_no_reviewable_files(self) -> None:
@@ -68,3 +79,12 @@ class TestConcludeSkipCheck:
         assert kwargs["status"] == "completed"
         title = kwargs["output"]["title"].lower()
         assert "no reviewable files" in title
+
+    def test_returns_false_when_skip_check_post_fails(self, capsys) -> None:
+        repo = MagicMock()
+        repo.create_check_run.side_effect = GithubException(503, {"message": "Unavailable"}, None)
+
+        assert conclude_skip_check(repo, "sha456", dropped_count=3) is False
+        err = capsys.readouterr().err
+        assert "skip check-run POST failed" in err
+        assert "dropped=3" in err

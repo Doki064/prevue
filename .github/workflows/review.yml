@@ -17,9 +17,10 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout trusted reviewer code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
 
       - name: Set up uv

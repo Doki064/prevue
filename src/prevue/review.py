@@ -10,7 +10,7 @@ from prevue.classify.router import route
 from prevue.classify.rules import load_ruleset
 from prevue.engines.base import EngineAdapter
 from prevue.engines.copilot_cli import CopilotCliAdapter
-from prevue.gate import apply_gate, load_review_config
+from prevue.gate import GateResult, PlacedFinding, apply_gate, load_review_config
 from prevue.github.checks import conclude_review_check, conclude_skip_check
 from prevue.github.client import get_authenticated_pull, get_repo, load_pr_context
 from prevue.github.comments import post_inline_review, upsert_skip_note, upsert_sticky
@@ -43,7 +43,8 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         raise ForkPrUnsupported()
 
     ruleset = load_ruleset()
-    review_cfg = load_review_config()
+    config_path = os.environ.get("PREVUE_CONFIG_PATH", "prevue.yml")
+    review_cfg = load_review_config(config_path)
 
     diff = fetch_diff()
     reduced, dropped = filter_diff(diff, ruleset.ignore_globs)
@@ -51,7 +52,9 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
 
     if not reduced.files:
         upsert_skip_note(pr, dropped_count=len(dropped))
-        conclude_skip_check(get_repo(ctx), diff.head_sha, dropped_count=len(dropped))
+        skip_published = conclude_skip_check(get_repo(ctx), diff.head_sha, dropped_count=len(dropped))
+        if not skip_published:
+            raise RuntimeError("Failed to publish skip check run")
         return
 
     result_cls = classify(reduced.files, ruleset.label_rules)
@@ -82,7 +85,24 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         degraded=result.degraded,
         dropped_findings=result.dropped_findings,
     )
-    post_inline_review(pr, gate)  # return value ignored in v1 (04-04)
+    inline_posted = post_inline_review(pr, gate)
+    if not inline_posted and gate.inline:
+        downgraded = [
+            PlacedFinding(
+                finding=placed.finding,
+                placement="summary-only" if placed.placement == "inline" else placed.placement,
+            )
+            for placed in gate.placed
+        ]
+        gate = GateResult(
+            conclusion=gate.conclusion,
+            severity_counts=gate.severity_counts,
+            placed=downgraded,
+            inline=[],
+            config=gate.config,
+            degraded=gate.degraded,
+            dropped_findings=gate.dropped_findings,
+        )
     sticky = upsert_sticky(
         pr,
         result,
@@ -90,9 +110,11 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         loaded_skills=[f"{s.name} ({s.bundle})" for s in matched],
         gate=gate,
     )
-    conclude_review_check(
+    check_published = conclude_review_check(
         get_repo(ctx),
         diff.head_sha,
         gate,
         sticky_url=getattr(sticky, "html_url", None),
     )
+    if not check_published:
+        raise RuntimeError("Failed to publish review check run")
