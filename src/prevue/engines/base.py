@@ -12,3 +12,13 @@ class EngineAdapter(ABC):
 
     @abstractmethod
     def review(self, req: ReviewRequest) -> ReviewResult: ...
+
+    def classify(
+        self,
+        paths: list[str],
+        allowed_labels: tuple[str, ...] | list[str],
+        *,
+        model: str | None = None,
+    ) -> dict[str, str]:
+        """Label-only classification for ambiguous file paths (D-11)."""
+        raise NotImplementedError(f"{self.name} does not implement classify()")

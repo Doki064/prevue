@@ -311,6 +311,81 @@ def test_run_review_filtered_diff_and_classification_metadata() -> None:
     assert classification.dropped_count == 1
 
 
+def test_run_review_bot_skip_neutral_no_engine() -> None:
+    """NOIS-01: bot PR skips before engine; posts neutral check + sticky reason."""
+    mock_pr = MagicMock()
+    mock_pr.user.type = "Bot"
+    mock_pr.user.login = "dependabot[bot]"
+    mock_pr.title = "chore: bump deps"
+    mock_pr.labels = []
+    mock_pr.head.sha = HEAD_SHA
+    mock_repo = _mock_repo()
+
+    class SpyEngine:
+        name = "spy"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            raise AssertionError("engine must not be called on skipped PR")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff") as mock_fetch,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.upsert_skip_note") as mock_skip,
+        patch("prevue.review.conclude_skip_check") as mock_skip_check,
+        patch("prevue.review.upsert_sticky") as mock_sticky,
+        patch("prevue.review.conclude_review_check") as mock_check,
+        patch("prevue.review.llm_classify") as mock_llm,
+    ):
+        run_review(adapter=SpyEngine())
+
+    mock_fetch.assert_not_called()
+    mock_skip.assert_called_once()
+    assert mock_skip.call_args.kwargs.get("reason") is not None
+    assert "dependabot" in mock_skip.call_args.kwargs["reason"]
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        HEAD_SHA,
+        conclusion="neutral",
+        reason=mock_skip.call_args.kwargs["reason"],
+    )
+    mock_sticky.assert_not_called()
+    mock_check.assert_not_called()
+    mock_llm.assert_not_called()
+
+
+def test_run_review_bot_skip_before_empty_filter_path() -> None:
+    """NOIS-01: bot PR with only filtered files gets neutral bot skip, not empty success."""
+    mock_pr = MagicMock()
+    mock_pr.user.type = "Bot"
+    mock_pr.user.login = "dependabot[bot]"
+    mock_pr.title = "chore: bump deps"
+    mock_pr.labels = []
+    mock_pr.head.sha = HEAD_SHA
+    mock_repo = _mock_repo()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff") as mock_fetch,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.upsert_skip_note") as mock_skip,
+        patch("prevue.review.conclude_skip_check") as mock_skip_check,
+    ):
+        run_review()
+
+    mock_fetch.assert_not_called()
+    mock_skip.assert_called_once()
+    assert "dependabot" in mock_skip.call_args.kwargs["reason"]
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        HEAD_SHA,
+        conclusion="neutral",
+        reason=mock_skip.call_args.kwargs["reason"],
+    )
+
+
 def test_run_review_empty_skip_no_engine_call() -> None:
     """D-10: all-filtered PR skips engine; posts skip note and success check."""
     mock_pr = MagicMock()
@@ -403,7 +478,7 @@ def test_invalid_review_config_raises_before_fetch() -> None:
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
         patch(
-            "prevue.review.load_review_config",
+            "prevue.review.load_config",
             side_effect=ValidationError.from_exception_data("ReviewConfig", []),
         ),
         patch("prevue.review.fetch_diff") as mock_fetch,
@@ -414,6 +489,98 @@ def test_invalid_review_config_raises_before_fetch() -> None:
 
     mock_fetch.assert_not_called()
     mock_get_adapter.assert_not_called()
+
+
+def test_run_review_load_config_default_path() -> None:
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.load_config") as mock_load_config,
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=True),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        from prevue.config import load_config as real_load_config
+
+        mock_load_config.side_effect = real_load_config
+        run_review(adapter=FindingsEngine())
+        mock_load_config.assert_called_once_with(".github/prevue.yml")
+
+
+def test_run_review_fallback_skipped_when_all_matched() -> None:
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    class SpyEngine(FindingsEngine):
+        def classify(self, paths, allowed_labels, *, model=None):
+            raise AssertionError("classify must not run when all files matched")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=True),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=True),
+        patch("prevue.review.llm_classify") as mock_llm,
+    ):
+        run_review(adapter=SpyEngine())
+        mock_llm.assert_not_called()
+
+
+def test_run_review_fallback_fires_on_unmatched_paths() -> None:
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+    mixed_diff = DiffBundle(
+        pr_number=PR_NUMBER,
+        base_sha=BASE_SHA,
+        head_sha=HEAD_SHA,
+        files=[
+            ChangedFile(
+                path="src/App.tsx",
+                status="modified",
+                additions=1,
+                deletions=0,
+                patch="@@",
+            ),
+            ChangedFile(
+                path="mystery.bin",
+                status="added",
+                additions=1,
+                deletions=0,
+                patch="@@",
+            ),
+        ],
+    )
+
+    class ClassifyEngine(FindingsEngine):
+        def classify(self, paths, allowed_labels, *, model=None):
+            return {path: "backend" for path in paths}
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=mixed_diff),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=True),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        run_review(adapter=ClassifyEngine())
+
+    classification = mock_upsert.call_args.kwargs["classification"]
+    assert "backend" in classification.labels
+    assert classification.labels["backend"] == "mystery.bin"
+    assert "general" not in classification.labels
 
 
 def test_engine_selection_via_prevue_engine(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -8,7 +8,13 @@ import subprocess
 from prevue.engines import flow
 from prevue.engines.base import EngineAdapter
 from prevue.engines.errors import AuthError, EngineFailure, sanitize_stderr
-from prevue.engines.prompt import MAX_PROMPT_BYTES, build_prompt
+from prevue.engines.prompt import (
+    CLASSIFY_TIMEOUT_SECONDS,
+    MAX_PROMPT_BYTES,
+    build_classify_prompt,
+    build_prompt,
+    parse_classify_response,
+)
 from prevue.models import ReviewRequest, ReviewResult
 
 
@@ -66,3 +72,19 @@ class ClaudeCodeAdapter(EngineAdapter):
             max_prompt_bytes=MAX_PROMPT_BYTES,
             model_label=req.model or "default",
         )
+
+    def classify(
+        self,
+        paths: list[str],
+        allowed_labels: tuple[str, ...] | list[str],
+        *,
+        model: str | None = None,
+    ) -> dict[str, str]:
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if not key:
+            raise ClaudeAuthError("ANTHROPIC_API_KEY is not set.")
+
+        env = {**os.environ, "ANTHROPIC_API_KEY": key}
+        prompt = build_classify_prompt(paths, allowed_labels)
+        text = self._invoke(prompt, env, key, CLASSIFY_TIMEOUT_SECONDS, model)
+        return parse_classify_response(text, paths, allowed_labels)

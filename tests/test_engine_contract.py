@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from types import SimpleNamespace
 
 import pytest
 
+from prevue.classify.models import CANONICAL_LABEL_ORDER
 from prevue.engines.errors import AuthError
 from prevue.engines.registry import ENGINES, get_adapter
 from tests.engine_helpers import (
@@ -180,3 +182,55 @@ def test_cursor_model_mapping_and_prompt_file(monkeypatch: pytest.MonkeyPatch) -
     assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "text"]
     assert ["-m", "sonnet-4"] == cmd[-2:]
     assert "src/main.py" in captured["prompt"]
+
+
+def test_classify_valid_json_returns_label_map(
+    engine_name: str, adapter, authed_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = {"src/main.py": "backend", "README.md": "frontend"}
+    stdout = json.dumps(payload)
+
+    def _success(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _success)
+    result = adapter.classify(["src/main.py", "README.md"], CANONICAL_LABEL_ORDER)
+    assert result == payload
+
+
+def test_classify_drops_unknown_labels(
+    engine_name: str, adapter, authed_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stdout = json.dumps({"src/main.py": "backend", "README.md": "not-a-label"})
+
+    def _success(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _success)
+    result = adapter.classify(["src/main.py", "README.md"], CANONICAL_LABEL_ORDER)
+    assert result == {"src/main.py": "backend"}
+
+
+def test_classify_missing_credential_raises_auth_error(
+    engine_name: str, adapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for env_var, _ in AUTH_ENV.values():
+        monkeypatch.delenv(env_var, raising=False)
+
+    called = False
+
+    def _run(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        return SimpleNamespace(returncode=0, stdout="{}", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _run)
+    with pytest.raises(AuthError):
+        adapter.classify(["src/main.py"], CANONICAL_LABEL_ORDER)
+    assert not called
+
+
+def test_gemini_classify_raises_not_implemented() -> None:
+    adapter = get_adapter("gemini-cli")
+    with pytest.raises(NotImplementedError, match="does not implement classify"):
+        adapter.classify(["src/main.py"], CANONICAL_LABEL_ORDER)
