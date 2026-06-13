@@ -423,19 +423,19 @@ class GeminiAdapter(EngineAdapter):
 
 **Confirmation path:** A1–A4 are confirmed during the D-12 live sandbox PR verification of the Claude and Cursor adapters.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Where does the shared retry-then-degrade flow live?**
    - What we know: It's ~40 identical lines; copy-pasting across 3 adapters is bad.
    - What's unclear: Add a non-abstract helper to `EngineAdapter` (base.py is "FINAL" for the interface) vs a free function.
-   - Recommendation: Free function (e.g. `engines/flow.py::review_with_retry(req, invoke, build_prompt, ...)`), leaving `base.py` untouched and the flow independently unit-testable.
+   - **RESOLVED:** Free function (e.g. `engines/flow.py::review_with_retry(req, invoke, build_prompt, ...)`), leaving `base.py` untouched and the flow independently unit-testable. Consumed by plan 05-01 (flow.py) + 05-02/05-03 adapters delegate to it.
 
 2. **Cursor prompt: positional arg vs `-f <tmpfile>`?**
    - What we know: docs show positional `-p "<prompt>"`; `-f` reads a file. Copilot/Claude use stdin to dodge ARG_MAX.
-   - Recommendation: use `-f` with a temp file for robustness; confirm during live test.
+   - **RESOLVED:** use `-f` with a temp file for robustness; confirm during live test. Consumed by plan 05-03-T1.
 
 3. **`COPILOT_MODEL` → `PREVUE_MODEL` rename at review.py:72?**
-   - Recommendation: read `PREVUE_MODEL` with `COPILOT_MODEL` as fallback (additive, no breakage). Small orchestration-seam edit; does not touch the pydantic contract.
+   - **RESOLVED:** read `PREVUE_MODEL` with `COPILOT_MODEL` as fallback (additive, no breakage). Small orchestration-seam edit; does not touch the pydantic contract. Consumed by plan 05-01-T3.
 
 ## Environment Availability
 
