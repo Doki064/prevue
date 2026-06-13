@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
 from types import SimpleNamespace
 
@@ -9,6 +10,7 @@ import pytest
 
 from prevue.engines.copilot_cli import (
     MAX_PROMPT_BYTES,
+    OUTPUT_CONTRACT,
     CopilotAuthError,
     CopilotCliAdapter,
     EngineFailure,
@@ -19,6 +21,20 @@ from prevue.models import ChangedFile, DiffBundle, ReviewRequest
 
 VALID_TOKEN = "github_pat_0123456789abcdefghijklmnopqrstuvwxyz"
 PROSE_REVIEW = "## Review\n\nLooks good overall."
+
+VALID_FINDING = {
+    "path": "src/main.py",
+    "line": 3,
+    "side": "RIGHT",
+    "severity": "warning",
+    "title": "Unused import",
+    "body": "Remove the unused import.",
+}
+
+
+def _stdout_with_fence(*, prose: str = PROSE_REVIEW, payload: object | None = None) -> str:
+    body = json.dumps([] if payload is None else payload)
+    return f"{prose}\n\n```json\n{body}\n```"
 
 
 def _sample_request(*, instructions: str = "Review this pull request carefully.") -> ReviewRequest:
@@ -248,6 +264,171 @@ class TestFailurePaths:
             adapter.review(_sample_request())
 
 
+class TestOutputContract:
+    def test_output_contract_constant_has_rubric_and_fence_instruction(self) -> None:
+        assert "error" in OUTPUT_CONTRACT
+        assert "warning" in OUTPUT_CONTRACT
+        assert "info" in OUTPUT_CONTRACT
+        assert "RIGHT" in OUTPUT_CONTRACT
+        assert "LEFT" in OUTPUT_CONTRACT
+        assert "last element" in OUTPUT_CONTRACT.lower()
+
+    def test_prompt_places_contract_before_untrusted_data(self) -> None:
+        prompt = _build_prompt(_sample_request())
+        contract_line = next(line for line in OUTPUT_CONTRACT.splitlines() if line.strip())
+        contract_idx = prompt.index(contract_line[: min(20, len(contract_line))])
+        untrusted_idx = prompt.index("UNTRUSTED DATA")
+        assert contract_idx < untrusted_idx
+
+    def test_prompt_includes_severity_rubric_and_fence_at_end_instruction(self) -> None:
+        prompt = _build_prompt(_sample_request())
+        assert "error" in prompt
+        assert "warning" in prompt
+        assert "info" in prompt
+        lower = prompt.lower()
+        assert "json" in lower
+        assert "last" in lower
+
+    def test_captured_review_prompt_carries_contract_via_stdin(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("COPILOT_GITHUB_TOKEN", VALID_TOKEN)
+        captured: dict = {}
+
+        def _capture(_cmd, input=None, **_kwargs):
+            captured["input"] = input
+            return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _capture)
+        CopilotCliAdapter().review(_sample_request())
+        prompt = captured["input"]
+        assert "Clear, Concise, Correct, Complete" in prompt
+        assert prompt.index("Clear") < prompt.index("UNTRUSTED DATA")
+
+
+class TestRetryThenDegrade:
+    @pytest.fixture(autouse=True)
+    def valid_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("COPILOT_GITHUB_TOKEN", VALID_TOKEN)
+
+    def test_valid_fence_returns_findings_and_strips_fence(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        stdout = _stdout_with_fence(payload=[VALID_FINDING])
+
+        def _success(*_args, **_kwargs):
+            return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _success)
+        result = CopilotCliAdapter().review(_sample_request())
+        assert result.degraded is False
+        assert len(result.findings) == 1
+        assert result.findings[0].path == "src/main.py"
+        assert result.summary_markdown == PROSE_REVIEW
+        assert result.engine_meta.get("retried") is False
+
+    def test_bad_fence_then_good_retry_sets_retried(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str | None] = []
+
+        def _run(_cmd, input=None, **_kwargs):
+            calls.append(input)
+            stdout = PROSE_REVIEW if len(calls) == 1 else _stdout_with_fence(payload=[VALID_FINDING])
+            return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        result = CopilotCliAdapter().review(_sample_request())
+        assert len(calls) == 2
+        assert calls[1] is not None
+        assert "fence" in calls[1].lower() or "parse" in calls[1].lower()
+        assert result.degraded is False
+        assert len(result.findings) == 1
+        assert result.engine_meta.get("retried") is True
+
+    def test_both_bad_fence_degrades_without_exception(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _run(*_args, **_kwargs):
+            return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        result = CopilotCliAdapter().review(_sample_request())
+        assert result.degraded is True
+        assert result.findings == []
+        assert PROSE_REVIEW in result.summary_markdown
+        assert "parse_error" in result.engine_meta
+
+    def test_all_invalid_findings_degrades_with_dropped_count(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        invalid = [{**VALID_FINDING, "severity": "critical"}]
+        stdout = _stdout_with_fence(payload=invalid)
+
+        def _success(*_args, **_kwargs):
+            return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _success)
+        result = CopilotCliAdapter().review(_sample_request())
+        assert result.degraded is True
+        assert result.findings == []
+        assert result.dropped_findings == 1
+
+    def test_mixed_salvage_keeps_valid_not_degraded(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        payload = [VALID_FINDING, {**VALID_FINDING, "severity": "nope"}]
+        stdout = _stdout_with_fence(payload=payload)
+
+        def _success(*_args, **_kwargs):
+            return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _success)
+        result = CopilotCliAdapter().review(_sample_request())
+        assert result.degraded is False
+        assert len(result.findings) == 1
+        assert result.dropped_findings == 1
+
+    def test_retry_skipped_when_retry_prompt_exceeds_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import prevue.engines.copilot_cli as copilot_cli
+
+        prompt = _build_prompt(_sample_request())
+        monkeypatch.setattr(copilot_cli, "MAX_PROMPT_BYTES", len(prompt.encode("utf-8")) + 50)
+        call_count = 0
+
+        def _run(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        result = CopilotCliAdapter().review(_sample_request())
+        assert call_count == 1
+        assert result.degraded is True
+        assert result.findings == []
+
+    def test_hard_failure_on_retry_degrades_with_first_prose(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        call_count = 0
+
+        def _run(*_args, **_kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
+            raise subprocess.TimeoutExpired(cmd=["copilot"], timeout=300)
+
+        monkeypatch.setattr(subprocess, "run", _run)
+        result = CopilotCliAdapter().review(_sample_request())
+        assert result.degraded is True
+        assert result.summary_markdown == PROSE_REVIEW
+        assert result.findings == []
+        assert result.engine_meta.get("retried") is True
+
+
 class TestSuccessPath:
     @pytest.fixture(autouse=True)
     def valid_token(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -257,12 +438,13 @@ class TestSuccessPath:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         def _success(*_args, **_kwargs):
-            return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
+            return SimpleNamespace(returncode=0, stdout=_stdout_with_fence(), stderr="")
 
         monkeypatch.setattr(subprocess, "run", _success)
         result = CopilotCliAdapter().review(_sample_request())
         assert result.summary_markdown == PROSE_REVIEW
         assert result.findings == []
+        assert result.degraded is False
         assert "duration_s" in result.engine_meta
 
     def test_command_uses_s_and_no_ask_user_without_allow_tool(
@@ -273,7 +455,7 @@ class TestSuccessPath:
         def _capture(cmd, input=None, **_kwargs):
             captured["cmd"] = cmd
             captured["input"] = input
-            return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
+            return SimpleNamespace(returncode=0, stdout=_stdout_with_fence(), stderr="")
 
         monkeypatch.setattr(subprocess, "run", _capture)
         req = _sample_request()
@@ -290,7 +472,7 @@ class TestSuccessPath:
         def _capture(cmd, input=None, **_kwargs):
             captured["cmd"] = cmd
             captured["input"] = input
-            return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
+            return SimpleNamespace(returncode=0, stdout=_stdout_with_fence(), stderr="")
 
         monkeypatch.setattr(subprocess, "run", _capture)
         req = _sample_request()
@@ -306,7 +488,7 @@ class TestSuccessPath:
 
         def _capture(cmd, input=None, **_kwargs):
             captured.update(cmd=cmd, input=input)
-            return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
+            return SimpleNamespace(returncode=0, stdout=_stdout_with_fence(), stderr="")
 
         monkeypatch.setattr(subprocess, "run", _capture)
         CopilotCliAdapter().review(_sample_request())
@@ -318,7 +500,7 @@ class TestSuccessPath:
 
         def _capture(_cmd, env=None, **_kwargs):
             captured_env.update(env or {})
-            return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
+            return SimpleNamespace(returncode=0, stdout=_stdout_with_fence(), stderr="")
 
         monkeypatch.setattr(subprocess, "run", _capture)
         req = _sample_request()

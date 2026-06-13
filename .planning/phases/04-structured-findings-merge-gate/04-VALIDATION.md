@@ -3,7 +3,7 @@ phase: 4
 slug: structured-findings-merge-gate
 status: ready
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-06-12
 ---
 
@@ -59,11 +59,11 @@ created: 2026-06-12
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_findings_parsing.py` — RED stubs for ENGN-03 (fence/salvage/strict)
-- [ ] `tests/test_positions.py` — RED stubs for OUTP-02 (unidiff validity sets incl. `@@ -0,0`, deletions, no-newline marker)
-- [ ] `tests/test_gate.py` — RED stubs for NOIS-02/NOIS-03/OUTP-03 (config, ladder, partition, budget, verdict strings)
-- [ ] `tests/test_checks.py` — RED stubs for OUTP-03 (check-run payload via MagicMock)
-- [ ] `uv add "unidiff==0.7.*"` — before any positions test runs
+- [x] `tests/test_findings_parsing.py` — RED stubs for ENGN-03 (fence/salvage/strict)
+- [x] `tests/test_positions.py` — RED stubs for OUTP-02 (unidiff validity sets incl. `@@ -0,0`, deletions, no-newline marker)
+- [x] `tests/test_gate.py` — RED stubs for NOIS-02/NOIS-03/OUTP-03 (config, ladder, partition, budget, verdict strings)
+- [x] `tests/test_checks.py` — RED stubs for OUTP-03 (check-run payload via MagicMock)
+- [x] `uv add "unidiff==0.7.*"` — before any positions test runs
 
 *(All created by Plan 04-01; this file's `wave_0_complete` flips to true in that plan.)*
 

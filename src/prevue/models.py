@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -32,7 +34,7 @@ class Finding(BaseModel):
     path: str
     line: int
     side: str = "RIGHT"
-    severity: str  # error | warning | info
+    severity: Literal["error", "warning", "info"]
     title: str
     body: str
     suggestion: str | None = None
@@ -41,4 +43,6 @@ class Finding(BaseModel):
 class ReviewResult(BaseModel):
     summary_markdown: str
     findings: list[Finding] = Field(default_factory=list)
+    degraded: bool = False
+    dropped_findings: int = 0
     engine_meta: dict = Field(default_factory=dict)

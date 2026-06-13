@@ -40,20 +40,20 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **ENGN-01**: Engine adapters implement a pluggable interface: review context in → structured findings (file, line, severity, message, suggestion) out
 - [x] **ENGN-02**: GitHub Copilot CLI adapter runs headless on Actions runners (`copilot -p ... -s --no-ask-user`, auth via `COPILOT_GITHUB_TOKEN`, minimal `--allow-tool` set)
-- [ ] **ENGN-03**: Engine output is schema-validated with retry-then-degrade handling; a parse failure produces a neutral check, never a crash or false block
+- [x] **ENGN-03**: Engine output is schema-validated with retry-then-degrade handling; a parse failure produces a neutral check, never a crash or false block
 
 ### Output
 
 - [x] **OUTP-01**: Review posts a sticky summary comment (updated in place on subsequent runs) with verdict, classification labels, and findings overview
-- [ ] **OUTP-02**: Review posts inline line-level comments via the Reviews API, with finding positions validated against diff hunks (invalid positions fall back to the summary)
-- [ ] **OUTP-03**: Review reports pass/fail/neutral status usable as a merge gate (blocking is opt-in via severity threshold)
+- [x] **OUTP-02**: Review posts inline line-level comments via the Reviews API, with finding positions validated against diff hunks (invalid positions fall back to the summary)
+- [x] **OUTP-03**: Review reports pass/fail/neutral status usable as a merge gate (blocking is opt-in via severity threshold)
 - [ ] **OUTP-04**: Summary comment includes token/cost transparency: tokens used, skills loaded vs skipped
 
 ### Noise Control
 
 - [ ] **NOIS-01**: Review skips draft PRs, bot authors (e.g. dependabot), and title/label-filtered PRs by default (configurable)
-- [ ] **NOIS-02**: Findings carry severity levels; consumer configures min-severity-to-comment and min-severity-to-fail thresholds
-- [ ] **NOIS-03**: Review enforces a hard per-review comment budget so the bot never floods a PR
+- [x] **NOIS-02**: Findings carry severity levels; consumer configures min-severity-to-comment and min-severity-to-fail thresholds
+- [x] **NOIS-03**: Review enforces a hard per-review comment budget so the bot never floods a PR
 
 ### Security
 
@@ -112,11 +112,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SKIL-01 | Phase 3 | Complete |
 | SKIL-02 | Phase 3 | Complete |
 | SKIL-04 | Phase 3 | Complete |
-| ENGN-03 | Phase 4 | Pending |
-| OUTP-02 | Phase 4 | Pending |
-| OUTP-03 | Phase 4 | Pending |
-| NOIS-02 | Phase 4 | Pending |
-| NOIS-03 | Phase 4 | Pending |
+| ENGN-03 | Phase 4 | Complete (04-02) |
+| OUTP-02 | Phase 4 | Complete (04-04/04-05) |
+| OUTP-03 | Phase 4 | Complete (04-05) |
+| NOIS-02 | Phase 4 | Complete (04-03) |
+| NOIS-03 | Phase 4 | Complete (04-03/04-05) |
 | WKFL-01 | Phase 5 | Pending |
 | WKFL-02 | Phase 5 | Pending |
 | WKFL-03 | Phase 5 | Pending |

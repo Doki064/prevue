@@ -49,7 +49,11 @@ def test_pull_request_types() -> None:
 
 def test_minimal_permissions() -> None:
     wf = _load_review_workflow()
-    assert wf["permissions"] == {"contents": "read", "pull-requests": "write"}
+    assert wf["permissions"] == {
+        "contents": "read",
+        "pull-requests": "write",
+        "checks": "write",
+    }
 
 
 def test_no_pull_request_target_in_source() -> None:

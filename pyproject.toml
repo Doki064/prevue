@@ -13,6 +13,7 @@ dependencies = [
     "pygithub==2.9.*",
     "python-frontmatter==1.3.*",
     "pyyaml==6.0.*",
+    "unidiff==0.7.*",
 ]
 
 [project.scripts]
