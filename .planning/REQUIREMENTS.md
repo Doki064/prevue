@@ -41,6 +41,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **ENGN-01**: Engine adapters implement a pluggable interface: review context in → structured findings (file, line, severity, message, suggestion) out
 - [x] **ENGN-02**: GitHub Copilot CLI adapter runs headless on Actions runners (`copilot -p ... -s --no-ask-user`, auth via `COPILOT_GITHUB_TOKEN`, minimal `--allow-tool` set)
 - [x] **ENGN-03**: Engine output is schema-validated with retry-then-degrade handling; a parse failure produces a neutral check, never a crash or false block
+- [ ] **ENGN-04**: Additional engine adapters (Claude Code CLI, Cursor CLI, Gemini CLI) implement the same pluggable interface and are selectable via config, validating the engine abstraction beyond Copilot (promoted from CUST-03, 2026-06-13)
 
 ### Output
 
@@ -75,7 +76,7 @@ Deferred to future release. Tracked but not in current roadmap.
 
 - **CUST-01**: Per-path severity/skill overrides for monorepos
 - **CUST-02**: GitHub native `suggestion` blocks in findings for one-click apply
-- **CUST-03**: Second engine adapter (e.g. Claude Code, Gemini CLI) to validate the abstraction
+- ~~**CUST-03**: Second engine adapter (e.g. Claude Code, Gemini CLI) to validate the abstraction~~ → **promoted to ENGN-04 (v1, Phase 5)** 2026-06-13
 - **CUST-04**: Chunked map-reduce review for PRs exceeding the token budget
 
 ## Out of Scope
@@ -117,16 +118,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OUTP-03 | Phase 4 | Complete (04-05) |
 | NOIS-02 | Phase 4 | Complete (04-03) |
 | NOIS-03 | Phase 4 | Complete (04-03/04-05) |
-| WKFL-01 | Phase 5 | Pending |
-| WKFL-02 | Phase 5 | Pending |
-| WKFL-03 | Phase 5 | Pending |
-| WKFL-04 | Phase 5 | Pending |
-| CLSF-02 | Phase 5 | Pending |
-| NOIS-01 | Phase 5 | Pending |
-| SKIL-03 | Phase 6 | Pending |
-| SECR-02 | Phase 6 | Pending |
-| OUTP-04 | Phase 6 | Pending |
-| DIFF-03 | Phase 6 | Pending |
+| ENGN-04 | Phase 5 | Pending |
+| WKFL-01 | Phase 6 | Pending |
+| WKFL-02 | Phase 6 | Pending |
+| WKFL-03 | Phase 6 | Pending |
+| WKFL-04 | Phase 6 | Pending |
+| CLSF-02 | Phase 6 | Pending |
+| NOIS-01 | Phase 6 | Pending |
+| SKIL-03 | Phase 7 | Pending |
+| SECR-02 | Phase 7 | Pending |
+| OUTP-04 | Phase 7 | Pending |
+| DIFF-03 | Phase 7 | Pending |
 
 **Coverage:**
 
