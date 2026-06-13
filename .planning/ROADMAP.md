@@ -130,7 +130,24 @@ Decimal phases appear between their surrounding integers in numeric order.
   4. The check reports pass/fail/neutral and is usable as a merge gate, with blocking opt-in via severity threshold
   5. No review ever posts more inline comments than the configured hard budget
 
-**Plans**: TBD
+**Plans**: 5 plans
+
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Wave 0: unidiff dep (audited) + RED contract scaffolds for parsing/positions/gate/checks
+
+**Wave 2** *(parallel, blocked on Wave 1 completion)*
+
+- [ ] 04-02-PLAN.md — Engine JSON contract: fence parsing + strict salvage + rubric/4C prompt + retry-then-degrade (ENGN-03, TDD)
+- [ ] 04-03-PLAN.md — Gate policy: ReviewConfig + conclusion ladder + budget allocation + unidiff position validity (NOIS-02/NOIS-03/OUTP-02/OUTP-03 logic, TDD)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-04-PLAN.md — Rendering: D-21 uniform inline template, Verdict/table/details sticky restructure, batched COMMENT review POST (TDD)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-05-PLAN.md — `prevue/review` check run + run_review post-engine wiring + `checks: write` permission (TDD)
 
 ### Phase 5: Reusable Workflow & Hybrid Classification
 
@@ -173,7 +190,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6
 | 1. Walking Skeleton Review Loop | 7/7 | Complete    | 2026-06-11 |
 | 2. Zero-Token Classification & Routing | 3/3 | Complete    | 2026-06-12 |
 | 3. Selective Skill Loading | 4/4 | Complete    | 2026-06-12 |
-| 4. Structured Findings & Merge Gate | 0/TBD | Not started | - |
+| 4. Structured Findings & Merge Gate | 0/5 | Planned | - |
 | 5. Reusable Workflow & Hybrid Classification | 0/TBD | Not started | - |
 | 6. Customization & Hardening | 0/TBD | Not started | - |
 
