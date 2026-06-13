@@ -275,13 +275,14 @@ class TestPostInlineReview:
         ]
         gate = self._gate(findings)
         pr = MagicMock()
+        pr.get_review_comments.return_value = []
 
         assert post_inline_review(pr, gate) is True
 
         pr.create_review.assert_called_once()
         kwargs = pr.create_review.call_args.kwargs
         assert kwargs["event"] == "COMMENT"
-        assert kwargs["body"] == "Prevue posted 2 inline comment(s) — see the review summary."
+        assert kwargs["body"] == "Prevue posted 2 new inline comment(s) — see the review summary."
         assert len(kwargs["comments"]) == 2
         first = kwargs["comments"][0]
         assert set(first.keys()) == {"path", "line", "side", "body"}
@@ -298,6 +299,7 @@ class TestPostInlineReview:
             config=ReviewConfig(),
         )
         pr = MagicMock()
+        pr.get_review_comments.return_value = []
 
         assert post_inline_review(pr, gate) is True
         pr.create_review.assert_not_called()
@@ -307,12 +309,137 @@ class TestPostInlineReview:
 
         gate = self._gate([self._finding()])
         pr = MagicMock()
+        pr.get_review_comments.return_value = []
         pr.create_review.side_effect = GithubException(422, {"message": "Validation Failed"}, None)
 
         assert post_inline_review(pr, gate) is False
         err = capsys.readouterr().err
         assert "inline review POST failed" in err
         assert "1 comment" in err
+
+    def test_updates_existing_inline_at_same_location(self) -> None:
+        finding = self._finding(path="a.py", line=1, title="Updated")
+        gate = self._gate([finding])
+        existing = MagicMock()
+        existing.path = "a.py"
+        existing.line = 1
+        existing.side = "RIGHT"
+        existing.body = "old\n\n<sub>posted by Prevue</sub>"
+        existing.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [existing]
+
+        assert post_inline_review(pr, gate) is True
+
+        existing.edit.assert_called_once_with(render_inline_comment(finding))
+        pr.create_review.assert_not_called()
+
+    def test_posts_only_new_locations_when_some_exist(self) -> None:
+        findings = [
+            self._finding(path="a.py", line=1, title="A"),
+            self._finding(path="b.py", line=2, title="B", severity="warning"),
+        ]
+        gate = self._gate(findings)
+        existing = MagicMock()
+        existing.path = "a.py"
+        existing.line = 1
+        existing.side = "RIGHT"
+        existing.body = "old\n\n<sub>posted by Prevue</sub>"
+        existing.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [existing]
+
+        assert post_inline_review(pr, gate) is True
+
+        existing.edit.assert_called_once()
+        pr.create_review.assert_called_once()
+        kwargs = pr.create_review.call_args.kwargs
+        assert len(kwargs["comments"]) == 1
+        assert kwargs["comments"][0]["path"] == "b.py"
+        assert "1 new inline comment(s)" in kwargs["body"]
+        assert "1 updated in place" in kwargs["body"]
+
+    def test_deletes_stale_inline_comments_on_rerun(self) -> None:
+        gate = GateResult(
+            conclusion="success",
+            severity_counts={"error": 0, "warning": 0, "info": 0},
+            placed=[],
+            inline=[],
+            config=ReviewConfig(),
+        )
+        stale = MagicMock()
+        stale.path = "old.py"
+        stale.line = 9
+        stale.side = "RIGHT"
+        stale.body = "stale\n\n<sub>posted by Prevue</sub>"
+        stale.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [stale]
+
+        assert post_inline_review(pr, gate) is True
+
+        pr.create_review.assert_not_called()
+        stale.delete.assert_called_once()
+
+    def test_create_failure_skips_stale_delete(self) -> None:
+        from github import GithubException
+
+        gate = self._gate([self._finding(path="new.py", line=5)])
+        stale = MagicMock()
+        stale.path = "old.py"
+        stale.line = 9
+        stale.side = "RIGHT"
+        stale.body = "stale\n\n<sub>posted by Prevue</sub>"
+        stale.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [stale]
+        pr.create_review.side_effect = GithubException(422, {"message": "Validation Failed"}, None)
+
+        assert post_inline_review(pr, gate) is False
+
+        stale.delete.assert_not_called()
+
+    def test_create_failure_skips_existing_inline_edit(self) -> None:
+        from github import GithubException
+
+        findings = [
+            self._finding(path="existing.py", line=1, title="Existing"),
+            self._finding(path="new.py", line=5, title="New"),
+        ]
+        gate = self._gate(findings)
+        existing = MagicMock()
+        existing.path = "existing.py"
+        existing.line = 1
+        existing.side = "RIGHT"
+        existing.body = "old\n\n<sub>posted by Prevue</sub>"
+        existing.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [existing]
+        pr.create_review.side_effect = GithubException(422, {"message": "Validation Failed"}, None)
+
+        assert post_inline_review(pr, gate) is False
+
+        pr.create_review.assert_called_once()
+        existing.edit.assert_not_called()
+
+    def test_stale_delete_failure_does_not_block_post(self) -> None:
+        from github import GithubException
+
+        gate = self._gate([self._finding(path="a.py", line=1)])
+        stale = MagicMock()
+        stale.path = "old.py"
+        stale.line = 9
+        stale.side = "RIGHT"
+        stale.body = "stale\n\n<sub>posted by Prevue</sub>"
+        stale.user.login = "github-actions[bot]"
+        stale.delete.side_effect = GithubException(403, {"message": "Forbidden"}, None)
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [stale]
+
+        assert post_inline_review(pr, gate) is True
+
+        pr.create_review.assert_called_once()
+        stale.delete.assert_called_once()
 
 
 class TestStickyWithGate:
