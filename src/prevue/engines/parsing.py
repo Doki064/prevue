@@ -9,7 +9,10 @@ from pydantic import ValidationError
 
 from prevue.models import Finding
 
-FENCE_RE = re.compile(r"```json\s*\n(.*?)\n\s*```", re.DOTALL)
+FENCE_RE = re.compile(
+    r"```json[ \t]*\r?\n(.*?)\r?\n[ \t]*```",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 def extract_json_fence(stdout: str) -> tuple[str, list | None, str | None]:

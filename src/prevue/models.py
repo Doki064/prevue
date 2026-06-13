@@ -32,8 +32,8 @@ class ReviewRequest(BaseModel):
 
 class Finding(BaseModel):
     path: str
-    line: int
-    side: str = "RIGHT"
+    line: int = Field(ge=1)
+    side: Literal["RIGHT", "LEFT"] = "RIGHT"
     severity: Literal["error", "warning", "info"]
     title: str
     body: str

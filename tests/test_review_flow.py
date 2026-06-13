@@ -175,8 +175,9 @@ def test_run_review_with_findings_posts_inline_then_sticky_then_check() -> None:
         call_order.append("sticky")
         return mock_sticky
 
-    def track_check(*_args, **_kwargs) -> None:
+    def track_check(*_args, **_kwargs) -> bool:
         call_order.append("check")
+        return True
 
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
@@ -197,6 +198,33 @@ def test_run_review_with_findings_posts_inline_then_sticky_then_check() -> None:
     assert len(gate.inline) == 1
     assert mock_check.call_args[0][2] is gate
     assert call_order == ["inline", "sticky", "check"]
+
+
+def test_run_review_inline_post_failure_downgrades_sticky_placements() -> None:
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=False) as mock_inline,
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check") as mock_check,
+    ):
+        run_review(adapter=FindingsEngine())
+
+    mock_inline.assert_called_once()
+    mock_upsert.assert_called_once()
+    mock_check.assert_called_once()
+    sticky_gate = mock_upsert.call_args.kwargs["gate"]
+    assert sticky_gate.inline == []
+    assert all(placed.placement != "inline" for placed in sticky_gate.placed)
+    check_gate = mock_check.call_args[0][2]
+    assert check_gate.inline == []
+    assert all(placed.placement != "inline" for placed in check_gate.placed)
 
 
 def test_run_review_degraded_neutral_check_no_inline() -> None:
@@ -325,6 +353,36 @@ def test_run_review_empty_skip_no_engine_call() -> None:
     mock_check.assert_not_called()
 
 
+def test_run_review_empty_skip_raises_when_skip_check_not_published() -> None:
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    lockfile_only = DiffBundle(
+        pr_number=PR_NUMBER,
+        base_sha=BASE_SHA,
+        head_sha=HEAD_SHA,
+        files=[
+            ChangedFile(
+                path="pkg/uv.lock",
+                status="modified",
+                additions=10,
+                deletions=0,
+                patch="@@",
+            ),
+        ],
+    )
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=lockfile_only),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.upsert_skip_note"),
+        patch("prevue.review.conclude_skip_check", return_value=False),
+    ):
+        with pytest.raises(RuntimeError, match="skip check run"):
+            run_review(adapter=FindingsEngine())
+
+
 def test_fork_pr_creates_no_check() -> None:
     with (
         patch("prevue.review.load_pr_context", return_value=_fork_ctx()),
@@ -374,3 +432,21 @@ def test_engine_failure_propagates_without_upsert() -> None:
     mock_inline.assert_not_called()
     mock_upsert.assert_not_called()
     mock_check.assert_not_called()
+
+
+def test_run_review_raises_when_review_check_not_published() -> None:
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=True),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=False),
+    ):
+        with pytest.raises(RuntimeError, match="review check run"):
+            run_review(adapter=FindingsEngine())
