@@ -1,9 +1,9 @@
 ---
-status: testing
+status: complete
 phase: 05-multi-engine-adapter-support
 source: [05-VERIFICATION.md]
 started: 2026-06-13T08:00:00Z
-updated: 2026-06-13T16:30:00Z
+updated: 2026-06-13T17:00:00Z
 uat_pr: "#11"
 ---
 
@@ -15,12 +15,7 @@ Fixture: `uat/phase-05/sample.py`. Engine via `uat/phase-05/ACTIVE`. See `uat/RE
 
 ## Current Test
 
-number: 3
-name: Unknown engine fail-closed live
-expected: |
-  PREVUE_ENGINE=typo-engine fails visibly with UnknownEngineError message
-  listing valid engines.
-awaiting: user response
+[testing complete]
 
 ## Tests
 
@@ -36,14 +31,14 @@ note: prevue/review check neutral; user ok. Workflow installed all 3 CLIs + load
 
 ### 3. Unknown engine fail-closed live
 expected: PREVUE_ENGINE=typo fails visibly with UnknownEngineError message
-result: [pending]
+result: pass
 
 ## Summary
 
 total: 3
-passed: 1
+passed: 2
 issues: 0
-pending: 1
+pending: 0
 skipped: 1
 blocked: 0
 
