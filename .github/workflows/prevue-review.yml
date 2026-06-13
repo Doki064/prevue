@@ -78,7 +78,12 @@ jobs:
               # Official Cursor CLI installer (https://cursor.com/docs/cli/overview).
               # No versioned npm package — npm `cursor-agent` is an unrelated impostor;
               # supply-chain guard: test_cursor_install_uses_official_curl_installer_in_reusable.
-              curl https://cursor.com/install -fsS | bash
+              # Download then exec (not curl | bash): avoids executing a truncated
+              # script and leaves a fetched artifact a checksum step can guard once
+              # Cursor publishes one. Residual risk (no upstream pin/checksum) is
+              # documented in docs/consumer-setup.md.
+              curl -fsS https://cursor.com/install -o "$RUNNER_TEMP/cursor-install.sh"
+              bash "$RUNNER_TEMP/cursor-install.sh"
               command -v cursor-agent
               ;;
             *)

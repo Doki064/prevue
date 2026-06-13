@@ -32,6 +32,8 @@ jobs:
       copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
 ```
 
+Fork PRs are **not reviewed in v1**. The reusable workflow self-guards on `head.repo == github.repository`, so PRs from forks are skipped automatically — no caller-side `if:` guard is required.
+
 Optional inputs:
 
 | Input | Default | Purpose |
@@ -70,6 +72,10 @@ Require the **`prevue/review`** check (posted by Prevue Python), not the **`prev
 | `claude-code-cli` | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
 | `cursor-cli` | `cursor-api-key` | `CURSOR_API_KEY` |
 
+### Cursor CLI supply-chain note
+
+The `cursor-cli` engine installs via Cursor's official shell installer (`https://cursor.com/install`). Unlike `copilot-cli` and `claude-code-cli` (pinned npm versions), Cursor publishes **no versioned npm package or installer checksum**, so this step cannot be version-pinned today. The workflow downloads the installer to a file before executing it (rather than piping straight to `bash`), but the residual supply-chain risk remains: a compromise of the install endpoint would run on the runner with access to `CURSOR_API_KEY`. Prefer `copilot-cli` or `claude-code-cli` where pinning matters; this note will be removed once Cursor ships a pinnable artifact.
+
 Example for Claude Code:
 
 ```yaml
@@ -92,3 +98,14 @@ Prevue **never merges** pull requests. Skip behavior depends on the skip type:
 | **Bot / label / title** | Python `should_skip()` | Yes — neutral `prevue/review` check + sticky reason |
 
 Skipping does not approve or merge the PR — your existing branch protection and human review process still applies.
+
+### Bot review policy (`skip.review_bots`)
+
+`skip.review_bots` is an **allowlist of bot logins to review**, not a blocklist to skip. By default it is empty, so **every bot-authored PR is skipped**. To review a specific bot (e.g. a release bot), add its login:
+
+```yaml
+# .github/prevue.yml
+skip:
+  review_bots:
+    - release-please[bot]   # only listed bots are reviewed; all other bots skipped
+```
