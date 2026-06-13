@@ -17,7 +17,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Zero-Token Classification & Routing** - Deterministic glob/path classifier with path filters and auditable label→bundle routing (completed 2026-06-12)
 - [x] **Phase 3: Selective Skill Loading** - SKILL.md bundle loader, five built-in bundles, trusted-ref-only loading (completed 2026-06-12)
 - [x] **Phase 4: Structured Findings & Merge Gate** - Schema-validated findings, position-validated inline comments, severity thresholds, comment budget, pass/fail/neutral check (completed 2026-06-13)
-- [ ] **Phase 5: Multi-Engine Adapter Support** - Additional `EngineAdapter`s (Claude Code, Cursor, Gemini) via the same interface, config-selectable, validating engine-agnosticism before public packaging
+- [x] **Phase 5: Multi-Engine Adapter Support** - Additional `EngineAdapter`s (Claude Code, Cursor, Gemini) via the same interface, config-selectable, validating engine-agnosticism before public packaging (completed 2026-06-13)
 - [ ] **Phase 6: Reusable Workflow & Hybrid Classification** - `workflow_call` packaging, consumer config, LLM classification fallback, skip conditions — first shippable
 - [ ] **Phase 7: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget
 
@@ -167,15 +167,15 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 **Wave 1**
 
-- [ ] 05-01-PLAN.md — Shared foundation: hoist prompt/errors/flow into shared modules + fail-closed registry + Gemini skeleton + wire PREVUE_ENGINE selection (Copilot stays green; TDD)
+- [x] 05-01-PLAN.md — Shared foundation: hoist prompt/errors/flow into shared modules + fail-closed registry + Gemini skeleton + wire PREVUE_ENGINE selection (Copilot stays green; TDD)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 05-02-PLAN.md — Claude Code CLI adapter (`claude --bare -p`), registered + contract-suite green (D-01, TDD)
+- [x] 05-02-PLAN.md — Claude Code CLI adapter (`claude --bare -p`), registered + contract-suite green (D-01, TDD)
 
 **Wave 3** *(blocked on Wave 2 completion; not autonomous — D-12 live verify)*
 
-- [ ] 05-03-PLAN.md — Cursor CLI adapter (`cursor-agent -p -f`) + workflow curl-installs (reject npm impostor) + D-12 live sandbox verification of Claude + Cursor (D-01, TDD)
+- [x] 05-03-PLAN.md — Cursor CLI adapter (`cursor-agent -p -f`) + workflow curl-installs (reject npm impostor) + D-12 live sandbox verification of Claude + Cursor (D-01, TDD)
 
 ### Phase 6: Reusable Workflow & Hybrid Classification
 
@@ -219,7 +219,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 2. Zero-Token Classification & Routing | 3/3 | Complete    | 2026-06-12 |
 | 3. Selective Skill Loading | 4/4 | Complete    | 2026-06-12 |
 | 4. Structured Findings & Merge Gate | 5/5 | Complete    | 2026-06-13 |
-| 5. Multi-Engine Adapter Support | 0/TBD | Not started | - |
+| 5. Multi-Engine Adapter Support | 3/3 | Complete   | 2026-06-13 |
 | 6. Reusable Workflow & Hybrid Classification | 0/TBD | Not started | - |
 | 7. Customization & Hardening | 0/TBD | Not started | - |
 
