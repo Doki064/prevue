@@ -37,3 +37,4 @@ class ClassificationResult(BaseModel):
     labels: dict[str, str] = Field(default_factory=dict)  # label → matched glob
     bundles: list[str] = Field(default_factory=list)
     dropped_count: int = 0
+    unmatched: list[str] = Field(default_factory=list)

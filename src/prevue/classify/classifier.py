@@ -29,14 +29,18 @@ def classify(
 ) -> ClassificationResult:
     """Multi-label union classify with PR-level general fallback (D-01, D-03)."""
     labels: dict[str, str] = {}
+    unmatched: list[str] = []
     specs = {label: GitIgnoreSpec.from_lines(globs) for label, globs in label_rules.items()}
     for f in files:
+        matched_any = False
         for label, spec in specs.items():
-            if label in labels:
-                continue
             res = spec.check_file(f.path)
             if res.include:
-                labels[label] = label_rules[label][res.index]
+                matched_any = True
+                if label not in labels:
+                    labels[label] = label_rules[label][res.index]
+        if not matched_any:
+            unmatched.append(f.path)
     if not labels:
         labels = {GENERAL_LABEL: NO_RULE_MATCHED}
-    return ClassificationResult(labels=_order_labels(labels))
+    return ClassificationResult(labels=_order_labels(labels), unmatched=unmatched)

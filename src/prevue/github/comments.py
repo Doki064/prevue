@@ -13,6 +13,7 @@ from prevue.gate import GateResult, severity_counts_line, thresholds_line, verdi
 from prevue.models import Finding, ReviewResult
 
 MARKER = "<!-- prevue:sticky -->"
+INLINE_MARKER = "<sub>posted by Prevue</sub>"
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
 
 SEVERITY_BADGES = {"error": "🔴", "warning": "🟡", "info": "🔵"}
@@ -55,7 +56,7 @@ def render_inline_comment(finding: Finding) -> str:
     ]
     if finding.suggestion is not None:
         parts.extend(["", "**Suggested change**", _safe_suggestion_block(finding.suggestion)])
-    parts.extend(["", "<sub>posted by Prevue</sub>"])
+    parts.extend(["", INLINE_MARKER])
     return "\n".join(parts)
 
 
@@ -100,6 +101,7 @@ def render_body(
     classification: ClassificationResult | None = None,
     loaded_skills: list[str] | None = None,
     gate: GateResult | None = None,
+    classification_disclosure: str | None = None,
 ) -> str:
     """Sectioned sticky body: Verdict / Review / Findings / details / Metadata."""
     model = result.engine_meta.get("model", "unknown")
@@ -146,6 +148,8 @@ def render_body(
         if gate.degraded:
             metadata += "\nstructured findings unavailable (parse failure)"
         metadata += f"\n{thresholds_line(gate)}"
+    if classification_disclosure:
+        metadata += f"\n{classification_disclosure}"
 
     return (
         f"{MARKER}\n"
@@ -195,14 +199,16 @@ def _upsert_marker_comment(pr, body: str):
     return pr.create_issue_comment(body)
 
 
-def render_skip_body(dropped_count: int) -> str:
-    """Neutral skip body for all-filtered PRs (D-10)."""
+def render_skip_body(*, dropped_count: int | None = None, reason: str | None = None) -> str:
+    """Skip sticky body — empty-PR filtered count or explicit skip reason (D-10/D-16)."""
+    if reason is not None:
+        return f"{MARKER}\n## Prevue Review\n\n{reason}"
     return f"{MARKER}\n## Prevue Review\n\nno reviewable files ({dropped_count} filtered)"
 
 
-def upsert_skip_note(pr, dropped_count: int):
-    """Post idempotent sticky note when every file was filtered (D-10)."""
-    return _upsert_marker_comment(pr, render_skip_body(dropped_count))
+def upsert_skip_note(pr, *, dropped_count: int | None = None, reason: str | None = None):
+    """Post idempotent sticky note for empty-PR or bot/label/title skip (D-10/D-16)."""
+    return _upsert_marker_comment(pr, render_skip_body(dropped_count=dropped_count, reason=reason))
 
 
 def upsert_sticky(
@@ -212,6 +218,7 @@ def upsert_sticky(
     classification: ClassificationResult | None = None,
     loaded_skills: list[str] | None = None,
     gate: GateResult | None = None,
+    classification_disclosure: str | None = None,
 ):
     """Create one sticky comment or edit in place when marker exists (D-06)."""
     body = render_body(
@@ -219,35 +226,103 @@ def upsert_sticky(
         classification=classification,
         loaded_skills=loaded_skills,
         gate=gate,
+        classification_disclosure=classification_disclosure,
     )
     return _upsert_marker_comment(pr, body)
 
 
-def post_inline_review(pr, gate: GateResult) -> bool:
-    """Post one batched COMMENT review for inline findings (D-20)."""
-    if not gate.inline:
-        return True
-
-    comments = [
-        {
-            "path": finding.path,
-            "line": finding.line,
-            "side": finding.side,
-            "body": render_inline_comment(finding),
-        }
-        for finding in gate.inline
-    ]
-    count = len(comments)
-    body = f"Prevue posted {count} inline comment(s) — see the review summary."
-
-    try:
-        # Default commit_id is safe: concurrency group cancels superseded runs.
-        pr.create_review(body=body, event="COMMENT", comments=comments)
-    except GithubException as exc:
-        status = getattr(exc, "status", "unknown")
-        print(
-            f"prevue: inline review POST failed (HTTP {status}, {count} comment(s))",
-            file=sys.stderr,
-        )
+def _is_prevue_inline_comment(comment) -> bool:
+    """True for trusted automation review comments tagged with INLINE_MARKER."""
+    if INLINE_MARKER not in (comment.body or ""):
         return False
+    return _is_trusted_sticky_actor(comment)
+
+
+def _inline_location_key(path: str, line: int, side: str | None) -> tuple[str, int, str]:
+    return (path, line, side or "RIGHT")
+
+
+def _existing_prevue_inline_by_location(pr) -> dict[tuple[str, int, str], object]:
+    """Map (path, line, side) → existing Prevue inline review comment."""
+    existing: dict[tuple[str, int, str], object] = {}
+    for comment in pr.get_review_comments():
+        if not _is_prevue_inline_comment(comment):
+            continue
+        key = _inline_location_key(comment.path, comment.line, getattr(comment, "side", None))
+        existing.setdefault(key, comment)
+    return existing
+
+
+def _delete_prevue_inline_comments(comments: list[object]) -> None:
+    """Delete Prevue inline comments (best-effort)."""
+    for comment in comments:
+        try:
+            comment.delete()
+        except GithubException as exc:
+            status = getattr(exc, "status", "unknown")
+            path = getattr(comment, "path", "?")
+            line = getattr(comment, "line", "?")
+            print(
+                f"prevue: stale inline comment delete failed (HTTP {status}, {path}:{line})",
+                file=sys.stderr,
+            )
+
+
+def post_inline_review(pr, gate: GateResult) -> bool:
+    """Post, update, or remove inline findings — upsert by (path, line, side) on re-run."""
+    existing = _existing_prevue_inline_by_location(pr)
+    current_keys = {
+        _inline_location_key(finding.path, finding.line, finding.side) for finding in gate.inline
+    }
+    stale_comments = [comment for key, comment in existing.items() if key not in current_keys]
+
+    to_create: list[dict[str, object]] = []
+    to_update: list[tuple[object, str, Finding]] = []
+
+    for finding in gate.inline:
+        body = render_inline_comment(finding)
+        key = _inline_location_key(finding.path, finding.line, finding.side)
+        prior = existing.get(key)
+        if prior is not None:
+            to_update.append((prior, body, finding))
+            continue
+        to_create.append(
+            {
+                "path": finding.path,
+                "line": finding.line,
+                "side": finding.side,
+                "body": body,
+            }
+        )
+
+    if to_create:
+        count = len(to_create)
+        summary_parts = [f"{count} new inline comment(s)"]
+        if to_update:
+            summary_parts.append(f"{len(to_update)} updated in place")
+        body = f"Prevue posted {', '.join(summary_parts)} — see the review summary."
+
+        try:
+            pr.create_review(body=body, event="COMMENT", comments=to_create)
+        except GithubException as exc:
+            status = getattr(exc, "status", "unknown")
+            print(
+                f"prevue: inline review POST failed (HTTP {status}, {count} comment(s))",
+                file=sys.stderr,
+            )
+            return False
+
+    for prior, body, finding in to_update:
+        try:
+            prior.edit(body)
+        except GithubException as exc:
+            status = getattr(exc, "status", "unknown")
+            print(
+                f"prevue: inline comment update failed "
+                f"(HTTP {status}, {finding.path}:{finding.line})",
+                file=sys.stderr,
+            )
+            return False
+
+    _delete_prevue_inline_comments(stale_comments)
     return True

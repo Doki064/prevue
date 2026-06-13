@@ -9,13 +9,16 @@ from prevue.engines import flow
 from prevue.engines.base import EngineAdapter
 from prevue.engines.errors import AuthError, EngineFailure, sanitize_stderr
 from prevue.engines.prompt import (
+    CLASSIFY_TIMEOUT_SECONDS,
     MAX_PROMPT_BYTES,
     OUTPUT_CONTRACT,
     _build_prompt,
     _build_retry_prompt,
     _escape_line,
     _safe_diff_block,
+    build_classify_prompt,
     build_prompt,
+    parse_classify_response,
 )
 
 __all__ = [
@@ -94,3 +97,25 @@ class CopilotCliAdapter(EngineAdapter):
             max_prompt_bytes=MAX_PROMPT_BYTES,
             model_label=req.model or "default",
         )
+
+    def classify(
+        self,
+        paths: list[str],
+        allowed_labels: tuple[str, ...] | list[str],
+        *,
+        model: str | None = None,
+    ) -> dict[str, str]:
+        token = os.environ.get("COPILOT_GITHUB_TOKEN", "")
+        if not token.startswith("github_pat_"):
+            raise CopilotAuthError(
+                "COPILOT_GITHUB_TOKEN must be a fine-grained, user-owned PAT "
+                "(github_pat_…) with the Copilot Requests permission."
+            )
+
+        env = {**os.environ, "COPILOT_GITHUB_TOKEN": token}
+        if model:
+            env["COPILOT_MODEL"] = model
+
+        prompt = build_classify_prompt(paths, allowed_labels)
+        text = self._invoke(prompt, env, token, CLASSIFY_TIMEOUT_SECONDS)
+        return parse_classify_response(text, paths, allowed_labels)

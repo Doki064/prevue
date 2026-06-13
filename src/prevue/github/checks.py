@@ -59,24 +59,32 @@ def conclude_review_check(
 def conclude_skip_check(
     repo: Repository,
     head_sha: str,
-    dropped_count: int,
+    *,
+    dropped_count: int | None = None,
+    conclusion: str = "success",
+    reason: str | None = None,
 ) -> bool:
-    """Post success check when every file was filtered (D-09)."""
+    """Post completed skip check — success for empty-PR, neutral for bot/label/title (D-09/D-16)."""
+    if reason is not None:
+        output = {"title": "review skipped", "summary": reason}
+    else:
+        output = {
+            "title": "no reviewable files",
+            "summary": f"{dropped_count} filtered file(s) — nothing to review.",
+        }
     try:
         repo.create_check_run(
             name=CHECK_NAME,
             head_sha=head_sha,
             status="completed",
-            conclusion="success",
-            output={
-                "title": "no reviewable files",
-                "summary": f"{dropped_count} filtered file(s) — nothing to review.",
-            },
+            conclusion=conclusion,
+            output=output,
         )
     except GithubException as exc:
         status = getattr(exc, "status", "unknown")
+        detail = reason or f"dropped={dropped_count}"
         print(
-            f"prevue: skip check-run POST failed (HTTP {status}, dropped={dropped_count})",
+            f"prevue: skip check-run POST failed (HTTP {status}, {detail})",
             file=sys.stderr,
         )
         return False

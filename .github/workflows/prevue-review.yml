@@ -1,0 +1,97 @@
+name: Prevue Review (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      engine:
+        type: string
+        required: false
+        default: copilot-cli
+      config-path:
+        type: string
+        required: false
+        default: .github/prevue.yml
+      prevue-ref:
+        type: string
+        required: false
+        default: ""
+    secrets:
+      copilot-github-token:
+        required: false
+      anthropic-api-key:
+        required: false
+      cursor-api-key:
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  review:
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Prevue framework
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: Doki064/prevue
+          ref: ${{ inputs.prevue-ref != '' && inputs.prevue-ref || 'v0.6.0' }}
+          path: .prevue
+          persist-credentials: false
+
+      - name: Checkout consumer base ref
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: consumer
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+          version: "0.11.21"
+
+      - name: Install dependencies
+        working-directory: .prevue
+        run: uv sync --locked
+
+      - name: Install engine CLI
+        env:
+          PREVUE_ENGINE: ${{ inputs.engine }}
+        run: |
+          case "$PREVUE_ENGINE" in
+            copilot-cli)
+              npm install -g @github/copilot@1.0.61
+              command -v copilot
+              ;;
+            claude-code-cli)
+              npm install -g @anthropic-ai/claude-code@2.1.177
+              command -v claude
+              ;;
+            cursor-cli)
+              # Official Cursor CLI installer (https://cursor.com/docs/cli/overview).
+              # No versioned npm package — npm `cursor-agent` is an unrelated impostor;
+              # supply-chain guard: test_cursor_install_uses_official_curl_installer_in_reusable.
+              curl https://cursor.com/install -fsS | bash
+              command -v cursor-agent
+              ;;
+            *)
+              echo "Unsupported engine: $PREVUE_ENGINE" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Run review
+        working-directory: .prevue
+        run: uv run prevue review
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVUE_ENGINE: ${{ inputs.engine }}
+          PREVUE_CONSUMER_ROOT: ${{ github.workspace }}/consumer
+          PREVUE_CONFIG_PATH: ${{ inputs.config-path }}
+          COPILOT_GITHUB_TOKEN: ${{ inputs.engine == 'copilot-cli' && secrets.copilot-github-token || '' }}
+          ANTHROPIC_API_KEY: ${{ inputs.engine == 'claude-code-cli' && secrets.anthropic-api-key || '' }}
+          CURSOR_API_KEY: ${{ inputs.engine == 'cursor-cli' && secrets.cursor-api-key || '' }}
