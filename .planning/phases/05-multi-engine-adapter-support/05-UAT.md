@@ -3,7 +3,7 @@ status: testing
 phase: 05-multi-engine-adapter-support
 source: [05-VERIFICATION.md]
 started: 2026-06-13T08:00:00Z
-updated: 2026-06-13T16:00:00Z
+updated: 2026-06-13T16:30:00Z
 uat_pr: "#11"
 ---
 
@@ -11,15 +11,15 @@ uat_pr: "#11"
 
 Live UAT via `uat/phase-05` → `gsd/phase-05-multi-engine-adapter-support`.
 
-Fixture: `uat/phase-05/sample.py`. Engine switching via repo variable `PREVUE_ENGINE`. See `uat/README.md`.
+Fixture: `uat/phase-05/sample.py`. Engine via `uat/phase-05/ACTIVE`. See `uat/README.md`.
 
 ## Current Test
 
-number: 2
-name: Cursor adapter live review on sandbox PR
+number: 3
+name: Unknown engine fail-closed live
 expected: |
-  PREVUE_ENGINE=cursor-cli with CURSOR_API_KEY produces sticky comment +
-  prevue/review check; cursor-agent from official installer; no hang; no file writes.
+  PREVUE_ENGINE=typo-engine fails visibly with UnknownEngineError message
+  listing valid engines.
 awaiting: user response
 
 ## Tests
@@ -31,7 +31,8 @@ reason: Pro subscription — no ANTHROPIC_API_KEY available for live CLI auth
 
 ### 2. Cursor adapter live review on sandbox PR
 expected: Sticky + check; cursor-agent from official installer; no hang; no file writes
-result: [pending]
+result: pass
+note: prevue/review check neutral; user ok. Workflow installed all 3 CLIs + loaded all secrets — fixed in follow-up commit (selective install).
 
 ### 3. Unknown engine fail-closed live
 expected: PREVUE_ENGINE=typo fails visibly with UnknownEngineError message
@@ -40,9 +41,9 @@ result: [pending]
 ## Summary
 
 total: 3
-passed: 0
+passed: 1
 issues: 0
-pending: 2
+pending: 1
 skipped: 1
 blocked: 0
 

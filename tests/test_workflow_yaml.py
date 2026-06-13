@@ -79,17 +79,21 @@ def test_single_prevue_review_invocation() -> None:
 def test_copilot_token_env_separate_from_github_token() -> None:
     wf = _load_review_workflow()
     review_step = None
+    creds_step = None
     for job in wf.get("jobs", {}).values():
         for step in job.get("steps", []):
             if step.get("run", "").strip() == "uv run prevue review":
                 review_step = step
-                break
+            if step.get("name") == "Prepare engine credentials":
+                creds_step = step
     assert review_step is not None
-    env = review_step.get("env") or {}
-    assert "GITHUB_TOKEN" in env
-    assert "COPILOT_GITHUB_TOKEN" in env
-    assert "${{ github.token }}" in str(env["GITHUB_TOKEN"])
-    assert "${{ secrets.COPILOT_GITHUB_TOKEN }}" in str(env["COPILOT_GITHUB_TOKEN"])
+    review_env = review_step.get("env") or {}
+    assert "GITHUB_TOKEN" in review_env
+    assert "${{ github.token }}" in str(review_env["GITHUB_TOKEN"])
+    assert "COPILOT_GITHUB_TOKEN" not in review_env
+    assert creds_step is not None
+    creds_env = creds_step.get("env") or {}
+    assert "${{ secrets.COPILOT_GITHUB_TOKEN }}" in str(creds_env["COPILOT_GITHUB_TOKEN"])
 
 
 SETUP_UV_SHA = "fac544c07dec837d0ccb6301d7b5580bf5edae39"
@@ -132,8 +136,9 @@ def _copilot_install_command(wf: dict) -> str | None:
 
 
 def test_copilot_cli_version_pinned() -> None:
-    install = _copilot_install_command(_load_review_workflow())
-    assert install == f"npm install -g @github/copilot@{COPILOT_CLI_VERSION}"
+    text = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+    assert f"npm install -g @github/copilot@{COPILOT_CLI_VERSION}" in text
+    assert "copilot-cli)" in text
 
 
 def test_claude_install_uses_official_curl_installer() -> None:
@@ -147,20 +152,32 @@ def test_cursor_install_uses_official_curl_installer_not_npm_impostor() -> None:
     assert "npm install -g cursor-agent" not in text
 
 
-def test_run_review_env_includes_new_engine_secrets() -> None:
+def test_engine_credentials_prepared_per_adapter() -> None:
     wf = _load_review_workflow()
-    review_step = None
+    creds_step = None
     for job in wf.get("jobs", {}).values():
         for step in job.get("steps", []):
-            if step.get("run", "").strip() == "uv run prevue review":
-                review_step = step
+            if step.get("name") == "Prepare engine credentials":
+                creds_step = step
                 break
-    assert review_step is not None
-    env = review_step.get("env") or {}
-    assert "ANTHROPIC_API_KEY" in env
-    assert "CURSOR_API_KEY" in env
+    assert creds_step is not None
+    env = creds_step.get("env") or {}
     assert "${{ secrets.ANTHROPIC_API_KEY }}" in str(env["ANTHROPIC_API_KEY"])
     assert "${{ secrets.CURSOR_API_KEY }}" in str(env["CURSOR_API_KEY"])
+    run = creds_step.get("run", "")
+    assert "copilot-cli)" in run
+    assert "claude-code-cli)" in run
+    assert "cursor-cli)" in run
+
+
+def test_install_engine_cli_is_selective() -> None:
+    text = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+    assert "Install engine CLI" in text
+    assert 'case "$PREVUE_ENGINE" in' in text
+    assert "Resolve PREVUE_ENGINE" in text
+    idx_resolve = text.index("Resolve PREVUE_ENGINE")
+    idx_install = text.index("Install engine CLI")
+    assert idx_resolve < idx_install
 
 
 def test_uat_branch_engine_resolution_step() -> None:

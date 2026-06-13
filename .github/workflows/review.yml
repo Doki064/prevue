@@ -32,17 +32,6 @@ jobs:
       - name: Install dependencies
         run: uv sync --locked
 
-      - name: Install Copilot CLI
-        run: npm install -g @github/copilot@1.0.61
-
-      - name: Install Claude Code CLI
-        run: curl -fsSL https://claude.ai/install.sh | bash
-
-      - name: Install Cursor CLI
-        run: |
-          curl https://cursor.com/install -fsS | bash
-          command -v cursor-agent
-
       - name: Resolve PREVUE_ENGINE
         env:
           GH_TOKEN: ${{ github.token }}
@@ -59,10 +48,43 @@ jobs:
           fi
           echo "PREVUE_ENGINE=${ENGINE:-copilot-cli}" >> "$GITHUB_ENV"
 
+      - name: Install engine CLI
+        run: |
+          case "$PREVUE_ENGINE" in
+            copilot-cli)
+              npm install -g @github/copilot@1.0.61
+              ;;
+            claude-code-cli)
+              curl -fsSL https://claude.ai/install.sh | bash
+              ;;
+            cursor-cli)
+              curl https://cursor.com/install -fsS | bash
+              command -v cursor-agent
+              ;;
+            *)
+              echo "No CLI install for engine: $PREVUE_ENGINE"
+              ;;
+          esac
+
+      - name: Prepare engine credentials
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+        run: |
+          case "$PREVUE_ENGINE" in
+            copilot-cli)
+              echo "COPILOT_GITHUB_TOKEN=$COPILOT_GITHUB_TOKEN" >> "$GITHUB_ENV"
+              ;;
+            claude-code-cli)
+              echo "ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY" >> "$GITHUB_ENV"
+              ;;
+            cursor-cli)
+              echo "CURSOR_API_KEY=$CURSOR_API_KEY" >> "$GITHUB_ENV"
+              ;;
+          esac
+
       - name: Run review
         run: uv run prevue review
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
