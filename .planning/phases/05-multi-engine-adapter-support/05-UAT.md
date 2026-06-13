@@ -3,8 +3,15 @@ status: testing
 phase: 05-multi-engine-adapter-support
 source: [05-VERIFICATION.md]
 started: 2026-06-13T08:00:00Z
-updated: 2026-06-13T08:00:00Z
+updated: 2026-06-13T12:00:00Z
+uat_pr: "(pending — uat/phase-05)"
 ---
+
+## UAT Infrastructure
+
+Live UAT via `uat/phase-05` → `gsd/phase-05-multi-engine-adapter-support`.
+
+Fixture: `uat/phase-05/sample.py`. Engine switching via repo variable `PREVUE_ENGINE`. See `uat/README.md`.
 
 ## Current Test
 
