@@ -3,7 +3,7 @@ status: testing
 phase: 05-multi-engine-adapter-support
 source: [05-VERIFICATION.md]
 started: 2026-06-13T08:00:00Z
-updated: 2026-06-13T12:00:00Z
+updated: 2026-06-13T16:00:00Z
 uat_pr: "#11"
 ---
 
@@ -15,18 +15,19 @@ Fixture: `uat/phase-05/sample.py`. Engine switching via repo variable `PREVUE_EN
 
 ## Current Test
 
-number: 1
-name: Claude Code adapter live review on sandbox PR
+number: 2
+name: Cursor adapter live review on sandbox PR
 expected: |
-  PREVUE_ENGINE=claude-code-cli with ANTHROPIC_API_KEY produces sticky comment +
-  prevue/review check; review references diff content only; clean exit.
+  PREVUE_ENGINE=cursor-cli with CURSOR_API_KEY produces sticky comment +
+  prevue/review check; cursor-agent from official installer; no hang; no file writes.
 awaiting: user response
 
 ## Tests
 
 ### 1. Claude Code adapter live review on sandbox PR
 expected: Sticky + check published; diff-only review; clean exit with --bare
-result: [pending]
+result: skipped
+reason: Pro subscription — no ANTHROPIC_API_KEY available for live CLI auth
 
 ### 2. Cursor adapter live review on sandbox PR
 expected: Sticky + check; cursor-agent from official installer; no hang; no file writes
@@ -41,8 +42,8 @@ result: [pending]
 total: 3
 passed: 0
 issues: 0
-pending: 3
-skipped: 0
+pending: 2
+skipped: 1
 blocked: 0
 
 ## Gaps
