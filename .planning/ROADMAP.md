@@ -163,7 +163,19 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Each adapter runs headless on an Actions runner with its own auth env var and returns schema-valid findings through the shared retry-then-degrade path
   4. Adding the new adapters required no change to the orchestration, findings, or gate layers — confirming the abstraction boundary held (any interface leak is fixed here, not in consumer-facing packaging)
 
-**Plans**: TBD
+**Plans**: 3 plans
+
+**Wave 1**
+
+- [ ] 05-01-PLAN.md — Shared foundation: hoist prompt/errors/flow into shared modules + fail-closed registry + Gemini skeleton + wire PREVUE_ENGINE selection (Copilot stays green; TDD)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 05-02-PLAN.md — Claude Code CLI adapter (`claude --bare -p`), registered + contract-suite green (D-01, TDD)
+
+**Wave 3** *(blocked on Wave 2 completion; not autonomous — D-12 live verify)*
+
+- [ ] 05-03-PLAN.md — Cursor CLI adapter (`cursor-agent -p -f`) + workflow curl-installs (reject npm impostor) + D-12 live sandbox verification of Claude + Cursor (D-01, TDD)
 
 ### Phase 6: Reusable Workflow & Hybrid Classification
 
