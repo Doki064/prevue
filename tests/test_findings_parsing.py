@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 
 from prevue.engines.parsing import extract_json_fence, validate_findings
-
 from prevue.models import Finding
 
 VALID_FINDING = {
@@ -24,9 +23,8 @@ def _stdout_with_fence(*, prose_before: str = "## Review\n\nLooks good.", json_b
 
 class TestExtractJsonFence:
     def test_last_fence_wins_when_decoy_appears_earlier(self) -> None:
-        stdout = (
-            "Decoy fence:\n```json\n[{\"bad\": true}]\n```\n\n"
-            + _stdout_with_fence(json_body=json.dumps([VALID_FINDING]))
+        stdout = 'Decoy fence:\n```json\n[{"bad": true}]\n```\n\n' + _stdout_with_fence(
+            json_body=json.dumps([VALID_FINDING])
         )
         prose, items, err = extract_json_fence(stdout)
         assert err is None
@@ -71,10 +69,7 @@ class TestExtractJsonFence:
         assert "array" in err.lower()
 
     def test_accepts_uppercase_json_fence(self) -> None:
-        stdout = (
-            "## Review\n\nLooks good.\n\n"
-            f"```JSON\n{json.dumps([VALID_FINDING])}\n```"
-        )
+        stdout = f"## Review\n\nLooks good.\n\n```JSON\n{json.dumps([VALID_FINDING])}\n```"
         prose, items, err = extract_json_fence(stdout)
         assert err is None
         assert items is not None
@@ -84,8 +79,7 @@ class TestExtractJsonFence:
 
     def test_accepts_crlf_fence_newlines(self) -> None:
         stdout = (
-            "## Review\r\n\r\nLooks good.\r\n\r\n"
-            f"```json\r\n{json.dumps([VALID_FINDING])}\r\n```"
+            f"## Review\r\n\r\nLooks good.\r\n\r\n```json\r\n{json.dumps([VALID_FINDING])}\r\n```"
         )
         prose, items, err = extract_json_fence(stdout)
         assert err is None

@@ -25,10 +25,7 @@ def _render_check_output(gate: GateResult, sticky_url: str | None) -> dict:
 
     summary = thresholds_line(gate)
     if sticky_url:
-        summary += (
-            f"\n\nFull findings index in the "
-            f"[Prevue Review comment]({sticky_url})."
-        )
+        summary += f"\n\nFull findings index in the [Prevue Review comment]({sticky_url})."
 
     return {"title": title, "summary": summary}
 
@@ -79,8 +76,7 @@ def conclude_skip_check(
     except GithubException as exc:
         status = getattr(exc, "status", "unknown")
         print(
-            "prevue: skip check-run POST failed "
-            f"(HTTP {status}, dropped={dropped_count})",
+            f"prevue: skip check-run POST failed (HTTP {status}, dropped={dropped_count})",
             file=sys.stderr,
         )
         return False

@@ -52,7 +52,9 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
 
     if not reduced.files:
         upsert_skip_note(pr, dropped_count=len(dropped))
-        skip_published = conclude_skip_check(get_repo(ctx), diff.head_sha, dropped_count=len(dropped))
+        skip_published = conclude_skip_check(
+            get_repo(ctx), diff.head_sha, dropped_count=len(dropped)
+        )
         if not skip_published:
             raise RuntimeError("Failed to publish skip check run")
         return

@@ -1,10 +1,11 @@
 ---
 phase: 4
 slug: structured-findings-merge-gate
-status: ready
+status: validated
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-06-12
+validated: 2026-06-13
 ---
 
 # Phase 4 — Validation Strategy
@@ -21,7 +22,7 @@ created: 2026-06-12
 | **Config file** | `pyproject.toml` `[tool.pytest.ini_options]` (testpaths=tests) |
 | **Quick run command** | `uv run pytest -x -q` |
 | **Full suite command** | `uv run pytest --cov=prevue` |
-| **Estimated runtime** | ~10 seconds |
+| **Estimated runtime** | ~1 second (220 tests) |
 
 ---
 
@@ -38,20 +39,20 @@ created: 2026-06-12
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 04-01-01 | 01 | 1 | all (dep) | T-04-SC | pinned audited dep, lock committed | import check | `uv run python -c "from unidiff import PatchSet"` | ✅ | ⬜ pending |
-| 04-01-02 | 01 | 1 | all (contracts) | T-04-01 | strict-validation contracts pinned RED | unit (RED) | `uv run pytest tests/test_findings_parsing.py tests/test_positions.py tests/test_gate.py tests/test_checks.py -q` (expect non-zero) | ❌ W0 (this task creates) | ⬜ pending |
-| 04-02-01 | 02 | 2 | ENGN-03 | T-04-02 | last-fence extraction; strict no-coercion salvage | unit | `uv run pytest tests/test_findings_parsing.py tests/test_models.py -x` | ❌ W0 → ✅ | ⬜ pending |
-| 04-02-02 | 02 | 2 | ENGN-03 | T-04-03 | rubric/contract in trusted prompt section only | unit | `uv run pytest tests/test_copilot_adapter.py -x` | ✅ extend | ⬜ pending |
-| 04-02-03 | 02 | 2 | ENGN-03 | T-04-04/05/06 | bounded retry; degrade never raises; hard fail stays red | unit | `uv run pytest tests/test_copilot_adapter.py tests/test_findings_parsing.py -q` | ✅ extend | ⬜ pending |
-| 04-03-01 | 03 | 2 | OUTP-02 | T-04-08 | header-synthesis hunk validation, no snapping | unit | `uv run pytest tests/test_positions.py -x` | ❌ W0 → ✅ | ⬜ pending |
-| 04-03-02 | 03 | 2 | NOIS-02, OUTP-03 | T-04-07 | fail-closed config before engine spend; neutral never blocks | unit | `uv run pytest tests/test_gate.py -k "ReviewConfig or Conclude"` | ❌ W0 → ✅ | ⬜ pending |
-| 04-03-03 | 03 | 2 | NOIS-02, NOIS-03, OUTP-03 | T-04-09/10 | budget cap; verdict over ALL findings | unit | `uv run pytest tests/test_gate.py tests/test_positions.py -q` | ❌ W0 → ✅ | ⬜ pending |
-| 04-04-01 | 04 | 3 | OUTP-02 | T-04-12 | suggestion fence escape-hardened | unit | `uv run pytest tests/test_comments.py -k InlineTemplate` | ✅ extend | ⬜ pending |
-| 04-04-02 | 04 | 3 | OUTP-03, NOIS-02 | T-04-11/15 | table-cell escaping; verdict mirror via gate helpers | unit | `uv run pytest tests/test_comments.py -x` | ✅ extend | ⬜ pending |
-| 04-04-03 | 04 | 3 | OUTP-02, NOIS-03 | T-04-14 | single atomic COMMENT POST; crash-proof failure path | unit | `uv run pytest tests/test_comments.py -x` | ✅ extend | ⬜ pending |
-| 04-05-01 | 05 | 4 | OUTP-03 | T-04-17 | head SHA only; completed-only check | unit | `uv run pytest tests/test_checks.py -x` | ❌ W0 → ✅ | ⬜ pending |
-| 04-05-02 | 05 | 4 | ENGN-03, OUTP-02, OUTP-03, NOIS-03 | T-04-18 | degrade→neutral; fork→no check; config-fail→red pre-engine | unit | `uv run pytest tests/test_review_flow.py -x && uv run pytest -q` | ✅ extend | ⬜ pending |
-| 04-05-03 | 05 | 4 | OUTP-03 | T-04-16 | exact-equality permission pin | unit | `uv run pytest tests/test_workflow_yaml.py -x && uv run pytest -q` | ✅ extend | ⬜ pending |
+| 04-01-01 | 01 | 1 | all (dep) | T-04-SC | pinned audited dep, lock committed | import check | `uv run python -c "from unidiff import PatchSet"` | ✅ | ✅ green |
+| 04-01-02 | 01 | 1 | all (contracts) | T-04-01 | strict-validation contracts pinned RED | unit | `uv run pytest tests/test_findings_parsing.py tests/test_positions.py tests/test_gate.py tests/test_checks.py -q` | ✅ | ✅ green |
+| 04-02-01 | 02 | 2 | ENGN-03 | T-04-02 | last-fence extraction; strict no-coercion salvage | unit | `uv run pytest tests/test_findings_parsing.py tests/test_models.py -x` | ✅ | ✅ green |
+| 04-02-02 | 02 | 2 | ENGN-03 | T-04-03 | rubric/contract in trusted prompt section only | unit | `uv run pytest tests/test_copilot_adapter.py -x` | ✅ | ✅ green |
+| 04-02-03 | 02 | 2 | ENGN-03 | T-04-04/05/06 | bounded retry; degrade never raises; hard fail stays red | unit | `uv run pytest tests/test_copilot_adapter.py tests/test_findings_parsing.py -q` | ✅ | ✅ green |
+| 04-03-01 | 03 | 2 | OUTP-02 | T-04-08 | header-synthesis hunk validation, no snapping | unit | `uv run pytest tests/test_positions.py -x` | ✅ | ✅ green |
+| 04-03-02 | 03 | 2 | NOIS-02, OUTP-03 | T-04-07 | fail-closed config before engine spend; neutral never blocks | unit | `uv run pytest tests/test_gate.py -k "ReviewConfig or Conclude"` | ✅ | ✅ green |
+| 04-03-03 | 03 | 2 | NOIS-02, NOIS-03, OUTP-03 | T-04-09/10 | budget cap; verdict over ALL findings | unit | `uv run pytest tests/test_gate.py tests/test_positions.py -q` | ✅ | ✅ green |
+| 04-04-01 | 04 | 3 | OUTP-02 | T-04-12 | suggestion fence escape-hardened | unit | `uv run pytest tests/test_comments.py -k InlineTemplate` | ✅ | ✅ green |
+| 04-04-02 | 04 | 3 | OUTP-03, NOIS-02 | T-04-11/15 | table-cell escaping; verdict mirror via gate helpers | unit | `uv run pytest tests/test_comments.py -x` | ✅ | ✅ green |
+| 04-04-03 | 04 | 3 | OUTP-02, NOIS-03 | T-04-14 | single atomic COMMENT POST; crash-proof failure path | unit | `uv run pytest tests/test_comments.py -x` | ✅ | ✅ green |
+| 04-05-01 | 05 | 4 | OUTP-03 | T-04-17 | head SHA only; completed-only check | unit | `uv run pytest tests/test_checks.py -x` | ✅ | ✅ green |
+| 04-05-02 | 05 | 4 | ENGN-03, OUTP-02, OUTP-03, NOIS-03 | T-04-18 | degrade→neutral; fork→no check; config-fail→red pre-engine | unit | `uv run pytest tests/test_review_flow.py -x && uv run pytest -q` | ✅ | ✅ green |
+| 04-05-03 | 05 | 4 | OUTP-03 | T-04-16 | exact-equality permission pin | unit | `uv run pytest tests/test_workflow_yaml.py -x && uv run pytest -q` | ✅ | ✅ green |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -86,4 +87,16 @@ created: 2026-06-12
 - [x] Feedback latency < 30s
 - [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** approved 2026-06-12 (planner-filled during /gsd-plan-phase)
+**Approval:** approved 2026-06-12 (planner); re-validated 2026-06-13 (`/gsd-validate-phase 4`)
+
+---
+
+## Validation Audit 2026-06-13
+
+| Metric | Count |
+|--------|-------|
+| Gaps found | 0 |
+| Resolved | 0 |
+| Escalated | 0 |
+
+**Coverage summary:** 13/13 tasks COVERED (220 tests green). 1 manual-only item retained (live GitHub UI per RESEARCH A2/A4). No new tests required — documentation lag only (status column was ⬜ pending while verifier already green).

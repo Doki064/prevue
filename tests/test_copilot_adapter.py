@@ -327,14 +327,15 @@ class TestRetryThenDegrade:
         assert result.summary_markdown == PROSE_REVIEW
         assert result.engine_meta.get("retried") is False
 
-    def test_bad_fence_then_good_retry_sets_retried(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_bad_fence_then_good_retry_sets_retried(self, monkeypatch: pytest.MonkeyPatch) -> None:
         calls: list[str | None] = []
 
         def _run(_cmd, input=None, **_kwargs):
             calls.append(input)
-            stdout = PROSE_REVIEW if len(calls) == 1 else _stdout_with_fence(payload=[VALID_FINDING])
+            if len(calls) == 1:
+                stdout = PROSE_REVIEW
+            else:
+                stdout = _stdout_with_fence(payload=[VALID_FINDING])
             return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
         monkeypatch.setattr(subprocess, "run", _run)
@@ -374,9 +375,7 @@ class TestRetryThenDegrade:
         assert result.findings == []
         assert result.dropped_findings == 1
 
-    def test_mixed_salvage_keeps_valid_not_degraded(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_mixed_salvage_keeps_valid_not_degraded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         payload = [VALID_FINDING, {**VALID_FINDING, "severity": "nope"}]
         stdout = _stdout_with_fence(payload=payload)
 
