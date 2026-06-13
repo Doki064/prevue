@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from prevue.github.positions import build_valid_lines, commentable_lines
-
 from prevue.models import ChangedFile
 
 MODIFIED_PATCH = """\

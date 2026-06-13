@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from github import GithubException
+
 from prevue.gate import GateResult, ReviewConfig
 from prevue.github.checks import CHECK_NAME, conclude_review_check, conclude_skip_check
 

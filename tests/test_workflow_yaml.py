@@ -8,6 +8,7 @@ import yaml
 
 REVIEW_WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "review.yml"
 
+
 def _load_review_workflow() -> dict:
     with REVIEW_WORKFLOW.open(encoding="utf-8") as f:
         return yaml.safe_load(f)

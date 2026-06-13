@@ -468,32 +468,24 @@ class TestInlineTemplate:
         assert info.startswith("🔵 **Note**")
 
     def test_suggestion_in_four_backtick_fence(self) -> None:
-        rendered = render_inline_comment(
-            self._finding(suggestion="cursor.execute(query, params)")
-        )
+        rendered = render_inline_comment(self._finding(suggestion="cursor.execute(query, params)"))
 
         assert "**Suggested change**" in rendered
         assert "````\ncursor.execute(query, params)\n````" in rendered
 
     def test_suggestion_escapes_triple_backticks(self) -> None:
-        rendered = render_inline_comment(
-            self._finding(suggestion="code with ``` inside")
-        )
+        rendered = render_inline_comment(self._finding(suggestion="code with ``` inside"))
 
         assert "````\ncode with ``` inside\n````" in rendered
 
     def test_suggestion_with_four_backticks_uses_longer_fence(self) -> None:
-        rendered = render_inline_comment(
-            self._finding(suggestion="code with ```` inside")
-        )
+        rendered = render_inline_comment(self._finding(suggestion="code with ```` inside"))
 
         assert "`````\ncode with ```` inside\n`````" in rendered
 
     def test_uniform_template_structure(self) -> None:
         a = render_inline_comment(self._finding(title="A", body="body A"))
-        b = render_inline_comment(
-            self._finding(severity="warning", title="B", body="body B")
-        )
+        b = render_inline_comment(self._finding(severity="warning", title="B", body="body B"))
 
         def skeleton(text: str) -> list[str]:
             lines = text.split("\n")
@@ -510,15 +502,11 @@ class TestInlineTemplate:
         assert _escape_table_cell("a\r\nb") == "a b"
 
     def test_inline_title_escapes_markdown_control_chars(self) -> None:
-        rendered = render_inline_comment(
-            self._finding(title="bad_*[title]`value`", body="details")
-        )
+        rendered = render_inline_comment(self._finding(title="bad_*[title]`value`", body="details"))
         assert "🔴 **bad\\_\\*\\[title\\]\\`value\\`**" in rendered
 
     def test_inline_body_escapes_markdown_control_chars(self) -> None:
-        rendered = render_inline_comment(
-            self._finding(body="ping [link](x) and `code`")
-        )
+        rendered = render_inline_comment(self._finding(body="ping [link](x) and `code`"))
         assert "ping \\[link\\](x) and \\`code\\`" in rendered
 
 

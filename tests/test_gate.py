@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
+
 from prevue.gate import (
     GateResult,
     ReviewConfig,
@@ -15,8 +17,6 @@ from prevue.gate import (
     thresholds_line,
     verdict_title,
 )
-from pydantic import ValidationError
-
 from prevue.models import Finding
 
 
@@ -65,9 +65,7 @@ class TestReviewConfig:
         cfg = load_review_config(None)
         assert cfg == ReviewConfig()
 
-    def test_load_review_config_no_review_section_defaults(
-        self, tmp_path: Path
-    ) -> None:
+    def test_load_review_config_no_review_section_defaults(self, tmp_path: Path) -> None:
         path = tmp_path / "prevue.yml"
         path.write_text("ignore:\n  - '**/*.lock'\n")
         cfg = load_review_config(str(path))
@@ -75,9 +73,7 @@ class TestReviewConfig:
 
     def test_load_review_config_consumer_overrides(self, tmp_path: Path) -> None:
         path = tmp_path / "prevue.yml"
-        path.write_text(
-            "review:\n  min_severity_to_fail: error\n  max_inline_comments: 3\n"
-        )
+        path.write_text("review:\n  min_severity_to_fail: error\n  max_inline_comments: 3\n")
         cfg = load_review_config(str(path))
         assert cfg.min_severity_to_fail == "error"
         assert cfg.max_inline_comments == 3

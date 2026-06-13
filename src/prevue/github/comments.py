@@ -89,9 +89,7 @@ def render_finding_details(gate: GateResult) -> str:
         finding = placed.finding
         summary = f"{finding.path}:{finding.line} — {_escape_table_cell(finding.title)}"
         blocks.append(
-            f"<details><summary>{summary}</summary>\n\n"
-            f"{render_inline_comment(finding)}\n"
-            f"</details>"
+            f"<details><summary>{summary}</summary>\n\n{render_inline_comment(finding)}\n</details>"
         )
     return "\n".join(blocks)
 
@@ -135,9 +133,7 @@ def render_body(
         details_section = ""
     else:
         verdict_section = (
-            f"{verdict_title(gate)}\n"
-            f"{severity_counts_line(gate)}\n"
-            f"{thresholds_line(gate)}\n\n"
+            f"{verdict_title(gate)}\n{severity_counts_line(gate)}\n{thresholds_line(gate)}\n\n"
         )
         findings_section = ""
         if gate.placed or gate.degraded:

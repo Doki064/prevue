@@ -46,8 +46,7 @@ def conclude(findings: list[Finding], cfg: ReviewConfig, *, degraded: bool) -> s
     if degraded:
         return "neutral"
     if cfg.min_severity_to_fail is not None and any(
-        SEVERITY_RANK[f.severity] <= SEVERITY_RANK[cfg.min_severity_to_fail]
-        for f in findings
+        SEVERITY_RANK[f.severity] <= SEVERITY_RANK[cfg.min_severity_to_fail] for f in findings
     ):
         return "failure"
     if findings:
@@ -90,9 +89,7 @@ def apply_gate(
         severity_counts[finding.severity] += 1
 
     def meets_comment_threshold(severity: str) -> bool:
-        return (
-            SEVERITY_RANK[severity] <= SEVERITY_RANK[cfg.min_severity_to_comment]
-        )
+        return SEVERITY_RANK[severity] <= SEVERITY_RANK[cfg.min_severity_to_comment]
 
     def is_placeable(finding: Finding) -> bool:
         side_lines = valid_lines.get(finding.path, {}).get(finding.side)
@@ -110,9 +107,7 @@ def apply_gate(
             candidates.append((index, finding))
 
     candidates.sort(key=lambda item: (SEVERITY_RANK[item[1].severity], item[0]))
-    inline_indices = {
-        index for index, _ in candidates[: cfg.max_inline_comments]
-    }
+    inline_indices = {index for index, _ in candidates[: cfg.max_inline_comments]}
 
     for index, _finding in candidates:
         if index in inline_indices:
@@ -126,8 +121,7 @@ def apply_gate(
         key=lambda item: (tier_order[item[1].severity], item[0]),
     )
     placed = [
-        PlacedFinding(finding=finding, placement=placements[index])
-        for index, finding in ordered
+        PlacedFinding(finding=finding, placement=placements[index]) for index, finding in ordered
     ]
     inline = [finding for index, finding in candidates if index in inline_indices]
 
