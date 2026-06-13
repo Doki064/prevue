@@ -9,7 +9,7 @@ from prevue.classify.filter import filter_diff
 from prevue.classify.router import route
 from prevue.classify.rules import load_ruleset
 from prevue.engines.base import EngineAdapter
-from prevue.engines.copilot_cli import CopilotCliAdapter
+from prevue.engines.registry import DEFAULT_ENGINE, get_adapter
 from prevue.gate import GateResult, PlacedFinding, apply_gate, load_review_config
 from prevue.github.checks import conclude_review_check, conclude_skip_check
 from prevue.github.client import get_authenticated_pull, get_repo, load_pr_context
@@ -71,10 +71,10 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         diff=reduced,
         instructions=instructions,
         budget_seconds=300,
-        model=os.environ.get("COPILOT_MODEL"),
+        model=os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL")),
     )
 
-    engine = adapter or CopilotCliAdapter()
+    engine = adapter or get_adapter(os.environ.get("PREVUE_ENGINE", DEFAULT_ENGINE))
     result = engine.review(req)
 
     # EngineFailure / CopilotAuthError raise before gate (Phase 1 D-09 red run, no check).

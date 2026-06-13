@@ -2,8 +2,8 @@
 phase: 05
 slug: multi-engine-adapter-support
 status: draft
-nyquist_compliant: false
-wave_0_complete: false
+nyquist_compliant: true
+wave_0_complete: true
 created: 2026-06-13
 ---
 
@@ -43,19 +43,19 @@ created: 2026-06-13
 
 | Behavior (sampling target) | Requirement | Test Type | Automated Command | File Exists |
 |----------------------------|-------------|-----------|-------------------|-------------|
-| Registry resolves known name → adapter instance | ENGN-04 | tdd/unit | `pytest tests/test_registry.py -k resolves -x` | ❌ W0 |
-| Default engine is `copilot-cli` when env unset (D-03) | ENGN-04 | tdd/unit | `pytest tests/test_registry.py -k default -x` | ❌ W0 |
-| Unknown `PREVUE_ENGINE` → `UnknownEngineError` naming bad value + listing valid (fail-closed, D-04) | ENGN-04 | tdd/unit | `pytest tests/test_registry.py -k unknown -x` | ❌ W0 |
-| Gemini registered AND `review()` raises `NotImplementedError` (D-02) | ENGN-04 | tdd/unit | `pytest tests/test_registry.py -k gemini -x` | ❌ W0 |
-| Each adapter: missing credential → `AuthError` BEFORE subprocess (D-06), parametrized over registry | ENGN-04 | tdd/unit | `pytest tests/test_engine_contract.py -k auth -x` | ❌ W0 |
-| Each adapter: valid fence stdout → valid `ReviewResult`, not degraded | ENGN-04 | tdd/unit | `pytest tests/test_engine_contract.py -k valid_fence -x` | ❌ W0 |
-| Each adapter: unparseable stdout → retry → still bad → degraded neutral (D-08) | ENGN-04 | tdd/unit | `pytest tests/test_engine_contract.py -k degrade -x` | ❌ W0 |
-| Each adapter: bad-then-good retry sets `retried=True` (D-08) | ENGN-04 | tdd/unit | `pytest tests/test_engine_contract.py -k retry -x` | ❌ W0 |
-| Each adapter passes correct vendor argv (claude `--bare -p --output-format text`; cursor `-p --output-format text`) | ENGN-04 | unit | `pytest tests/test_engine_contract.py -k argv -x` | ❌ W0 |
-| Hoisted prompt: `build_prompt` output identical to pre-hoist; fencing preserved verbatim (D-09) | ENGN-04 | tdd/unit | `pytest tests/test_prompt.py -x` | ❌ W0 |
-| `review.py` resolves adapter via `PREVUE_ENGINE` registry when no adapter injected (D-03) | ENGN-04 | unit | `pytest tests/test_review_flow.py -k engine_selection -x` | ⚠️ extend |
-| `cli.py` catches shared `AuthError` for non-Copilot adapters | ENGN-04 | tdd/unit | `pytest tests/test_cli.py -k auth -x` | ⚠️ extend |
-| Criterion 4: gate/findings/comments/checks layers unchanged (no-regression) | ENGN-04 | regression | `uv run pytest -q` | ✓ existing |
+| Registry resolves known name → adapter instance | ENGN-04 | tdd/unit | `pytest tests/test_registry.py -k resolves -x` | ✅ |
+| Default engine is `copilot-cli` when env unset (D-03) | ENGN-04 | tdd/unit | `pytest tests/test_registry.py -k default -x` | ✅ |
+| Unknown `PREVUE_ENGINE` → `UnknownEngineError` naming bad value + listing valid (fail-closed, D-04) | ENGN-04 | tdd/unit | `pytest tests/test_registry.py -k unknown -x` | ✅ |
+| Gemini registered AND `review()` raises `NotImplementedError` (D-02) | ENGN-04 | tdd/unit | `pytest tests/test_registry.py -k gemini -x` | ✅ |
+| Each adapter: missing credential → `AuthError` BEFORE subprocess (D-06), parametrized over registry | ENGN-04 | tdd/unit | `pytest tests/test_engine_contract.py -k auth -x` | ✅ |
+| Each adapter: valid fence stdout → valid `ReviewResult`, not degraded | ENGN-04 | tdd/unit | `pytest tests/test_engine_contract.py -k valid_fence -x` | ✅ |
+| Each adapter: unparseable stdout → retry → still bad → degraded neutral (D-08) | ENGN-04 | tdd/unit | `pytest tests/test_engine_contract.py -k degrade -x` | ✅ |
+| Each adapter: bad-then-good retry sets `retried=True` (D-08) | ENGN-04 | tdd/unit | `pytest tests/test_engine_contract.py -k retry -x` | ✅ |
+| Each adapter passes correct vendor argv (claude `--bare -p --output-format text`; cursor `-p --output-format text`) | ENGN-04 | unit | `pytest tests/test_engine_contract.py -k argv -x` | ✅ |
+| Hoisted prompt: `build_prompt` output identical to pre-hoist; fencing preserved verbatim (D-09) | ENGN-04 | tdd/unit | `pytest tests/test_prompt.py -x` | ✅ |
+| `review.py` resolves adapter via `PREVUE_ENGINE` registry when no adapter injected (D-03) | ENGN-04 | unit | `pytest tests/test_review_flow.py -k engine_selection -x` | ✅ |
+| `cli.py` catches shared `AuthError` for non-Copilot adapters | ENGN-04 | tdd/unit | `pytest tests/test_cli.py -k auth -x` | ✅ |
+| Criterion 4: gate/findings/comments/checks layers unchanged (no-regression) | ENGN-04 | regression | `uv run pytest -q` | ✅ |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -63,11 +63,11 @@ created: 2026-06-13
 
 ## Wave 0 Requirements
 
-- [ ] `tests/test_engine_contract.py` — parametrized contract suite (valid/degrade/retry/auth/argv across `ENGINES.keys()`)
-- [ ] `tests/test_registry.py` — resolve / default / unknown-fail-closed / gemini-skeleton
-- [ ] `tests/test_prompt.py` — hoisted prompt parity + fencing preserved (D-09)
-- [ ] Shared subprocess-mock helpers — move `_stdout_with_fence` + `SAMPLE_REQUEST` into `tests/conftest.py` so the contract suite and `test_copilot_adapter.py` share them
-- [ ] Framework install: none needed (pytest/ruff/pytest-cov already present)
+- [x] `tests/test_engine_contract.py` — parametrized contract suite (valid/degrade/retry/auth/argv across `ENGINES.keys()`)
+- [x] `tests/test_registry.py` — resolve / default / unknown-fail-closed / gemini-skeleton
+- [x] `tests/test_prompt.py` — hoisted prompt parity + fencing preserved (D-09)
+- [x] Shared subprocess-mock helpers — `tests/engine_helpers.py`
+- [x] Framework install: none needed (pytest/ruff/pytest-cov already present)
 
 ---
 
@@ -89,4 +89,4 @@ created: 2026-06-13
 - [ ] Feedback latency < 30s
 - [ ] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** automated coverage complete; D-12 human UAT pending

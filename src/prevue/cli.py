@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from prevue.engines.copilot_cli import CopilotAuthError, EngineFailure
+from prevue.engines.errors import AuthError, EngineFailure
 from prevue.review import ForkPrUnsupported, run_review
 
 
@@ -29,7 +29,7 @@ def _cmd_review() -> int:
     except ForkPrUnsupported as exc:
         print(str(exc), file=sys.stderr)
         return 0
-    except (EngineFailure, CopilotAuthError) as exc:
+    except (EngineFailure, AuthError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
     except Exception as exc:
