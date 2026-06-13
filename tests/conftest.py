@@ -11,8 +11,28 @@ import responses
 
 from prevue.engines.base import EngineAdapter
 from prevue.models import ReviewRequest, ReviewResult
+from tests.engine_helpers import (
+    VALID_TOKEN,
+    make_sample_request,
+    stdout_with_fence,
+)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
+
+# Back-compat aliases for plans referencing conftest symbol names.
+_stdout_with_fence = stdout_with_fence
+
+
+@pytest.fixture
+def sample_request() -> ReviewRequest:
+    return make_sample_request()
+
+
+@pytest.fixture
+def set_all_engine_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("COPILOT_GITHUB_TOKEN", VALID_TOKEN)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
+    monkeypatch.setenv("CURSOR_API_KEY", "cur_test_key")
 
 
 class FakeEngine(EngineAdapter):

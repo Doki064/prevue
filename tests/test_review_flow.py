@@ -7,7 +7,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from prevue.engines.copilot_cli import EngineFailure
+from prevue.engines.errors import EngineFailure
+from prevue.engines.registry import UnknownEngineError
 from prevue.github.client import PrContext
 from prevue.models import ChangedFile, DiffBundle, Finding, ReviewRequest, ReviewResult
 from prevue.review import BASELINE_INSTRUCTIONS, ForkPrUnsupported, run_review
@@ -406,13 +407,43 @@ def test_invalid_review_config_raises_before_fetch() -> None:
             side_effect=ValidationError.from_exception_data("ReviewConfig", []),
         ),
         patch("prevue.review.fetch_diff") as mock_fetch,
-        patch("prevue.review.CopilotCliAdapter") as mock_adapter_cls,
+        patch("prevue.review.get_adapter") as mock_get_adapter,
     ):
         with pytest.raises(ValidationError):
             run_review()
 
     mock_fetch.assert_not_called()
-    mock_adapter_cls.assert_not_called()
+    mock_get_adapter.assert_not_called()
+
+
+def test_engine_selection_via_prevue_engine(monkeypatch: pytest.MonkeyPatch) -> None:
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    monkeypatch.delenv("PREVUE_ENGINE", raising=False)
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=True),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=True),
+        patch("prevue.review.get_adapter") as mock_get_adapter,
+    ):
+        mock_get_adapter.return_value = FindingsEngine()
+        run_review()
+        mock_get_adapter.assert_called_once_with("copilot-cli")
+
+    monkeypatch.setenv("PREVUE_ENGINE", "nope")
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+    ):
+        with pytest.raises(UnknownEngineError, match="nope"):
+            run_review()
 
 
 def test_engine_failure_propagates_without_upsert() -> None:

@@ -134,3 +134,31 @@ def _copilot_install_command(wf: dict) -> str | None:
 def test_copilot_cli_version_pinned() -> None:
     install = _copilot_install_command(_load_review_workflow())
     assert install == f"npm install -g @github/copilot@{COPILOT_CLI_VERSION}"
+
+
+def test_claude_install_uses_official_curl_installer() -> None:
+    text = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+    assert "claude.ai/install.sh" in text
+
+
+def test_cursor_install_uses_official_curl_installer_not_npm_impostor() -> None:
+    text = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+    assert "cursor.com/install" in text
+    assert "npm install -g cursor-agent" not in text
+
+
+def test_run_review_env_includes_new_engine_secrets() -> None:
+    wf = _load_review_workflow()
+    review_step = None
+    for job in wf.get("jobs", {}).values():
+        for step in job.get("steps", []):
+            if step.get("run", "").strip() == "uv run prevue review":
+                review_step = step
+                break
+    assert review_step is not None
+    env = review_step.get("env") or {}
+    assert "ANTHROPIC_API_KEY" in env
+    assert "CURSOR_API_KEY" in env
+    assert "${{ secrets.ANTHROPIC_API_KEY }}" in str(env["ANTHROPIC_API_KEY"])
+    assert "${{ secrets.CURSOR_API_KEY }}" in str(env["CURSOR_API_KEY"])
+

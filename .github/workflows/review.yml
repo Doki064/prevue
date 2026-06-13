@@ -35,8 +35,19 @@ jobs:
       - name: Install Copilot CLI
         run: npm install -g @github/copilot@1.0.61
 
+      - name: Install Claude Code CLI
+        run: curl -fsSL https://claude.ai/install.sh | bash
+
+      - name: Install Cursor CLI
+        run: |
+          curl https://cursor.com/install -fsS | bash
+          command -v cursor-agent
+
       - name: Run review
         run: uv run prevue review
         env:
           GITHUB_TOKEN: ${{ github.token }}
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+          PREVUE_ENGINE: ${{ inputs.engine || vars.PREVUE_ENGINE || 'copilot-cli' }}
