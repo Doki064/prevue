@@ -734,7 +734,8 @@ def test_fallback_only_on_packed() -> None:
             label_rules={"frontend": ["**/*.tsx"]},
             routing_map={},
         ),
-        review=ReviewConfig(),
+        # Tight budget: mystery_b.bin (~50k tokens) must not fit; mystery_a.bin (~100) must.
+        review=ReviewConfig(max_input_tokens=5000, output_reserve_tokens=100),
         skip=SkipConfig(),
         fallback=FallbackConfig(enabled=True),
         skills=SkillsConfig(),

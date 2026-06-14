@@ -25,7 +25,8 @@ class ReviewConfig(BaseModel):
     min_severity_to_fail: Severity | None = None
     max_inline_comments: int = Field(default=10, ge=0)
     # Default 120k tokens (~480k bytes at bytes/4) stays under MAX_PROMPT_BYTES (~250k tokens).
-    max_input_tokens: int = Field(default=120000, ge=1)
+    # Upper bound matches MAX_PROMPT_BYTES // 4 so packing success implies invoke success.
+    max_input_tokens: int = Field(default=120000, ge=1, le=250_000)
     output_reserve_tokens: int = Field(default=12000, ge=0)
 
     @model_validator(mode="after")

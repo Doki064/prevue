@@ -136,9 +136,10 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     classification_disclosure: str | None = None
     classify_tokens = 0
 
+    consumer_skills_root = _consumer_skills_root()
     weight = make_file_weight(ruleset.label_rules)
     available = review_cfg.max_input_tokens - review_cfg.output_reserve_tokens
-    skill_reserve = _skill_reserve_tokens(config.skills)
+    skill_reserve = _skill_reserve_tokens(config.skills) if consumer_skills_root is not None else 0
     overhead = estimate_prompt_overhead_tokens(instructions=BASELINE_INSTRUCTIONS) + skill_reserve
     pack_budget = available - overhead if available > overhead else 0
     packed_files, skipped_files = pack_files(
@@ -167,16 +168,18 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
 
     try:
         skills, cap_skipped = load_skills(
-            consumer_skills_root=_consumer_skills_root(),
+            consumer_skills_root=consumer_skills_root,
             skills_config=config.skills,
             return_skipped=True,
         )
     except ValidationError as exc:
+        reason = f"Invalid consumer skill file: {exc}"
+        upsert_skip_note(pr, reason=reason)
         conclude_skip_check(
             get_repo(ctx),
             diff.head_sha,
             conclusion="failure",
-            reason=f"Invalid consumer skill file: {exc}",
+            reason=reason,
         )
         return
     matched = select_skills(skills, [f.path for f in packed_files])
