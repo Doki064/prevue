@@ -29,7 +29,7 @@ class ReviewConfig(BaseModel):
     output_reserve_tokens: int = Field(default=12000, ge=0)
 
     @model_validator(mode="after")
-    def _validate_token_budget(self) -> "ReviewConfig":
+    def _validate_token_budget(self) -> ReviewConfig:
         if self.output_reserve_tokens > self.max_input_tokens:
             raise ValueError("review.output_reserve_tokens must be <= review.max_input_tokens")
         return self

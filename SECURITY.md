@@ -30,4 +30,4 @@ Skills and config load from the trusted base ref (`PREVUE_CONSUMER_ROOT` / workf
 
 ## Consumer skill caps
 
-Oversized consumer skills are skipped and disclosed; malformed skills fail the review closed (red check).
+Oversized consumer skills are skipped and disclosed. Malformed consumer skills fail the workflow step (exit 1); skill content never reaches the engine. A dedicated `prevue/review` failure check is not published for loader validation errors today.

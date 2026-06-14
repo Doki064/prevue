@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
+from prevue.config import SkillsConfig
 from prevue.engines.errors import EngineFailure
 from prevue.engines.registry import UnknownEngineError
 from prevue.github.client import PrContext
@@ -532,6 +533,7 @@ def test_no_fit_neutral_skip() -> None:
     tiny_budget.review = MagicMock(max_input_tokens=100, output_reserve_tokens=0)
     tiny_budget.fallback = MagicMock(enabled=False)
     tiny_budget.skip = MagicMock()
+    tiny_budget.skills = SkillsConfig()
     tiny_budget.engine = "fake"
 
     class SpyEngine:
@@ -633,9 +635,7 @@ def test_invalid_review_config_raises_before_fetch() -> None:
     mock_get_adapter.assert_not_called()
 
 
-def test_run_review_load_config_default_path(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_run_review_load_config_default_path(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     mock_pr = MagicMock()
     mock_repo = _mock_repo()
     mock_sticky = _mock_sticky()
@@ -724,7 +724,7 @@ def test_fallback_only_on_packed() -> None:
                 status="added",
                 additions=1,
                 deletions=0,
-                patch="+" * 400,
+                patch="+" * 200_000,
             ),
         ],
     )
@@ -734,7 +734,7 @@ def test_fallback_only_on_packed() -> None:
             label_rules={"frontend": ["**/*.tsx"]},
             routing_map={},
         ),
-        review=ReviewConfig(max_input_tokens=150, output_reserve_tokens=0),
+        review=ReviewConfig(),
         skip=SkipConfig(),
         fallback=FallbackConfig(enabled=True),
         skills=SkillsConfig(),
@@ -747,6 +747,7 @@ def test_fallback_only_on_packed() -> None:
         patch("prevue.review.load_config", return_value=tight_config),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.load_skills", return_value=([], [])),
         patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
         patch("prevue.review.conclude_review_check", return_value=True),
@@ -901,7 +902,9 @@ def test_run_review_partial_degrade_bills_routes_and_retains_general() -> None:
     mock_repo = _mock_repo()
     mock_sticky = _mock_sticky()
 
-    partial_disclosure = "classification fallback partially degraded — some files reviewed as general"
+    partial_disclosure = (
+        "classification fallback partially degraded — some files reviewed as general"
+    )
 
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),

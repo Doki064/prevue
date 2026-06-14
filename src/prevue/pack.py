@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathspec import GitIgnoreSpec
 
 from prevue.classify.models import CANONICAL_LABEL_ORDER, canonical_index
-from prevue.engines.tokens import estimate_tokens
+from prevue.engines.prompt import estimate_file_prompt_tokens, estimate_prompt_overhead_tokens
 from prevue.models import ChangedFile
 
 WeightFn = Callable[[ChangedFile], object]
@@ -45,13 +45,33 @@ def pack_files(
     skipped: list[ChangedFile] = []
     used = 0
     for f in ranked:
-        patch_cost = estimate_tokens(f.patch or "")
-        # Account for path/status framing so patch-less files are never free.
-        structural_cost = estimate_tokens(f"{f.path}\n{f.status}\n")
-        cost = max(patch_cost + structural_cost, 1)
+        cost = estimate_file_prompt_tokens(f)
         if used + cost <= budget_tokens:
             packed.append(f)
             used += cost
         else:
             skipped.append(f)
     return packed, skipped
+
+
+def trim_packed_files(
+    packed: list[ChangedFile],
+    *,
+    instructions: str,
+    budget_tokens: int,
+    weight: WeightFn,
+) -> tuple[list[ChangedFile], list[ChangedFile]]:
+    """Drop lowest-priority packed files when matched skills inflate prompt overhead."""
+    overhead = estimate_prompt_overhead_tokens(instructions=instructions)
+    diff_budget = max(0, budget_tokens - overhead)
+    kept: list[ChangedFile] = []
+    dropped: list[ChangedFile] = []
+    used = 0
+    for f in sorted(packed, key=weight):
+        cost = estimate_file_prompt_tokens(f)
+        if used + cost <= diff_budget:
+            kept.append(f)
+            used += cost
+        else:
+            dropped.append(f)
+    return kept, dropped

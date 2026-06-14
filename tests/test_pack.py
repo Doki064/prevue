@@ -32,7 +32,7 @@ def test_packs_whole_files_to_budget() -> None:
         ),
     ]
 
-    packed, skipped = pack_files(files, weight=lambda f: f.path, budget_tokens=250)
+    packed, skipped = pack_files(files, weight=lambda f: f.path, budget_tokens=300)
 
     assert len(packed) == 2
     assert len(skipped) == 1
@@ -63,7 +63,7 @@ def test_priority_security_first() -> None:
             return (0, f.path)
         return (1, f.path)
 
-    packed, skipped = pack_files([docs, security], weight=weight, budget_tokens=150)
+    packed, skipped = pack_files([docs, security], weight=weight, budget_tokens=200)
 
     assert len(packed) == 1
     assert packed[0].path == "src/auth/login.py"
@@ -92,7 +92,7 @@ def test_custom_label_outranks_unmatched() -> None:
 
     weight = make_file_weight({"payments": ["payments/**"]})
     # Budget fits exactly one of the two equally sized files.
-    packed, skipped = pack_files([unmatched, custom], weight=weight, budget_tokens=150)
+    packed, skipped = pack_files([unmatched, custom], weight=weight, budget_tokens=200)
 
     assert [f.path for f in packed] == ["payments/charge.py"]
     assert [f.path for f in skipped] == ["misc/notes.txt"]

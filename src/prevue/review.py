@@ -19,8 +19,9 @@ from prevue.classify.llm_fallback import (
 )
 from prevue.classify.models import CANONICAL_LABEL_ORDER, GENERAL_LABEL
 from prevue.classify.router import route
-from prevue.config import load_config, resolve_consumer_config_path
+from prevue.config import SkillsConfig, load_config, resolve_consumer_config_path
 from prevue.engines.base import EngineAdapter
+from prevue.engines.prompt import estimate_prompt_overhead_tokens
 from prevue.engines.registry import get_adapter
 from prevue.gate import GateResult, PlacedFinding, apply_gate
 from prevue.github.checks import conclude_review_check, conclude_skip_check
@@ -34,7 +35,7 @@ from prevue.github.comments import (
 from prevue.github.diff import fetch_diff
 from prevue.github.positions import build_valid_lines
 from prevue.models import ReviewRequest
-from prevue.pack import make_file_weight, pack_files
+from prevue.pack import make_file_weight, pack_files, trim_packed_files
 from prevue.skills.loader import assemble_instructions, load_skills, select_skills
 from prevue.skip import should_skip
 
@@ -45,6 +46,13 @@ BASELINE_INSTRUCTIONS = (
 )
 
 FORK_UNSUPPORTED_MSG = "Fork PRs are unsupported in v1; skipping review."
+
+
+def _skill_reserve_tokens(skills_config: SkillsConfig | object) -> int:
+    """Conservative consumer skill byte ceiling as tokens (bytes/4)."""
+    if isinstance(skills_config, SkillsConfig):
+        return skills_config.max_total_consumer_bytes // 4
+    return SkillsConfig().max_total_consumer_bytes // 4
 
 
 def _consumer_skills_root() -> Path | None:
@@ -128,11 +136,10 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     classify_tokens = 0
 
     weight = make_file_weight(ruleset.label_rules)
-    # Reserve headroom for baseline instructions + matched skill bodies (not diff hunks).
-    _instruction_overhead = 16_000
-    pack_budget = review_cfg.max_input_tokens - review_cfg.output_reserve_tokens
-    if pack_budget > _instruction_overhead:
-        pack_budget -= _instruction_overhead
+    available = review_cfg.max_input_tokens - review_cfg.output_reserve_tokens
+    skill_reserve = _skill_reserve_tokens(config.skills)
+    overhead = estimate_prompt_overhead_tokens(instructions=BASELINE_INSTRUCTIONS) + skill_reserve
+    pack_budget = available - overhead if available > overhead else available
     packed_files, skipped_files = pack_files(
         reduced.files,
         weight=weight,
@@ -145,6 +152,42 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         else None
     )
 
+    if not packed_files:
+        upsert_skip_note(pr, reason="PR too large to review within budget")
+        skip_published = conclude_skip_check(
+            get_repo(ctx),
+            diff.head_sha,
+            conclusion="neutral",
+            reason="PR too large to review within budget",
+        )
+        if not skip_published:
+            raise RuntimeError("Failed to publish skip check run")
+        return
+
+    skills, cap_skipped = load_skills(
+        consumer_skills_root=_consumer_skills_root(),
+        skills_config=config.skills,
+        return_skipped=True,
+    )
+    matched = select_skills(skills, [f.path for f in packed_files])
+    instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
+    trimmed, extra_skipped = trim_packed_files(
+        packed_files,
+        instructions=instructions,
+        budget_tokens=available,
+        weight=weight,
+    )
+    if extra_skipped:
+        skipped_files = skipped_files + extra_skipped
+        skipped_paths = [f.path for f in skipped_files]
+        if skipped_paths and not skipped_reason:
+            skipped_reason = (
+                "Files ranked by classification risk; whole files dropped when over token budget."
+            )
+    packed_files = trimmed
+    matched = select_skills(skills, [f.path for f in packed_files])
+    skill_ratios = _skill_ratios(skills, matched)
+    instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
     if not packed_files:
         upsert_skip_note(pr, reason="PR too large to review within budget")
         skip_published = conclude_skip_check(
@@ -200,15 +243,6 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     result_cls.dropped_count = len(dropped)
 
     packed_diff = reduced.model_copy(update={"files": packed_files})
-
-    skills, cap_skipped = load_skills(
-        consumer_skills_root=_consumer_skills_root(),
-        skills_config=config.skills,
-        return_skipped=True,
-    )
-    matched = select_skills(skills, [f.path for f in packed_files])
-    skill_ratios = _skill_ratios(skills, matched)
-    instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
 
     req = ReviewRequest(
         diff=packed_diff,

@@ -32,9 +32,7 @@ def _render_check_output(
     if sticky_url:
         summary += f"\n\nFull findings index in the [Prevue Review comment]({sticky_url})."
     elif sticky_failed:
-        summary += (
-            "\n\n⚠️ Prevue summary comment failed to post; see workflow logs for details."
-        )
+        summary += "\n\n⚠️ Prevue summary comment failed to post; see workflow logs for details."
 
     return {"title": title, "summary": summary}
 
