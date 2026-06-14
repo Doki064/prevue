@@ -72,7 +72,7 @@ def estimate_file_prompt_tokens(f: ChangedFile) -> int:
 
     list_line = f"- path={_escape_line(f.path)} status={_escape_line(f.status)}"
     if f.patch:
-        block = f"### {f.path}\n{_safe_diff_block(f.patch)}"
+        block = f"### path={_escape_line(f.path)}\n{_safe_diff_block(f.patch)}"
     else:
         block = ""
     return max(estimate_tokens(list_line) + estimate_tokens(block), 1)
@@ -105,7 +105,9 @@ def _build_prompt(req: ReviewRequest) -> str:
         f"- path={_escape_line(f.path)} status={_escape_line(f.status)}" for f in req.diff.files
     )
     hunks = "\n\n".join(
-        f"### path={_escape_line(f.path)}\n{_safe_diff_block(f.patch)}" for f in req.diff.files if f.patch
+        f"### path={_escape_line(f.path)}\n{_safe_diff_block(f.patch)}"
+        for f in req.diff.files
+        if f.patch
     )
     return (
         f"{req.instructions}\n\n"

@@ -171,6 +171,7 @@ def test_resolve_absolute_consumer_config_path_under_workspace(
     config_file.write_text("review:\n  max_inline_comments: 2\n")
 
     monkeypatch.setenv("GITHUB_WORKSPACE", str(workspace))
+    monkeypatch.delenv("PREVUE_CONSUMER_ROOT", raising=False)
     resolved = resolve_consumer_config_path(str(config_file), consumer_root=None)
     assert resolved == config_file.resolve()
 
