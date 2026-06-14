@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from prevue.models import Finding
 
@@ -16,7 +16,7 @@ SEVERITY_RANK: dict[str, int] = {"error": 0, "warning": 1, "info": 2}
 
 
 class ReviewConfig(BaseModel):
-    """Consumer review thresholds (D-12/D-13/D-16/D-18)."""
+    """Consumer review thresholds (D-12/D-13/D-16/D-18/D-20)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -24,6 +24,15 @@ class ReviewConfig(BaseModel):
     # Independent of min_severity_to_fail — fail evaluates ALL findings (D-14).
     min_severity_to_fail: Severity | None = None
     max_inline_comments: int = Field(default=10, ge=0)
+    # Default 120k tokens (~480k bytes at bytes/4) stays under MAX_PROMPT_BYTES (~250k tokens).
+    max_input_tokens: int = Field(default=120000, ge=1)
+    output_reserve_tokens: int = Field(default=12000, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_token_budget(self) -> "ReviewConfig":
+        if self.output_reserve_tokens > self.max_input_tokens:
+            raise ValueError("review.output_reserve_tokens must be <= review.max_input_tokens")
+        return self
 
 
 def load_review_config(consumer_path: str | None = None) -> ReviewConfig:
@@ -41,7 +50,13 @@ def load_review_config(consumer_path: str | None = None) -> ReviewConfig:
     return ReviewConfig.model_validate(consumer["review"])
 
 
-def conclude(findings: list[Finding], cfg: ReviewConfig, *, degraded: bool) -> str:
+def conclude(
+    findings: list[Finding],
+    cfg: ReviewConfig,
+    *,
+    degraded: bool = False,
+    partial: bool = False,
+) -> str:
     """failure > neutral > success. Branch protection treats neutral as passing."""
     if degraded:
         return "neutral"
@@ -50,6 +65,8 @@ def conclude(findings: list[Finding], cfg: ReviewConfig, *, degraded: bool) -> s
     ):
         return "failure"
     if findings:
+        return "neutral"
+    if partial:
         return "neutral"
     return "success"
 
@@ -80,10 +97,11 @@ def apply_gate(
     *,
     degraded: bool = False,
     dropped_findings: int = 0,
+    partial: bool = False,
 ) -> GateResult:
     """Fixed-order gate pipeline: verdict/counts → threshold → position → budget."""
     # D-14: conclusion and severity_counts over ALL findings before partitioning.
-    conclusion = conclude(findings, cfg, degraded=degraded)
+    conclusion = conclude(findings, cfg, degraded=degraded, partial=partial)
     severity_counts = {"error": 0, "warning": 0, "info": 0}
     for finding in findings:
         severity_counts[finding.severity] += 1

@@ -48,6 +48,46 @@ Include `ready_for_review` in `pull_request.types` so draft→ready PRs trigger 
 
 `config-path` must be relative to the consumer checkout (no `..`). It is read from the PR base branch for security, not from the PR head branch. Config edits in the same PR take effect after merge.
 
+## Starter config (prevue.yml)
+
+Prevue loads `.github/prevue.yml` from your **base branch** (see `config-path` above). Copy the starter below or use the full file in the repo:
+
+**Full starter:** [docs/examples/prevue.yml](./examples/prevue.yml)
+
+```yaml
+# Minimal copy — see examples/prevue.yml for commented defaults
+review:
+  max_input_tokens: 120000
+  output_reserve_tokens: 12000
+  min_severity_to_comment: warning
+  min_severity_to_fail: null
+  max_inline_comments: 10
+
+skills:
+  exclude: []   # bundle/filename keys, e.g. security/committed-secrets.md
+  max_skill_bytes: 65536
+  max_total_consumer_bytes: 262144
+  max_consumer_skills: 50
+
+classification:
+  fallback:
+    enabled: true
+    model: null
+
+engine:
+  name: copilot-cli
+
+skip:
+  review_bots: []
+  skip_labels:
+    - skip-review
+  skip_title_patterns: []
+```
+
+- **Knob semantics:** [configuration.md](./configuration.md)
+- **Custom skills:** [skills.md](./skills.md)
+- **`skills.exclude`:** list paths like `security/committed-secrets.md` to drop a skill regardless of built-in or consumer source.
+
 ## Required permissions
 
 The caller workflow must grant these scopes to the reusable workflow:
