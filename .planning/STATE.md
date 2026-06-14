@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: "Phase 06 shipped — PR #13"
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-06-13T21:18:13.716Z"
-last_activity: 2026-06-13
+status: executing
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-06-14T23:09:23.308Z"
+last_activity: 2026-06-14
 progress:
   total_phases: 7
-  completed_phases: 6
-  total_plans: 26
-  completed_plans: 26
-  percent: 86
+  completed_phases: 7
+  total_plans: 33
+  completed_plans: 33
+  percent: 100
 ---
 
 # Project State
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-12)
 
 **Core value:** Optimal memory context and token usage when integrating with AI — load only the review skills the PR actually needs — while keeping review quality on par with a full-context review.
-**Current focus:** Phase 07 — customization & hardening
+**Current focus:** Phase 07 — customization-hardening
 
 ## Current Position
 
-Phase: 7 (customization-&-hardening)
+Phase: 07
 Plan: Not started
-Status: Phase 06 shipped — PR #13
-Last activity: 2026-06-13 - Completed quick task 260613-w0q: fix Phase 6 self-review findings
+Status: Executing Phase 07
+Last activity: 2026-06-14
 
-Progress: [██████████████] 86% (6/7 phases)
+Progress: [██████████████] 90% (6/7 phases)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 28
+- Total plans completed: 36
 - Average duration: 9 min
 - Total execution time: 1.28 hours
 
@@ -50,6 +50,7 @@ Progress: [██████████████] 86% (6/7 phases)
 | 03 | 3 | - | - |
 | 3 | 3 | - | - |
 | 06 | 4 | - | - |
+| 07 | 7 | - | - |
 
 **Recent Trend:**
 
@@ -64,6 +65,9 @@ Progress: [██████████████] 86% (6/7 phases)
 | Phase 04-structured-findings-merge-gate P03 | 15min | 3 tasks | 3 files |
 | Phase 04-structured-findings-merge-gate P04 | 25min | 3 tasks | 2 files |
 | Phase 04-structured-findings-merge-gate P05 | 20min | 3 tasks | 7 files |
+
+| Phase 07-customization-hardening P01 | 15min | 3 tasks | 12 files |
+| Phase 07-customization-hardening P02 | 25min | 3 tasks | 9 files |
 
 *Updated after each plan completion*
 | Phase 01-walking-skeleton-review-loop P05 | 15min | 2 tasks | 3 files |
@@ -123,6 +127,10 @@ Recent decisions affecting current work:
 - [06-03]: run_review single-read load_config(.github/prevue.yml); same adapter for fallback (D-10)
 - [06-03]: Classification disclosure on sticky Metadata line (Open Question 3 lock)
 
+- [07-02]: make_file_weight re-runs GitIgnoreSpec per file for pack priority (A4)
+- [07-02]: partial=True degrades would-be success to neutral (D-23)
+- [07-02]: No-fit PR reuses neutral skip path with budget disclosure (D-24)
+
 ### Pending Todos
 
 None yet.
@@ -149,6 +157,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-14T00:15:00.000Z
-Stopped at: Completed 06-03-PLAN.md
-Resume file: .planning/phases/06-reusable-workflow-hybrid-classification/06-CONTEXT.md
+Last session: 2026-06-15T12:00:00.000Z
+Stopped at: Completed 07-02-PLAN.md
+Resume file: .planning/phases/07-customization-hardening/07-03-PLAN.md

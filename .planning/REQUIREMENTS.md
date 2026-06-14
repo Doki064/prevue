@@ -18,7 +18,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [x] **DIFF-01**: Pipeline fetches the PR diff and changed-file metadata via the GitHub API on PR events (no checkout of untrusted code required for diff analysis)
 - [x] **DIFF-02**: Pipeline applies default path filters (lockfiles, generated, vendored, binaries) and consumer-defined ignore globs before classification
-- [ ] **DIFF-03**: Pipeline enforces a token budget with prioritized file packing and explicitly discloses "N files not reviewed" in the summary
+- [x] **DIFF-03**: Pipeline enforces a token budget with prioritized file packing and explicitly discloses "N files not reviewed" in the summary
   - *Note (added 2026-06-11, Phase 1 discussion):* when input and output share a token pool, the budget must reserve tokens for the review output so packed input cannot starve the response
 
 ### Classification
@@ -33,7 +33,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **SKIL-01**: Skill loader loads only the matched skill bundles into the review context (SKILL.md-style markdown bundles with routing metadata)
 - [x] **SKIL-02**: Framework ships built-in skill bundles: security, frontend, backend, data, infra
   - *Note (added 2026-06-11, Phase 1 discussion):* the built-in security bundle must instruct the review to flag secrets/credentials committed in the diff (alert, not redact)
-- [ ] **SKIL-03**: Consumer repos can add custom skills and override built-in bundles via `.github/prevue/skills/`
+- [x] **SKIL-03**: Consumer repos can add custom skills and override built-in bundles via `.github/prevue/skills/`
 - [x] **SKIL-04**: Skills are loaded from the trusted base ref only; PR-modified skill files are never executed in the same run
 
 ### Engine Adapter
@@ -48,7 +48,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **OUTP-01**: Review posts a sticky summary comment (updated in place on subsequent runs) with verdict, classification labels, and findings overview
 - [x] **OUTP-02**: Review posts inline line-level comments via the Reviews API, with finding positions validated against diff hunks (invalid positions fall back to the summary)
 - [x] **OUTP-03**: Review reports pass/fail/neutral status usable as a merge gate (blocking is opt-in via severity threshold)
-- [ ] **OUTP-04**: Summary comment includes token/cost transparency: tokens used, skills loaded vs skipped
+- [x] **OUTP-04**: Summary comment includes token/cost transparency: tokens used, skills loaded vs skipped
 
 ### Noise Control
 
@@ -59,7 +59,7 @@ Requirements for initial release. Each maps to roadmap phases.
 ### Security
 
 - [x] **SECR-01**: Workflow uses the `pull_request` trigger only (no `pull_request_target`); fork PRs are documented as unsupported in v1
-- [ ] **SECR-02**: Untrusted PR text (titles, bodies, comments) is never interpolated into engine prompts as instructions; prompt-injection mitigations documented and tested
+- [x] **SECR-02**: Untrusted PR text (titles, bodies, comments) is never interpolated into engine prompts as instructions; prompt-injection mitigations documented and tested
 
 ## v2 Requirements
 
@@ -68,6 +68,7 @@ Deferred to future release. Tracked but not in current roadmap.
 ### Review Lifecycle
 
 - **LIFE-01**: Incremental review on new pushes (diff since last-reviewed SHA, stored in sticky-comment marker)
+  - *Note (added 2026-06-14, Phase 7 discussion):* today a new push re-classifies AND re-reviews the entire PR even when the new commit doesn't touch earlier files — redundant token spend. Scope **both** classification and review to the incremental diff since the last-reviewed SHA. The "unless the new change addresses a prior finding" case is covered by LIFE-02 (dedupe) + LIFE-04 (resolve outdated threads). Cross-file call-graph impact ("a change here references a prior finding's function over there") stays out of scope — see "Full codebase graph/indexing" under Out of Scope.
 - **LIFE-02**: Comment dedupe using existing PR comments as engine context plus deterministic fingerprint backstop
 - **LIFE-03**: Manual `/review` comment trigger for re-runs
 - **LIFE-04**: Auto-resolve outdated inline threads when the underlying lines change
@@ -125,10 +126,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | WKFL-04 | Phase 6 | Complete |
 | CLSF-02 | Phase 6 | Complete |
 | NOIS-01 | Phase 6 | Complete |
-| SKIL-03 | Phase 7 | Pending |
-| SECR-02 | Phase 7 | Pending |
-| OUTP-04 | Phase 7 | Pending |
-| DIFF-03 | Phase 7 | Pending |
+| SKIL-03 | Phase 7 | Complete |
+| SECR-02 | Phase 7 | Complete |
+| OUTP-04 | Phase 7 | Complete |
+| DIFF-03 | Phase 7 | Complete |
 
 **Coverage:**
 
