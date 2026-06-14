@@ -106,6 +106,15 @@ def test_cursor_install_uses_official_curl_not_npm_impostor() -> None:
     assert "npm install -g cursor-agent" not in text
 
 
+def test_cursor_install_downloads_then_execs_not_pipe_to_bash() -> None:
+    """Hardening guard: fetch installer to a file then exec, never curl | bash."""
+    text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
+    assert "cursor.com/install -o" in text or "-o " in text.split("cursor.com/install", 1)[1]
+    # No pipe-to-bash of the install endpoint.
+    assert "cursor.com/install -fsS | bash" not in text
+    assert "cursor.com/install | bash" not in text
+
+
 def test_self_checkout_ref_not_main() -> None:
     wf = _load_reusable_workflow()
     prevue_refs: list[str] = []

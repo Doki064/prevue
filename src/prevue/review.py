@@ -16,7 +16,7 @@ from prevue.gate import GateResult, PlacedFinding, apply_gate
 from prevue.github.checks import conclude_review_check, conclude_skip_check
 from prevue.github.client import get_authenticated_pull, get_repo, load_pr_context
 from prevue.github.comments import (
-    _inline_location_key,
+    inline_location_key,
     post_inline_review,
     upsert_skip_note,
     upsert_sticky,
@@ -38,7 +38,7 @@ FORK_UNSUPPORTED_MSG = "Fork PRs are unsupported in v1; skipping review."
 
 def _inline_key(finding) -> tuple[str, int, str]:
     """Location key matching post_inline_review's failed-key set."""
-    return _inline_location_key(finding.path, finding.line, finding.side)
+    return inline_location_key(finding.path, finding.line, finding.side)
 
 
 class ForkPrUnsupported(Exception):

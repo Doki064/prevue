@@ -231,6 +231,79 @@ def test_run_review_inline_post_failure_downgrades_sticky_placements() -> None:
     assert all(placed.placement != "inline" for placed in check_gate.placed)
 
 
+class TwoFindingsEngine:
+    name = "two-findings"
+
+    def review(self, req: ReviewRequest) -> ReviewResult:
+        return ReviewResult(
+            summary_markdown="Two issues.",
+            findings=[
+                Finding(
+                    path="src/multi.py",
+                    line=1,
+                    side="RIGHT",
+                    severity="warning",
+                    title="First",
+                    body="First issue.",
+                ),
+                Finding(
+                    path="src/multi.py",
+                    line=2,
+                    side="RIGHT",
+                    severity="warning",
+                    title="Second",
+                    body="Second issue.",
+                ),
+            ],
+            engine_meta={"model": "fake", "duration_s": 0.1},
+        )
+
+
+def _two_line_diff() -> DiffBundle:
+    return DiffBundle(
+        pr_number=PR_NUMBER,
+        base_sha=BASE_SHA,
+        head_sha=HEAD_SHA,
+        files=[
+            ChangedFile(
+                path="src/multi.py",
+                status="added",
+                additions=2,
+                deletions=0,
+                patch="@@ -0,0 +1,2 @@\n+new1\n+new2",
+            )
+        ],
+    )
+
+
+def test_run_review_partial_inline_failure_downgrades_only_failed_finding() -> None:
+    """Only the finding whose inline post failed is downgraded; the rest stay inline."""
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_two_line_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch(
+            "prevue.review.post_inline_review",
+            return_value={("src/multi.py", 2, "RIGHT")},
+        ),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check"),
+    ):
+        run_review(adapter=TwoFindingsEngine())
+
+    gate = mock_upsert.call_args.kwargs["gate"]
+    inline_lines = {f.line for f in gate.inline}
+    assert inline_lines == {1}
+    placements = {(p.finding.line, p.placement) for p in gate.placed}
+    assert (1, "inline") in placements
+    assert (2, "summary-only") in placements
+
+
 def test_run_review_degraded_neutral_check_no_inline() -> None:
     mock_pr = MagicMock()
     mock_repo = _mock_repo()
