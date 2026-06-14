@@ -167,9 +167,7 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
             severity_counts=gate.severity_counts,
             placed=downgraded,
             inline=[
-                finding
-                for finding in gate.inline
-                if _inline_key(finding) not in failed_inline_keys
+                finding for finding in gate.inline if _inline_key(finding) not in failed_inline_keys
             ],
             config=gate.config,
             degraded=gate.degraded,
