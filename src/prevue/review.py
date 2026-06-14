@@ -128,7 +128,11 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     classify_tokens = 0
 
     weight = make_file_weight(ruleset.label_rules)
+    # Reserve headroom for baseline instructions + matched skill bodies (not diff hunks).
+    _instruction_overhead = 16_000
     pack_budget = review_cfg.max_input_tokens - review_cfg.output_reserve_tokens
+    if pack_budget > _instruction_overhead:
+        pack_budget -= _instruction_overhead
     packed_files, skipped_files = pack_files(
         reduced.files,
         weight=weight,
@@ -286,11 +290,15 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
             file=sys.stderr,
         )
         sticky = None
+        sticky_failed = True
+    else:
+        sticky_failed = False
     check_published = conclude_review_check(
         get_repo(ctx),
         diff.head_sha,
         gate,
         sticky_url=getattr(sticky, "html_url", None),
+        sticky_failed=sticky_failed,
     )
     if not check_published:
         raise RuntimeError("Failed to publish review check run")

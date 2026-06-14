@@ -150,9 +150,13 @@ def test_review_output_reserve_above_max_input_fails(tmp_path: Path) -> None:
         load_config(str(path))
 
 
-def test_resolve_absolute_consumer_config_path_requires_checkout_root(tmp_path: Path) -> None:
+def test_resolve_absolute_consumer_config_path_requires_checkout_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_file = tmp_path / "prevue.yml"
     config_file.write_text("review:\n  max_inline_comments: 5\n")
+    monkeypatch.delenv("PREVUE_CONSUMER_ROOT", raising=False)
+    monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
     with pytest.raises(ValueError, match="requires PREVUE_CONSUMER_ROOT or GITHUB_WORKSPACE"):
         resolve_consumer_config_path(str(config_file), consumer_root=None)
 

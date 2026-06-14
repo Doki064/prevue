@@ -59,6 +59,13 @@ class TestConcludeReviewCheck:
         assert url in summary
         assert f"]({url})" in summary
 
+    def test_sticky_failed_note_in_summary(self) -> None:
+        repo = MagicMock()
+        gate = _gate(conclusion="neutral")
+        conclude_review_check(repo, "sha123", gate, sticky_failed=True)
+        summary = repo.create_check_run.call_args.kwargs["output"]["summary"]
+        assert "summary comment failed to post" in summary
+
     def test_returns_false_when_check_run_post_fails(self, capsys) -> None:
         repo = MagicMock()
         repo.create_check_run.side_effect = GithubException(502, {"message": "Bad Gateway"}, None)
