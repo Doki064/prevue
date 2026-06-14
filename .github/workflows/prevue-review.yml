@@ -30,7 +30,10 @@ permissions:
 
 jobs:
   review:
-    if: ${{ !github.event.pull_request.draft }}
+    # Skip drafts; and forks (v1 does not review fork PRs — defense-in-depth so a
+    # caller that omits its own fork guard still avoids checkout/uv/CLI spend before
+    # the Python guard fires).
+    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Prevue framework
@@ -75,7 +78,12 @@ jobs:
               # Official Cursor CLI installer (https://cursor.com/docs/cli/overview).
               # No versioned npm package — npm `cursor-agent` is an unrelated impostor;
               # supply-chain guard: test_cursor_install_uses_official_curl_installer_in_reusable.
-              curl https://cursor.com/install -fsS | bash
+              # Download then exec (not curl | bash): avoids executing a truncated
+              # script and leaves a fetched artifact a checksum step can guard once
+              # Cursor publishes one. Residual risk (no upstream pin/checksum) is
+              # documented in docs/consumer-setup.md.
+              curl -fsS https://cursor.com/install -o "$RUNNER_TEMP/cursor-install.sh"
+              bash "$RUNNER_TEMP/cursor-install.sh"
               command -v cursor-agent
               ;;
             *)

@@ -55,6 +55,16 @@ def test_draft_if_guard() -> None:
     assert "if:" in text
 
 
+def test_fork_pr_job_guard() -> None:
+    """Reusable job must self-guard fork PRs (v1 forks-skip), not rely on callers."""
+    wf = _load_reusable_workflow()
+    guards = [str(job.get("if", "")) for job in wf.get("jobs", {}).values()]
+    assert any(
+        "github.event.pull_request.head.repo.full_name == github.repository" in guard
+        for guard in guards
+    )
+
+
 def test_named_secrets_not_required() -> None:
     wf = _load_reusable_workflow()
     on = wf.get("on") or wf.get(True)
@@ -94,6 +104,15 @@ def test_cursor_install_uses_official_curl_not_npm_impostor() -> None:
     text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
     assert "cursor.com/install" in text
     assert "npm install -g cursor-agent" not in text
+
+
+def test_cursor_install_downloads_then_execs_not_pipe_to_bash() -> None:
+    """Hardening guard: fetch installer to a file then exec, never curl | bash."""
+    text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
+    assert "cursor.com/install -o" in text or "-o " in text.split("cursor.com/install", 1)[1]
+    # No pipe-to-bash of the install endpoint.
+    assert "cursor.com/install -fsS | bash" not in text
+    assert "cursor.com/install | bash" not in text
 
 
 def test_self_checkout_ref_not_main() -> None:

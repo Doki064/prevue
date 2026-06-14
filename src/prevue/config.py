@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 from pathlib import Path
 
 import yaml
@@ -118,6 +119,16 @@ def load_config(consumer_path: str | None = None) -> PrevueConfig:
         loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
         if loaded and isinstance(loaded, dict):
             raw = loaded
+    else:
+        # Zero-config adoption is intentional (WKFL-01), but a missing file means
+        # built-in rules, default skip policy, and classification.fallback.enabled=true
+        # are silently in effect — surface that so consumers aren't surprised by
+        # unexpected LLM classify calls or un-applied custom rules.
+        print(
+            f"prevue: no config file at {path}; using built-in defaults "
+            "(classification.fallback.enabled=true)",
+            file=sys.stderr,
+        )
 
     ruleset = _ruleset_from_raw(raw)
     review = ReviewConfig.model_validate(raw.get("review", {}))

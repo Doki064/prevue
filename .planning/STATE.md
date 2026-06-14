@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-12)
 Phase: 7 (customization-&-hardening)
 Plan: Not started
 Status: Phase 06 shipped — PR #13
-Last activity: 2026-06-13
+Last activity: 2026-06-13 - Completed quick task 260613-w0q: fix Phase 6 self-review findings
 
 Progress: [██████████████] 86% (6/7 phases)
 
@@ -132,6 +132,12 @@ None yet.
 - [Research]: Copilot CLI behavior on clean Actions runners (auth, output stability, timeouts) is the highest unknown — spike landed in Phase 1 deliberately
 - [Research]: Diff-hunk → inline-comment position mapping is a known multi-day rabbit hole — budget real time in Phase 4
 - [Research]: REQUIREMENTS.md header said 26 v1 requirements; actual count is 27 — corrected in traceability
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260613-w0q | Fix Phase 6 Prevue self-review findings (#5 upsert, #2 fork guard, #4 config warn, #1 cursor install, #3/#6 docs) | 2026-06-13 | 8ee8968 | [260613-w0q-fix-phase-6-prevue-self-review-findings](./quick/260613-w0q-fix-phase-6-prevue-self-review-findings/) |
 
 ## Deferred Items
 

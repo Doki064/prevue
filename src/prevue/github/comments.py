@@ -238,7 +238,11 @@ def _is_prevue_inline_comment(comment) -> bool:
     return _is_trusted_sticky_actor(comment)
 
 
-def _inline_location_key(path: str, line: int, side: str | None) -> tuple[str, int, str]:
+def inline_location_key(path: str, line: int, side: str | None) -> tuple[str, int, str]:
+    """Stable (path, line, side) key for matching/upserting an inline comment.
+
+    Public so review.py can downgrade the exact findings post_inline_review reports
+    as failed without duplicating the keying logic (single source of truth)."""
     return (path, line, side or "RIGHT")
 
 
@@ -248,7 +252,7 @@ def _existing_prevue_inline_by_location(pr) -> dict[tuple[str, int, str], object
     for comment in pr.get_review_comments():
         if not _is_prevue_inline_comment(comment):
             continue
-        key = _inline_location_key(comment.path, comment.line, getattr(comment, "side", None))
+        key = inline_location_key(comment.path, comment.line, getattr(comment, "side", None))
         existing.setdefault(key, comment)
     return existing
 
@@ -268,11 +272,18 @@ def _delete_prevue_inline_comments(comments: list[object]) -> None:
             )
 
 
-def post_inline_review(pr, gate: GateResult) -> bool:
-    """Post, update, or remove inline findings — upsert by (path, line, side) on re-run."""
+def post_inline_review(pr, gate: GateResult) -> set[tuple[str, int, str]]:
+    """Post, update, or remove inline findings — upsert by (path, line, side) on re-run.
+
+    Returns the set of inline location keys that could NOT be represented on the PR
+    (edit failed → comment shows stale body; create batch failed → no comment exists).
+    An empty set means every inline finding is correctly placed. Callers downgrade only
+    the returned keys to summary-only, so partial success is not misreported as a total
+    failure (a successfully-posted comment must never be reported as summary-only).
+    """
     existing = _existing_prevue_inline_by_location(pr)
     current_keys = {
-        _inline_location_key(finding.path, finding.line, finding.side) for finding in gate.inline
+        inline_location_key(finding.path, finding.line, finding.side) for finding in gate.inline
     }
     stale_comments = [comment for key, comment in existing.items() if key not in current_keys]
 
@@ -281,7 +292,7 @@ def post_inline_review(pr, gate: GateResult) -> bool:
 
     for finding in gate.inline:
         body = render_inline_comment(finding)
-        key = _inline_location_key(finding.path, finding.line, finding.side)
+        key = inline_location_key(finding.path, finding.line, finding.side)
         prior = existing.get(key)
         if prior is not None:
             to_update.append((prior, body, finding))
@@ -295,6 +306,28 @@ def post_inline_review(pr, gate: GateResult) -> bool:
             }
         )
 
+    # Resilient upsert: edit existing first, then create, then ALWAYS attempt
+    # stale cleanup. A failure in any phase must not strand stale comments
+    # alongside fresh ones — the end state must converge to current findings.
+    failed_keys: set[tuple[str, int, str]] = set()
+    # Stale comments + any comment whose edit failed: a failed edit leaves the
+    # OLD body on the diff while the finding is downgraded to summary-only, so
+    # remove it (best-effort) to avoid a misleading authoritative-looking thread.
+    to_delete: list[object] = list(stale_comments)
+
+    for prior, body, finding in to_update:
+        try:
+            prior.edit(body)
+        except GithubException as exc:
+            failed_keys.add(inline_location_key(finding.path, finding.line, finding.side))
+            to_delete.append(prior)
+            status = getattr(exc, "status", "unknown")
+            print(
+                f"prevue: inline comment update failed "
+                f"(HTTP {status}, {finding.path}:{finding.line})",
+                file=sys.stderr,
+            )
+
     if to_create:
         count = len(to_create)
         summary_parts = [f"{count} new inline comment(s)"]
@@ -305,24 +338,14 @@ def post_inline_review(pr, gate: GateResult) -> bool:
         try:
             pr.create_review(body=body, event="COMMENT", comments=to_create)
         except GithubException as exc:
+            failed_keys.update(
+                inline_location_key(c["path"], c["line"], c.get("side")) for c in to_create
+            )
             status = getattr(exc, "status", "unknown")
             print(
                 f"prevue: inline review POST failed (HTTP {status}, {count} comment(s))",
                 file=sys.stderr,
             )
-            return False
 
-    for prior, body, finding in to_update:
-        try:
-            prior.edit(body)
-        except GithubException as exc:
-            status = getattr(exc, "status", "unknown")
-            print(
-                f"prevue: inline comment update failed "
-                f"(HTTP {status}, {finding.path}:{finding.line})",
-                file=sys.stderr,
-            )
-            return False
-
-    _delete_prevue_inline_comments(stale_comments)
-    return True
+    _delete_prevue_inline_comments(to_delete)
+    return failed_keys
