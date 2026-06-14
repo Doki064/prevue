@@ -339,8 +339,7 @@ def post_inline_review(pr, gate: GateResult) -> set[tuple[str, int, str]]:
             pr.create_review(body=body, event="COMMENT", comments=to_create)
         except GithubException as exc:
             failed_keys.update(
-                inline_location_key(str(c["path"]), int(c["line"]), str(c["side"]))
-                for c in to_create
+                inline_location_key(c["path"], c["line"], c.get("side")) for c in to_create
             )
             status = getattr(exc, "status", "unknown")
             print(

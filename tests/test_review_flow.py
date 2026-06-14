@@ -124,7 +124,7 @@ def test_run_review_happy_path_calls_upsert_once(fake_engine) -> None:
         patch("prevue.review.fetch_diff", return_value=sample_diff) as mock_fetch,
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr) as mock_get_pr,
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review.post_inline_review") as mock_inline,
+        patch("prevue.review.post_inline_review", return_value=set()) as mock_inline,
         patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
         patch("prevue.review.conclude_review_check") as mock_check,
     ):
