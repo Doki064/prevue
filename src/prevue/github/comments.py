@@ -268,8 +268,15 @@ def _delete_prevue_inline_comments(comments: list[object]) -> None:
             )
 
 
-def post_inline_review(pr, gate: GateResult) -> bool:
-    """Post, update, or remove inline findings — upsert by (path, line, side) on re-run."""
+def post_inline_review(pr, gate: GateResult) -> set[tuple[str, int, str]]:
+    """Post, update, or remove inline findings — upsert by (path, line, side) on re-run.
+
+    Returns the set of inline location keys that could NOT be represented on the PR
+    (edit failed → comment shows stale body; create batch failed → no comment exists).
+    An empty set means every inline finding is correctly placed. Callers downgrade only
+    the returned keys to summary-only, so partial success is not misreported as a total
+    failure (a successfully-posted comment must never be reported as summary-only).
+    """
     existing = _existing_prevue_inline_by_location(pr)
     current_keys = {
         _inline_location_key(finding.path, finding.line, finding.side) for finding in gate.inline
@@ -298,13 +305,13 @@ def post_inline_review(pr, gate: GateResult) -> bool:
     # Resilient upsert: edit existing first, then create, then ALWAYS attempt
     # stale cleanup. A failure in any phase must not strand stale comments
     # alongside fresh ones — the end state must converge to current findings.
-    ok = True
+    failed_keys: set[tuple[str, int, str]] = set()
 
     for prior, body, finding in to_update:
         try:
             prior.edit(body)
         except GithubException as exc:
-            ok = False
+            failed_keys.add(_inline_location_key(finding.path, finding.line, finding.side))
             status = getattr(exc, "status", "unknown")
             print(
                 f"prevue: inline comment update failed "
@@ -322,7 +329,10 @@ def post_inline_review(pr, gate: GateResult) -> bool:
         try:
             pr.create_review(body=body, event="COMMENT", comments=to_create)
         except GithubException as exc:
-            ok = False
+            failed_keys.update(
+                _inline_location_key(str(c["path"]), int(c["line"]), str(c["side"]))
+                for c in to_create
+            )
             status = getattr(exc, "status", "unknown")
             print(
                 f"prevue: inline review POST failed (HTTP {status}, {count} comment(s))",
@@ -330,4 +340,4 @@ def post_inline_review(pr, gate: GateResult) -> bool:
             )
 
     _delete_prevue_inline_comments(stale_comments)
-    return ok
+    return failed_keys

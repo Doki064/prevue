@@ -18,7 +18,7 @@ from prevue.engines.registry import DEFAULT_ENGINE
 from prevue.gate import ReviewConfig
 
 
-def test_absent_file_all_defaults(tmp_path: Path) -> None:
+def test_absent_file_all_defaults(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     missing = tmp_path / ".github" / "prevue.yml"
     cfg = load_config(str(missing))
     assert isinstance(cfg, PrevueConfig)
@@ -27,6 +27,10 @@ def test_absent_file_all_defaults(tmp_path: Path) -> None:
     assert cfg.fallback == FallbackConfig()
     assert cfg.engine == DEFAULT_ENGINE
     assert cfg.ruleset.label_rules  # built-in defaults present
+
+    err = capsys.readouterr().err
+    assert "no config file" in err
+    assert "fallback.enabled=true" in err
 
 
 def test_review_section_read(tmp_path: Path) -> None:

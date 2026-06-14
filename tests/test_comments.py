@@ -277,7 +277,7 @@ class TestPostInlineReview:
         pr = MagicMock()
         pr.get_review_comments.return_value = []
 
-        assert post_inline_review(pr, gate) is True
+        assert post_inline_review(pr, gate) == set()
 
         pr.create_review.assert_called_once()
         kwargs = pr.create_review.call_args.kwargs
@@ -301,18 +301,18 @@ class TestPostInlineReview:
         pr = MagicMock()
         pr.get_review_comments.return_value = []
 
-        assert post_inline_review(pr, gate) is True
+        assert post_inline_review(pr, gate) == set()
         pr.create_review.assert_not_called()
 
     def test_swallows_github_exception(self, capsys) -> None:
         from github import GithubException
 
-        gate = self._gate([self._finding()])
+        gate = self._gate([self._finding(path="src/a.py", line=10)])
         pr = MagicMock()
         pr.get_review_comments.return_value = []
         pr.create_review.side_effect = GithubException(422, {"message": "Validation Failed"}, None)
 
-        assert post_inline_review(pr, gate) is False
+        assert post_inline_review(pr, gate) == {("src/a.py", 10, "RIGHT")}
         err = capsys.readouterr().err
         assert "inline review POST failed" in err
         assert "1 comment" in err
@@ -329,7 +329,7 @@ class TestPostInlineReview:
         pr = MagicMock()
         pr.get_review_comments.return_value = [existing]
 
-        assert post_inline_review(pr, gate) is True
+        assert post_inline_review(pr, gate) == set()
 
         existing.edit.assert_called_once_with(render_inline_comment(finding))
         pr.create_review.assert_not_called()
@@ -349,7 +349,7 @@ class TestPostInlineReview:
         pr = MagicMock()
         pr.get_review_comments.return_value = [existing]
 
-        assert post_inline_review(pr, gate) is True
+        assert post_inline_review(pr, gate) == set()
 
         existing.edit.assert_called_once()
         pr.create_review.assert_called_once()
@@ -376,7 +376,7 @@ class TestPostInlineReview:
         pr = MagicMock()
         pr.get_review_comments.return_value = [stale]
 
-        assert post_inline_review(pr, gate) is True
+        assert post_inline_review(pr, gate) == set()
 
         pr.create_review.assert_not_called()
         stale.delete.assert_called_once()
@@ -397,13 +397,14 @@ class TestPostInlineReview:
         pr.get_review_comments.return_value = [stale]
         pr.create_review.side_effect = GithubException(422, {"message": "Validation Failed"}, None)
 
-        assert post_inline_review(pr, gate) is False
+        assert post_inline_review(pr, gate) == {("new.py", 5, "RIGHT")}
 
         stale.delete.assert_called_once()
 
     def test_edits_run_before_create_even_if_create_fails(self) -> None:
         """Existing comments are edited before creating new ones, so a create
-        failure cannot leave the existing thread showing stale content."""
+        failure cannot leave the existing thread showing stale content. Only the
+        failed create is reported as failed; the successful edit is not downgraded."""
         from github import GithubException
 
         findings = [
@@ -421,14 +422,14 @@ class TestPostInlineReview:
         pr.get_review_comments.return_value = [existing]
         pr.create_review.side_effect = GithubException(422, {"message": "Validation Failed"}, None)
 
-        assert post_inline_review(pr, gate) is False
+        assert post_inline_review(pr, gate) == {("new.py", 5, "RIGHT")}
 
         pr.create_review.assert_called_once()
         existing.edit.assert_called_once()
 
     def test_edit_failure_is_nonfatal_and_still_deletes_stale(self) -> None:
-        """An edit failure marks the run unsuccessful but does not abort the
-        function before stale cleanup runs."""
+        """An edit failure flags only that location as failed and does not abort
+        the function before stale cleanup runs."""
         from github import GithubException
 
         gate = self._gate([self._finding(path="existing.py", line=1, title="Existing")])
@@ -448,11 +449,37 @@ class TestPostInlineReview:
         pr = MagicMock()
         pr.get_review_comments.return_value = [existing, stale]
 
-        assert post_inline_review(pr, gate) is False
+        assert post_inline_review(pr, gate) == {("existing.py", 1, "RIGHT")}
 
         existing.edit.assert_called_once()
         stale.delete.assert_called_once()
         pr.create_review.assert_not_called()
+
+    def test_partial_success_reports_only_failed_keys(self) -> None:
+        """Edit succeeds + create fails → only the created (failed) location is
+        returned, so review.py keeps the edited finding inline (no misreport)."""
+        from github import GithubException
+
+        findings = [
+            self._finding(path="edited.py", line=1, title="Edited"),
+            self._finding(path="created.py", line=5, title="Created"),
+        ]
+        gate = self._gate(findings)
+        existing = MagicMock()
+        existing.path = "edited.py"
+        existing.line = 1
+        existing.side = "RIGHT"
+        existing.body = "old\n\n<sub>posted by Prevue</sub>"
+        existing.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [existing]
+        pr.create_review.side_effect = GithubException(422, {"message": "Validation Failed"}, None)
+
+        failed = post_inline_review(pr, gate)
+
+        assert failed == {("created.py", 5, "RIGHT")}
+        assert ("edited.py", 1, "RIGHT") not in failed
+        existing.edit.assert_called_once()
 
     def test_stale_delete_failure_does_not_block_post(self) -> None:
         from github import GithubException
@@ -468,7 +495,7 @@ class TestPostInlineReview:
         pr = MagicMock()
         pr.get_review_comments.return_value = [stale]
 
-        assert post_inline_review(pr, gate) is True
+        assert post_inline_review(pr, gate) == set()
 
         pr.create_review.assert_called_once()
         stale.delete.assert_called_once()

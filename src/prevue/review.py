@@ -15,7 +15,12 @@ from prevue.engines.registry import get_adapter
 from prevue.gate import GateResult, PlacedFinding, apply_gate
 from prevue.github.checks import conclude_review_check, conclude_skip_check
 from prevue.github.client import get_authenticated_pull, get_repo, load_pr_context
-from prevue.github.comments import post_inline_review, upsert_skip_note, upsert_sticky
+from prevue.github.comments import (
+    _inline_location_key,
+    post_inline_review,
+    upsert_skip_note,
+    upsert_sticky,
+)
 from prevue.github.diff import fetch_diff
 from prevue.github.positions import build_valid_lines
 from prevue.models import ReviewRequest
@@ -29,6 +34,11 @@ BASELINE_INSTRUCTIONS = (
 )
 
 FORK_UNSUPPORTED_MSG = "Fork PRs are unsupported in v1; skipping review."
+
+
+def _inline_key(finding) -> tuple[str, int, str]:
+    """Location key matching post_inline_review's failed-key set."""
+    return _inline_location_key(finding.path, finding.line, finding.side)
 
 
 class ForkPrUnsupported(Exception):
@@ -140,12 +150,15 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         degraded=result.degraded,
         dropped_findings=result.dropped_findings,
     )
-    inline_posted = post_inline_review(pr, gate)
-    if not inline_posted and gate.inline:
+    failed_inline_keys = post_inline_review(pr, gate)
+    if failed_inline_keys and gate.inline:
         downgraded = [
             PlacedFinding(
                 finding=placed.finding,
-                placement="summary-only" if placed.placement == "inline" else placed.placement,
+                placement="summary-only"
+                if placed.placement == "inline"
+                and _inline_key(placed.finding) in failed_inline_keys
+                else placed.placement,
             )
             for placed in gate.placed
         ]
@@ -153,7 +166,11 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
             conclusion=gate.conclusion,
             severity_counts=gate.severity_counts,
             placed=downgraded,
-            inline=[],
+            inline=[
+                finding
+                for finding in gate.inline
+                if _inline_key(finding) not in failed_inline_keys
+            ],
             config=gate.config,
             degraded=gate.degraded,
             dropped_findings=gate.dropped_findings,

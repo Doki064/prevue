@@ -168,9 +168,9 @@ def test_run_review_with_findings_posts_inline_then_sticky_then_check() -> None:
     mock_sticky = _mock_sticky()
     call_order: list[str] = []
 
-    def track_inline(*_args, **_kwargs) -> bool:
+    def track_inline(*_args, **_kwargs) -> set:
         call_order.append("inline")
-        return True
+        return set()
 
     def track_sticky(*_args, **_kwargs) -> MagicMock:
         call_order.append("sticky")
@@ -211,7 +211,10 @@ def test_run_review_inline_post_failure_downgrades_sticky_placements() -> None:
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review.post_inline_review", return_value=False) as mock_inline,
+        patch(
+            "prevue.review.post_inline_review",
+            return_value={("src/example.py", 1, "RIGHT")},
+        ) as mock_inline,
         patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
         patch("prevue.review.conclude_review_check") as mock_check,
     ):
@@ -502,7 +505,7 @@ def test_run_review_load_config_default_path() -> None:
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review.post_inline_review", return_value=True),
+        patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky),
         patch("prevue.review.conclude_review_check", return_value=True),
     ):
@@ -527,7 +530,7 @@ def test_run_review_fallback_skipped_when_all_matched() -> None:
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review.post_inline_review", return_value=True),
+        patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky),
         patch("prevue.review.conclude_review_check", return_value=True),
         patch("prevue.review.llm_classify") as mock_llm,
@@ -571,7 +574,7 @@ def test_run_review_fallback_fires_on_unmatched_paths() -> None:
         patch("prevue.review.fetch_diff", return_value=mixed_diff),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review.post_inline_review", return_value=True),
+        patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
         patch("prevue.review.conclude_review_check", return_value=True),
     ):
@@ -594,7 +597,7 @@ def test_engine_selection_via_prevue_engine(monkeypatch: pytest.MonkeyPatch) -> 
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review.post_inline_review", return_value=True),
+        patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky),
         patch("prevue.review.conclude_review_check", return_value=True),
         patch("prevue.review.get_adapter") as mock_get_adapter,
@@ -642,7 +645,7 @@ def test_run_review_raises_when_review_check_not_published() -> None:
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review.post_inline_review", return_value=True),
+        patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky),
         patch("prevue.review.conclude_review_check", return_value=False),
     ):
