@@ -83,8 +83,9 @@ def test_assemble_sections(fixture_skills) -> None:
 
 def test_missing_applies_to_raises(skills_fixture_root: Path) -> None:
     """D-12: skill with missing applies-to raises ValidationError on load."""
+    malformed_root = Path(__file__).parent / "fixtures" / "skills" / "consumer-malformed"
     with pytest.raises(ValidationError):
-        _load_fixture_bundle(skills_fixture_root / "malformed", "malformed")
+        _load_fixture_bundle(malformed_root / "malformed", "malformed")
 
 
 def test_loads_from_packaged_framework_dir() -> None:
