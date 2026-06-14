@@ -169,7 +169,7 @@ def render_body(
         if gate.degraded:
             metadata += "\nstructured findings unavailable (parse failure)"
     if classification_disclosure:
-        metadata += f"\n{classification_disclosure}"
+        metadata += f"\n{_escape_table_cell(classification_disclosure)}"
 
     if token_meta:
         review_tokens = token_meta.get("review", 0)

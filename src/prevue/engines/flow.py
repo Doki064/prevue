@@ -65,8 +65,10 @@ def review_with_retry(
 
     start = time.monotonic()
     retried = False
+    retry_prompt = ""
 
     stdout = invoke(prompt)
+    first_stdout = stdout
     prose, payload, fence_err = extract_json_fence(stdout)
 
     if fence_err:
@@ -80,7 +82,7 @@ def review_with_retry(
                 retried=False,
                 model_label=model_label,
                 prompt=prompt,
-                stdout=stdout,
+                stdout=first_stdout,
             )
 
         retried = True
@@ -94,7 +96,8 @@ def review_with_retry(
                 start,
                 retried=True,
                 model_label=model_label,
-                prompt=retry_prompt,
+                prompt=prompt + retry_prompt,
+                stdout=first_stdout,
             )
 
         prose, payload, fence_err = extract_json_fence(stdout)
@@ -106,9 +109,14 @@ def review_with_retry(
                 start,
                 retried=True,
                 model_label=model_label,
-                prompt=retry_prompt,
-                stdout=stdout,
+                prompt=prompt + retry_prompt,
+                stdout=first_stdout + stdout,
             )
+
+    def _tokens() -> dict[str, int | bool]:
+        if retried:
+            return _token_meta(prompt + retry_prompt, first_stdout + stdout)
+        return _token_meta(prompt, stdout)
 
     valid, dropped = validate_findings(payload or [])
     if payload and not valid:
@@ -121,7 +129,7 @@ def review_with_retry(
                 "model": model_label,
                 "duration_s": round(time.monotonic() - start, 1),
                 "retried": retried,
-                "tokens": _token_meta(prompt, stdout),
+                "tokens": _tokens(),
             },
         )
 
@@ -134,6 +142,6 @@ def review_with_retry(
             "model": model_label,
             "duration_s": round(time.monotonic() - start, 1),
             "retried": retried,
-            "tokens": _token_meta(prompt, stdout),
+            "tokens": _tokens(),
         },
     )

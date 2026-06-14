@@ -105,7 +105,7 @@ def _build_prompt(req: ReviewRequest) -> str:
         f"- path={_escape_line(f.path)} status={_escape_line(f.status)}" for f in req.diff.files
     )
     hunks = "\n\n".join(
-        f"### {f.path}\n{_safe_diff_block(f.patch)}" for f in req.diff.files if f.patch
+        f"### path={_escape_line(f.path)}\n{_safe_diff_block(f.patch)}" for f in req.diff.files if f.patch
     )
     return (
         f"{req.instructions}\n\n"
