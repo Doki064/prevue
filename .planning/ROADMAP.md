@@ -19,7 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Structured Findings & Merge Gate** - Schema-validated findings, position-validated inline comments, severity thresholds, comment budget, pass/fail/neutral check (completed 2026-06-13)
 - [x] **Phase 5: Multi-Engine Adapter Support** - Additional `EngineAdapter`s (Claude Code, Cursor, Gemini) via the same interface, config-selectable, validating engine-agnosticism before public packaging (completed 2026-06-13)
 - [x] **Phase 6: Reusable Workflow & Hybrid Classification** - `workflow_call` packaging, consumer config, LLM classification fallback, skip conditions — first shippable (completed 2026-06-13)
-- [ ] **Phase 7: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget
+- [x] **Phase 7: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget (completed 2026-06-14)
 
 ## Phase Details
 
@@ -219,7 +219,29 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. The summary comment reports tokens used and which skills were loaded vs skipped on every review
   4. Oversized PRs are reviewed within a token budget using prioritized file packing, with an explicit "N files not reviewed" disclosure in the summary
 
-**Plans**: TBD
+**Plans**: 7 plans (5 shipped + 2 gap closure)
+
+**Wave 1**
+
+- [x] 07-01-PLAN.md — Wave 0 scaffold: RED tests (pack/tokens/skills-merge/injection) + consumer fixtures + config knobs (SkillsConfig, budget caps)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 07-02-PLAN.md — DIFF-03 packing: estimate_tokens + pack_files + partial→neutral gate + no-fit skip + "N files not reviewed" disclosure (TDD)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 07-03-PLAN.md — OUTP-04 transparency: token meta (review+classify ~est) + per-bundle ratios + packed-set coverage statement (TDD)
+
+**Wave 4** *(parallel, blocked on Wave 3 / Wave 1)*
+
+- [x] 07-04-PLAN.md — SKIL-03 consumer skills: two-root per-file merge (override/custom) + skills.exclude + caps, base-ref-only loading (TDD)
+- [x] 07-05-PLAN.md — SECR-02 hardening: instruction-reassertion + adversarial CI suite + D-08 tool-posture human-verify + SECURITY.md + docs (TDD, not autonomous)
+
+**Wave 5** *(gap closure from 07-UAT.md)*
+
+- [x] 07-06-PLAN.md — UAT gap 1: engine name + skill source tags in sticky Metadata (SKIL-03/OUTP-04, TDD)
+- [x] 07-07-PLAN.md — UAT gap 2: copy-paste starter docs/examples/prevue.yml + consumer-setup section (WKFL-03)
 
 ## Progress
 
@@ -234,7 +256,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 4. Structured Findings & Merge Gate | 5/5 | Complete    | 2026-06-13 |
 | 5. Multi-Engine Adapter Support | 3/3 | Complete   | 2026-06-13 |
 | 6. Reusable Workflow & Hybrid Classification | 4/4 | Complete    | 2026-06-13 |
-| 7. Customization & Hardening | 0/TBD | Not started | - |
+| 7. Customization & Hardening | 7/7 | Complete    | 2026-06-14 |
 
 ---
 *Roadmap created: 2026-06-12*
