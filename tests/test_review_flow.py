@@ -748,7 +748,10 @@ def test_fallback_only_on_packed() -> None:
         patch("prevue.review.load_config", return_value=tight_config),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review.load_skills", return_value=([], [])),
+        patch(
+            "prevue.review.load_skills",
+            side_effect=lambda *a, **kw: ([], []) if kw.get("return_skipped") else [],
+        ),
         patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
         patch("prevue.review.conclude_review_check", return_value=True),

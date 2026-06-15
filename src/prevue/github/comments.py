@@ -206,7 +206,7 @@ def render_body(
 
     if cap_skipped:
         metadata += f"\nSkipped {len(cap_skipped)} oversized consumer skill(s): " + ", ".join(
-            cap_skipped
+            _escape_table_cell(s) for s in cap_skipped
         )
 
     coverage_section = ""

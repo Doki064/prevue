@@ -71,10 +71,11 @@ def conclude_skip_check(
     dropped_count: int | None = None,
     conclusion: str = "success",
     reason: str | None = None,
+    title: str | None = None,
 ) -> bool:
     """Post completed skip check — success for empty-PR, neutral for bot/label/title (D-09/D-16)."""
     if reason is not None:
-        output = {"title": "review skipped", "summary": reason}
+        output = {"title": title or "review skipped", "summary": reason}
     else:
         output = {
             "title": "no reviewable files",

@@ -24,6 +24,7 @@ from prevue.config import SkillsConfig, load_config, resolve_consumer_config_pat
 from prevue.engines.base import EngineAdapter
 from prevue.engines.prompt import estimate_prompt_overhead_tokens
 from prevue.engines.registry import get_adapter
+from prevue.engines.tokens import estimate_tokens
 from prevue.gate import GateResult, PlacedFinding, apply_gate
 from prevue.github.checks import conclude_review_check, conclude_skip_check
 from prevue.github.client import get_authenticated_pull, get_repo, load_pr_context
@@ -137,10 +138,16 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     classify_tokens = 0
 
     consumer_skills_root = _consumer_skills_root()
+    builtin_skills = load_skills(consumer_skills_root=None)
+    builtin_skill_tokens = sum(estimate_tokens(s.body) for s in builtin_skills)
     weight = make_file_weight(ruleset.label_rules)
     available = review_cfg.max_input_tokens - review_cfg.output_reserve_tokens
     skill_reserve = _skill_reserve_tokens(config.skills) if consumer_skills_root is not None else 0
-    overhead = estimate_prompt_overhead_tokens(instructions=BASELINE_INSTRUCTIONS) + skill_reserve
+    overhead = (
+        estimate_prompt_overhead_tokens(instructions=BASELINE_INSTRUCTIONS)
+        + builtin_skill_tokens
+        + skill_reserve
+    )
     pack_budget = available - overhead if available > overhead else 0
     packed_files, skipped_files = pack_files(
         reduced.files,
@@ -180,6 +187,7 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
             diff.head_sha,
             conclusion="failure",
             reason=reason,
+            title="review failed",
         )
         if not check_published:
             raise RuntimeError("Failed to publish skill-validation failure check run")
