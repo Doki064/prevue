@@ -57,7 +57,7 @@ def _skill_reserve_tokens(skills_config: SkillsConfig | object) -> int:
 
 
 def _consumer_skills_root() -> Path | None:
-    root_env = os.environ.get("PREVUE_CONSUMER_ROOT")
+    root_env = os.environ.get("PREVUE_CONSUMER_ROOT") or os.environ.get("GITHUB_WORKSPACE")
     if not root_env:
         return None
     skills_dir = Path(root_env) / ".github" / "prevue" / "skills"
