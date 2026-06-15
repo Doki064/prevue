@@ -96,3 +96,42 @@ def test_custom_label_outranks_unmatched() -> None:
 
     assert [f.path for f in packed] == ["payments/charge.py"]
     assert [f.path for f in skipped] == ["misc/notes.txt"]
+
+
+def test_readmit_then_trim_when_instructions_expand() -> None:
+    """readmit_files + trim_packed_files sequence: second trim corrects for instruction growth."""
+    from prevue.engines.prompt import estimate_file_prompt_tokens, estimate_prompt_overhead_tokens
+    from prevue.pack import readmit_files, trim_packed_files
+
+    small = ChangedFile(path="a.py", status="modified", additions=1, deletions=0, patch="+" * 200)
+    medium = ChangedFile(path="b.py", status="modified", additions=1, deletions=0, patch="+" * 200)
+
+    short_instr = "x"  # 1 token
+    small_cost = estimate_file_prompt_tokens(small)
+    medium_cost = estimate_file_prompt_tokens(medium)
+    overhead_short = estimate_prompt_overhead_tokens(instructions=short_instr)
+
+    # available_tokens fits exactly both files under short instructions
+    available_tokens = overhead_short + small_cost + medium_cost
+
+    new_packed, still_skipped = readmit_files(
+        [small],
+        [medium],
+        instructions=short_instr,
+        available_tokens=available_tokens,
+        weight=lambda f: f.path,
+    )
+    assert medium in new_packed, "medium re-admitted when budget exactly fits both"
+    assert not still_skipped
+
+    # big_instr adds 1 more token (8 chars → 2 tokens vs 1 char → 1 token), shrinking
+    # diff_budget by 1 so small_cost + medium_cost no longer fits.
+    big_instr = "x" * 8  # 8//4=2 tokens vs 1//4→1 token: overhead grows by 1
+    kept, dropped = trim_packed_files(
+        new_packed,
+        instructions=big_instr,
+        budget_tokens=available_tokens,
+        weight=lambda f: f.path,
+    )
+    assert medium in dropped, "medium dropped when instruction inflation shrinks diff budget by 1"
+    assert small in kept

@@ -243,6 +243,22 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         matched = select_skills(skills, [f.path for f in packed_files])
         skill_ratios = _skill_ratios(skills, matched)
         instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
+        # Second trim: re-admitted paths may activate new skills, growing instructions.
+        packed_files, trim2_skipped = trim_packed_files(
+            packed_files,
+            instructions=instructions,
+            budget_tokens=available,
+            weight=weight,
+        )
+        if trim2_skipped:
+            skipped_files = skipped_files + trim2_skipped
+            skipped_paths = [f.path for f in skipped_files]
+            skipped_reason = (
+                "Files ranked by classification risk; whole files dropped when over token budget."
+            )
+            matched = select_skills(skills, [f.path for f in packed_files])
+            skill_ratios = _skill_ratios(skills, matched)
+            instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
 
     if not packed_files:
         upsert_skip_note(pr, reason="PR too large to review within budget")
