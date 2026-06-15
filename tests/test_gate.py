@@ -105,6 +105,16 @@ class TestConclude:
         cfg = ReviewConfig(min_severity_to_fail="warning")
         assert conclude([_finding(severity="error")], cfg, degraded=True) == "neutral"
 
+    def test_partial_coverage_neutral(self) -> None:
+        cfg = ReviewConfig()
+        assert conclude([], cfg, degraded=False, partial=True) == "neutral"
+        assert conclude([], cfg, degraded=False, partial=False) == "success"
+        fail_cfg = ReviewConfig(min_severity_to_fail="error")
+        assert (
+            conclude([_finding(severity="error")], fail_cfg, degraded=False, partial=True)
+            == "failure"
+        )
+
 
 class TestApplyGate:
     def test_severity_counts_all_three_keys_all_findings(self) -> None:
@@ -201,6 +211,10 @@ class TestApplyGate:
         assert gate.conclusion == "neutral"
         assert gate.inline == []
         assert gate.degraded is True
+
+    def test_partial_coverage_neutral_via_apply_gate(self) -> None:
+        gate = apply_gate([], ReviewConfig(), {}, partial=True)
+        assert gate.conclusion == "neutral"
 
 
 class TestVerdictStrings:
