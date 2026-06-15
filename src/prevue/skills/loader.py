@@ -19,12 +19,22 @@ def _skills_root():
     return importlib.resources.files("prevue.skills")
 
 
-def _iter_skill_files(root: Path | object, bundle: str) -> Iterator[tuple[str, str, str]]:
+def _iter_skill_files(
+    root: Path | object,
+    bundle: str,
+    *,
+    consumer_root: Path | None = None,
+) -> Iterator[tuple[str, str, str]]:
     # Sort by name so byte-cap enforcement drops a deterministic set across runs
     # and machines (Path.iterdir() order is filesystem-dependent) (WR-04).
     for entry in sorted(root.iterdir(), key=lambda p: p.name):  # type: ignore[union-attr]
         if not entry.name.endswith(".md"):
             continue
+        if consumer_root is not None:
+            # Guard against symlinked skill files escaping the consumer root.
+            resolved = Path(entry).resolve()
+            if not resolved.is_relative_to(consumer_root):
+                continue
         yield bundle, entry.name, entry.read_text(encoding="utf-8")
 
 
@@ -47,7 +57,10 @@ def _load_from_tree(
         if not bundle_entry.is_dir():
             continue
         bundle = bundle_entry.name
-        for bundle_name, filename, text in _iter_skill_files(bundle_entry, bundle):
+        cr = Path(root).resolve() if is_consumer else None
+        for bundle_name, filename, text in _iter_skill_files(
+            bundle_entry, bundle, consumer_root=cr
+        ):
             key = f"{bundle_name}/{filename}"
             post = frontmatter.loads(text)
             # Measure the loaded body (frontmatter stripped) — that is what reaches

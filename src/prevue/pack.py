@@ -9,26 +9,33 @@ from pathspec import GitIgnoreSpec
 from prevue.classify.models import CANONICAL_LABEL_ORDER, canonical_index
 from prevue.engines.prompt import estimate_file_prompt_tokens, estimate_prompt_overhead_tokens
 from prevue.models import ChangedFile
+from prevue.skills.models import Skill
 
 WeightFn = Callable[[ChangedFile], object]
 
 
-def make_file_weight(label_rules: dict[str, list[str]]) -> WeightFn:
-    """Score files by re-running label_rules GitIgnoreSpec (A4 — no classify() change)."""
+def make_file_weight(
+    label_rules: dict[str, list[str]],
+    skills: list[Skill] | None = None,
+) -> WeightFn:
+    """Score files by label_rules + loaded skill applies-to globs (D-18)."""
     specs = {label: GitIgnoreSpec.from_lines(globs) for label, globs in label_rules.items()}
+    skill_specs = [GitIgnoreSpec.from_lines(s.applies_to) for s in (skills or [])]
     # Strictly worse than any matched label. A non-canonical custom label resolves
     # to canonical_index == len(CANONICAL_LABEL_ORDER), so the fallback must sit one
     # past that to keep matched custom rules ahead of truly unmatched files (WR-04).
     fallback_priority = len(CANONICAL_LABEL_ORDER) + 1
 
-    def weight(f: ChangedFile) -> tuple[int, int, str]:
+    def weight(f: ChangedFile) -> tuple[int, int, int, str]:
+        # Files covered by at least one skill come first (0) vs uncovered (1).
+        skill_match = 0 if any(sp.match_file(f.path) for sp in skill_specs) else 1
         best = fallback_priority
         for label, spec in specs.items():
             res = spec.check_file(f.path)
             if res.include:
                 best = min(best, canonical_index(label))
         churn = -(f.additions + f.deletions)
-        return (best, churn, f.path)
+        return (skill_match, best, churn, f.path)
 
     return weight
 

@@ -102,8 +102,8 @@ def render_finding_details(gate: GateResult) -> str:
             continue
         finding = placed.finding
         summary = escape_html(f"{finding.path}:{finding.line} — {finding.title}")
-        # Sanitize closing tags that could escape the <details> wrapper (adversarial LLM output).
-        content = render_inline_comment(finding).replace("</details>", "&lt;/details&gt;")
+        # Encode any HTML tag sequences in LLM output so they can't escape the <details> wrapper.
+        content = re.sub(r"<(?=[/a-zA-Z])", "&lt;", render_inline_comment(finding))
         blocks.append(f"<details><summary>{summary}</summary>\n\n{content}\n</details>")
     return "\n".join(blocks)
 

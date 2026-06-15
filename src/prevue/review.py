@@ -167,7 +167,7 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         return
 
     builtin_skill_tokens = sum(estimate_tokens(s.body) for s in skills if s.source == "builtin")
-    weight = make_file_weight(ruleset.label_rules)
+    weight = make_file_weight(ruleset.label_rules, skills=skills)
     available = review_cfg.max_input_tokens - review_cfg.output_reserve_tokens
     skill_reserve = _skill_reserve_tokens(config.skills) if consumer_skills_root is not None else 0
     overhead = (
