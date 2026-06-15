@@ -8,6 +8,8 @@ import subprocess
 from prevue.classify.models import CANONICAL_LABEL_ORDER, GENERAL_LABEL
 from prevue.engines.base import EngineAdapter
 from prevue.engines.errors import AuthError, EngineFailure
+from prevue.engines.prompt import build_classify_prompt
+from prevue.engines.tokens import estimate_tokens
 
 FALLBACK_DISCLOSURE = "classification fallback unavailable — reviewed as general"
 FALLBACK_FAILED_GLOB = "(llm fallback failed)"
@@ -17,6 +19,14 @@ CLASSIFY_BATCH_SIZE = 100
 
 def _chunk_paths(paths: list[str], batch_size: int) -> list[list[str]]:
     return [paths[i : i + batch_size] for i in range(0, len(paths), batch_size)]
+
+
+def estimate_classify_tokens(paths: list[str], *, batch_size: int = CLASSIFY_BATCH_SIZE) -> int:
+    """Estimate token cost of classifying paths via the LLM fallback."""
+    total = 0
+    for batch in _chunk_paths(paths, batch_size):
+        total += estimate_tokens(build_classify_prompt(batch))
+    return total
 
 
 def _validate_labels(

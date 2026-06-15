@@ -8,7 +8,15 @@ from collections.abc import Callable
 from prevue.engines.errors import EngineFailure
 from prevue.engines.parsing import extract_json_fence, validate_findings
 from prevue.engines.prompt import _build_retry_prompt
+from prevue.engines.tokens import estimate_tokens
 from prevue.models import ReviewRequest, ReviewResult
+
+
+def _token_meta(prompt: str, stdout: str = "") -> dict[str, int | bool]:
+    return {
+        "review": estimate_tokens(prompt) + estimate_tokens(stdout),
+        "estimated": True,
+    }
 
 
 def _degraded_result(
@@ -20,18 +28,22 @@ def _degraded_result(
     retried: bool,
     dropped_findings: int = 0,
     model_label: str,
+    prompt: str = "",
+    stdout: str = "",
 ) -> ReviewResult:
+    meta: dict[str, object] = {
+        "model": model_label,
+        "duration_s": round(time.monotonic() - start, 1),
+        "retried": retried,
+        "parse_error": parse_error,
+        "tokens": _token_meta(prompt, stdout),
+    }
     return ReviewResult(
         summary_markdown=prose,
         findings=[],
         degraded=True,
         dropped_findings=dropped_findings,
-        engine_meta={
-            "model": model_label,
-            "duration_s": round(time.monotonic() - start, 1),
-            "retried": retried,
-            "parse_error": parse_error,
-        },
+        engine_meta=meta,
     )
 
 
@@ -61,7 +73,14 @@ def review_with_retry(
         retry_prompt = _build_retry_prompt(prompt, fence_err)
         if len(retry_prompt.encode("utf-8")) > max_prompt_bytes:
             return _degraded_result(
-                prose, fence_err, req, start, retried=False, model_label=model_label
+                prose,
+                fence_err,
+                req,
+                start,
+                retried=False,
+                model_label=model_label,
+                prompt=prompt,
+                stdout=stdout,
             )
 
         retried = True
@@ -69,13 +88,26 @@ def review_with_retry(
             stdout = invoke(retry_prompt)
         except EngineFailure:
             return _degraded_result(
-                prose, fence_err, req, start, retried=True, model_label=model_label
+                prose,
+                fence_err,
+                req,
+                start,
+                retried=True,
+                model_label=model_label,
+                prompt=retry_prompt,
             )
 
         prose, payload, fence_err = extract_json_fence(stdout)
         if fence_err:
             return _degraded_result(
-                prose, fence_err, req, start, retried=True, model_label=model_label
+                prose,
+                fence_err,
+                req,
+                start,
+                retried=True,
+                model_label=model_label,
+                prompt=retry_prompt,
+                stdout=stdout,
             )
 
     valid, dropped = validate_findings(payload or [])
@@ -89,6 +121,7 @@ def review_with_retry(
                 "model": model_label,
                 "duration_s": round(time.monotonic() - start, 1),
                 "retried": retried,
+                "tokens": _token_meta(prompt, stdout),
             },
         )
 
@@ -101,5 +134,6 @@ def review_with_retry(
             "model": model_label,
             "duration_s": round(time.monotonic() - start, 1),
             "retried": retried,
+            "tokens": _token_meta(prompt, stdout),
         },
     )

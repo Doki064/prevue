@@ -1,0 +1,34 @@
+# Copy to `.github/prevue.yml` on your default branch.
+# Prevue reads this from the PR base ref at review time (not the PR head).
+# See docs/configuration.md for knob semantics and docs/skills.md for custom skills.
+
+review:
+  max_input_tokens: 120000
+  output_reserve_tokens: 12000
+  min_severity_to_comment: warning
+  min_severity_to_fail: null
+  max_inline_comments: 10
+
+skills:
+  exclude:
+    # - security/committed-secrets.md
+  max_skill_bytes: 65536
+  max_total_consumer_bytes: 262144
+  max_consumer_skills: 50
+
+classification:
+  fallback:
+    enabled: true
+    model: null
+
+engine:
+  name: copilot-cli
+
+skip:
+  review_bots: []
+  skip_labels:
+    - skip-review
+  skip_title_patterns: []
+  # review_bots example (allowlist — only listed bots are reviewed):
+  # review_bots:
+  #   - release-please[bot]
