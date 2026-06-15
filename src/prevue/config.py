@@ -45,6 +45,17 @@ class FallbackConfig(BaseModel):
     model: str | None = None
 
 
+class SkillsConfig(BaseModel):
+    """Consumer skill overrides and caps (SKIL-03, D-05/D-07)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exclude: list[str] = Field(default_factory=list)
+    max_skill_bytes: int = Field(default=65536, ge=1)
+    max_total_consumer_bytes: int = Field(default=262144, ge=1)
+    max_consumer_skills: int = Field(default=50, ge=1)
+
+
 class PrevueConfig(BaseModel):
     """Typed bundle from one prevue.yml read."""
 
@@ -52,6 +63,7 @@ class PrevueConfig(BaseModel):
     review: ReviewConfig
     skip: SkipConfig
     fallback: FallbackConfig
+    skills: SkillsConfig
     engine: str
 
 
@@ -60,30 +72,33 @@ def resolve_consumer_config_path(
     *,
     consumer_root: str | None = None,
 ) -> Path:
-    """Resolve config path under consumer checkout; reject traversal (WKFL-03)."""
+    """Resolve config path under consumer checkout; reject traversal (WKFL-03).
+
+    Containment on the *resolved* path (symlinks followed) is the single enforced
+    invariant. A root always anchors the check: PREVUE_CONSUMER_ROOT/GITHUB_WORKSPACE
+    when set, otherwise the current working directory.
+    """
     raw = config_path or ".github/prevue.yml"
     rel = Path(raw)
     root_env = consumer_root or os.environ.get("PREVUE_CONSUMER_ROOT")
 
-    if rel.is_absolute():
-        resolved = rel.resolve()
-        if root_env:
-            root = Path(root_env).resolve()
-            if not resolved.is_relative_to(root):
-                raise ValueError("config path must stay inside consumer checkout")
-        return resolved
-
     if ".." in rel.parts:
         raise ValueError("config path must not contain '..'")
 
-    if root_env:
-        root = Path(root_env).resolve()
-        resolved = (root / rel).resolve()
-        if not resolved.is_relative_to(root):
-            raise ValueError("config path escapes consumer checkout")
-        return resolved
+    root_candidate = root_env or os.environ.get("GITHUB_WORKSPACE")
+    if root_candidate is None:
+        if rel.is_absolute():
+            raise ValueError(
+                "absolute config path requires PREVUE_CONSUMER_ROOT or GITHUB_WORKSPACE"
+            )
+        root = Path.cwd().resolve()
+    else:
+        root = Path(root_candidate).resolve()
 
-    return rel
+    resolved = (rel if rel.is_absolute() else root / rel).resolve()  # resolves symlinks
+    if not resolved.is_relative_to(root):
+        raise ValueError("config path escapes consumer checkout")
+    return resolved
 
 
 def _ruleset_from_raw(raw: dict) -> RuleSet:
@@ -112,7 +127,12 @@ def _resolve_engine(raw: dict) -> str:
 
 
 def load_config(consumer_path: str | None = None) -> PrevueConfig:
-    """Load all prevue.yml sections from a single yaml.safe_load (D-08)."""
+    """Load all prevue.yml sections from a single yaml.safe_load (D-08).
+
+    consumer_path must be a path already validated by resolve_consumer_config_path()
+    (the single source of truth for traversal/containment). Pass user-supplied paths
+    through that resolver before calling this loader.
+    """
     path = Path(consumer_path) if consumer_path is not None else Path(".github/prevue.yml")
     raw: dict = {}
     if path.is_file():
@@ -137,6 +157,7 @@ def load_config(consumer_path: str | None = None) -> PrevueConfig:
     if not isinstance(classification, dict):
         classification = {}
     fallback = FallbackConfig.model_validate(classification.get("fallback", {}))
+    skills = SkillsConfig.model_validate(raw.get("skills", {}))
     engine = _resolve_engine(raw)
 
     return PrevueConfig(
@@ -144,5 +165,6 @@ def load_config(consumer_path: str | None = None) -> PrevueConfig:
         review=review,
         skip=skip,
         fallback=fallback,
+        skills=skills,
         engine=engine,
     )
