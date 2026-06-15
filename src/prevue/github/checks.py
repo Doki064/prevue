@@ -16,7 +16,12 @@ from prevue.gate import GateResult, severity_counts_line, thresholds_line, verdi
 CHECK_NAME = "prevue/review"
 
 
-def _render_check_output(gate: GateResult, sticky_url: str | None) -> dict:
+def _render_check_output(
+    gate: GateResult,
+    sticky_url: str | None,
+    *,
+    sticky_failed: bool = False,
+) -> dict:
     """Compact check panel: verdict title + counts in title; thresholds + sticky link in summary."""
     title = verdict_title(gate)
     counts = severity_counts_line(gate)
@@ -26,6 +31,8 @@ def _render_check_output(gate: GateResult, sticky_url: str | None) -> dict:
     summary = thresholds_line(gate)
     if sticky_url:
         summary += f"\n\nFull findings index in the [Prevue Review comment]({sticky_url})."
+    elif sticky_failed:
+        summary += "\n\n⚠️ Prevue summary comment failed to post; see workflow logs for details."
 
     return {"title": title, "summary": summary}
 
@@ -36,6 +43,7 @@ def conclude_review_check(
     gate: GateResult,
     *,
     sticky_url: str | None = None,
+    sticky_failed: bool = False,
 ) -> bool:
     """Post a single completed check run concluding with the gate verdict."""
     try:
@@ -44,7 +52,7 @@ def conclude_review_check(
             head_sha=head_sha,
             status="completed",
             conclusion=gate.conclusion,
-            output=_render_check_output(gate, sticky_url),
+            output=_render_check_output(gate, sticky_url, sticky_failed=sticky_failed),
         )
     except GithubException as exc:
         status = getattr(exc, "status", "unknown")
@@ -63,10 +71,11 @@ def conclude_skip_check(
     dropped_count: int | None = None,
     conclusion: str = "success",
     reason: str | None = None,
+    title: str | None = None,
 ) -> bool:
     """Post completed skip check — success for empty-PR, neutral for bot/label/title (D-09/D-16)."""
     if reason is not None:
-        output = {"title": "review skipped", "summary": reason}
+        output = {"title": title or "review skipped", "summary": reason}
     else:
         output = {
             "title": "no reviewable files",

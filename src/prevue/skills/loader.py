@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import importlib.resources
+from collections.abc import Iterator
+from pathlib import Path
 
 import frontmatter
 from pathspec import GitIgnoreSpec
 
 from prevue.classify.models import canonical_index
+from prevue.config import SkillsConfig
 from prevue.skills.models import Skill
 
 
@@ -16,25 +19,116 @@ def _skills_root():
     return importlib.resources.files("prevue.skills")
 
 
-def load_skills() -> list[Skill]:
-    """Load every .md skill under the packaged prevue.skills bundle dirs."""
-    root = _skills_root()
-    skills: list[Skill] = []
-    for bundle_entry in root.iterdir():
+def _iter_skill_files(
+    root: Path | object,
+    bundle: str,
+    *,
+    consumer_root: Path | None = None,
+) -> Iterator[tuple[str, str, str]]:
+    # Sort by name so byte-cap enforcement drops a deterministic set across runs
+    # and machines (Path.iterdir() order is filesystem-dependent) (WR-04).
+    for entry in sorted(root.iterdir(), key=lambda p: p.name):  # type: ignore[union-attr]
+        if not entry.name.endswith(".md"):
+            continue
+        if consumer_root is not None:
+            # Guard against symlinked skill files escaping the consumer root.
+            resolved = Path(entry).resolve()
+            if not resolved.is_relative_to(consumer_root):
+                continue
+        yield bundle, entry.name, entry.read_text(encoding="utf-8")
+
+
+def _load_from_tree(
+    root: Path | object,
+    *,
+    is_consumer: bool,
+    skills_config: SkillsConfig,
+    consumer_bytes: int,
+    consumer_count: int,
+    skipped: list[str],
+) -> tuple[dict[str, Skill], int, int]:
+    by_key: dict[str, Skill] = {}
+    total_bytes = consumer_bytes
+    count = consumer_count
+
+    for bundle_entry in sorted(root.iterdir(), key=lambda p: p.name):  # type: ignore[union-attr]
         if bundle_entry.name.startswith("_") or bundle_entry.name == "__pycache__":
             continue
         if not bundle_entry.is_dir():
             continue
         bundle = bundle_entry.name
-        for entry in bundle_entry.iterdir():
-            if not entry.name.endswith(".md"):
-                continue
-            post = frontmatter.loads(entry.read_text(encoding="utf-8"))
+        cr = Path(root).resolve() if is_consumer else None
+        for bundle_name, filename, text in _iter_skill_files(
+            bundle_entry, bundle, consumer_root=cr
+        ):
+            key = f"{bundle_name}/{filename}"
+            post = frontmatter.loads(text)
+            # Measure the loaded body (frontmatter stripped) — that is what reaches
+            # the prompt via assemble_instructions — not the whole file (WR-03).
+            content_bytes = len(post.content.encode("utf-8"))
+            if is_consumer:
+                if content_bytes > skills_config.max_skill_bytes:
+                    skipped.append(f"{key} (exceeds max_skill_bytes)")
+                    continue
+                if count >= skills_config.max_consumer_skills:
+                    skipped.append(f"{key} (exceeds max_consumer_skills)")
+                    continue
+                if total_bytes + content_bytes > skills_config.max_total_consumer_bytes:
+                    skipped.append(f"{key} (exceeds max_total_consumer_bytes)")
+                    continue
+                total_bytes += content_bytes
+                count += 1
             skill = Skill.model_validate(post.metadata)
-            skill.bundle = bundle
-            skill.filename = entry.name
+            skill.bundle = bundle_name
+            skill.filename = filename
             skill.body = post.content
-            skills.append(skill)
+            skill.source = "consumer" if is_consumer else "builtin"
+            by_key[key] = skill
+    return by_key, total_bytes, count
+
+
+def load_skills(
+    *,
+    consumer_skills_root: Path | str | None = None,
+    builtin_skills_root: Path | str | None = None,
+    skills_config: SkillsConfig | None = None,
+    return_skipped: bool = False,
+) -> list[Skill] | tuple[list[Skill], list[str]]:
+    """Load built-in skills, optionally merged with consumer overrides (SKIL-03)."""
+    cfg = skills_config or SkillsConfig()
+    skipped: list[str] = []
+    by_key: dict[str, Skill] = {}
+
+    builtin_root = Path(builtin_skills_root) if builtin_skills_root else _skills_root()
+    builtin_loaded, _, _ = _load_from_tree(
+        builtin_root,
+        is_consumer=False,
+        skills_config=cfg,
+        consumer_bytes=0,
+        consumer_count=0,
+        skipped=skipped,
+    )
+    by_key.update(builtin_loaded)
+
+    if consumer_skills_root is not None:
+        consumer_root = Path(consumer_skills_root)
+        if consumer_root.is_dir():
+            consumer_loaded, _, _ = _load_from_tree(
+                consumer_root,
+                is_consumer=True,
+                skills_config=cfg,
+                consumer_bytes=0,
+                consumer_count=0,
+                skipped=skipped,
+            )
+            by_key.update(consumer_loaded)
+
+    for key in cfg.exclude:
+        by_key.pop(key, None)
+
+    skills = list(by_key.values())
+    if return_skipped:
+        return skills, skipped
     return skills
 
 

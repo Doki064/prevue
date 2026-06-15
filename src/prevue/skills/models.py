@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field
+
+SkillSource = Literal["builtin", "consumer"]
 
 
 class Skill(BaseModel):
@@ -16,3 +20,4 @@ class Skill(BaseModel):
     bundle: str = ""
     filename: str = ""
     body: str = ""
+    source: SkillSource = "builtin"

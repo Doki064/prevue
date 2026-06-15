@@ -66,6 +66,23 @@ def test_label_and_title() -> None:
     assert re.search("WIP", title_reason)
 
 
+def test_none_title_does_not_crash() -> None:
+    """WR-05: a None PR title must not make re.search raise TypeError."""
+    cfg = SkipConfig(skip_title_patterns=[r"^WIP:"])
+    pr = _human_pr()
+    pr.title = None
+    # Title is None and no other skip condition applies → proceed (None), no raise.
+    assert should_skip(pr, cfg) is None
+
+
+def test_bot_with_none_login_skips_as_unknown() -> None:
+    """WR-05: a Bot author with login=None is skipped as an unknown bot, not crashed."""
+    cfg = SkipConfig()
+    pr = _bot_pr(login=None)  # type: ignore[arg-type]
+    reason = should_skip(pr, cfg)
+    assert reason == "bot author unknown"
+
+
 @responses.activate
 def test_skip_surface(responses_activated: None) -> None:
     pr = MagicMock()

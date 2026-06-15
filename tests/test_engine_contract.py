@@ -234,3 +234,38 @@ def test_gemini_classify_raises_not_implemented() -> None:
     adapter = get_adapter("gemini-cli")
     with pytest.raises(NotImplementedError, match="does not implement classify"):
         adapter.classify(["src/main.py"], CANONICAL_LABEL_ORDER)
+
+
+def test_adapter_cli_commands_contain_no_allow_tool_flags() -> None:
+    """D-08 regression: no adapter may pass --allow-tool to its CLI subprocess.
+    Static source scan only — live tool-posture verification is a separate required
+    pre-production step documented in SECURITY.md (see D-08 row and 07-05 UAT checklist).
+    """
+    import pathlib
+
+    engines_dir = pathlib.Path("src/prevue/engines")
+    violations: list[str] = []
+
+    for py_file in sorted(engines_dir.glob("*.py")):
+        source = py_file.read_text(encoding="utf-8")
+        if "--allow-tool" in source:
+            violations.append(f"{py_file}: contains '--allow-tool' flag")
+
+    assert not violations, "Adapters must not pass --allow-tool to CLI: " + "; ".join(violations)
+
+
+def test_security_md_documents_d08_live_verification() -> None:
+    """D-08 gap: static scan cannot verify vendor-controlled CLI tool access.
+    SECURITY.md must document that live engine tool-posture verification is a required
+    pre-production checkpoint so consumers know to run it before enabling merge gates.
+    """
+    import pathlib
+
+    security_md = pathlib.Path("SECURITY.md")
+    assert security_md.exists(), "SECURITY.md must exist"
+    content = security_md.read_text(encoding="utf-8")
+    assert "D-08" in content, "SECURITY.md must document D-08 vector"
+    assert "pre-production" in content, (
+        "SECURITY.md must describe D-08 as pre-production checkpoint"
+    )
+    assert "live" in content.lower(), "SECURITY.md must mention live verification for D-08"

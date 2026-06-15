@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
+from prevue.config import SkillsConfig
 from prevue.engines.errors import EngineFailure
 from prevue.engines.registry import UnknownEngineError
 from prevue.github.client import PrContext
@@ -505,6 +506,73 @@ def test_run_review_empty_skip_no_engine_call() -> None:
     mock_check.assert_not_called()
 
 
+def test_no_fit_neutral_skip() -> None:
+    """D-24: single file exceeding whole input budget -> neutral skip, no engine."""
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    huge_patch = "+" * 500_000
+    oversized = DiffBundle(
+        pr_number=PR_NUMBER,
+        base_sha=BASE_SHA,
+        head_sha=HEAD_SHA,
+        files=[
+            ChangedFile(
+                path="src/huge.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+                patch=huge_patch,
+            ),
+        ],
+    )
+    tiny_budget = MagicMock()
+    tiny_budget.ruleset = MagicMock()
+    tiny_budget.ruleset.label_rules = {"backend": ["**/*.py"]}
+    tiny_budget.ruleset.ignore_globs = []
+    tiny_budget.ruleset.routing_map = {"backend": "backend"}
+    tiny_budget.review = MagicMock(max_input_tokens=100, output_reserve_tokens=0)
+    tiny_budget.fallback = MagicMock(enabled=False)
+    tiny_budget.skip = MagicMock()
+    tiny_budget.skills = SkillsConfig()
+    tiny_budget.engine = "fake"
+
+    class SpyEngine:
+        name = "spy"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            raise AssertionError("engine must not be called when no file fits budget")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=oversized),
+        patch("prevue.review.load_config", return_value=tiny_budget),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.classify") as mock_classify,
+        patch("prevue.review.upsert_skip_note") as mock_skip,
+        patch("prevue.review.conclude_skip_check") as mock_skip_check,
+        patch("prevue.review.upsert_sticky") as mock_sticky,
+        patch("prevue.review.conclude_review_check") as mock_check,
+    ):
+        from prevue.classify.models import ClassificationResult
+
+        mock_classify.return_value = ClassificationResult(
+            labels={"backend": "**/*.py"},
+            bundles=["backend"],
+        )
+        run_review(adapter=SpyEngine())
+
+    mock_skip.assert_called_once_with(mock_pr, reason="PR too large to review within budget")
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        HEAD_SHA,
+        conclusion="neutral",
+        reason="PR too large to review within budget",
+    )
+    mock_sticky.assert_not_called()
+    mock_check.assert_not_called()
+
+
 def test_run_review_empty_skip_raises_when_skip_check_not_published() -> None:
     mock_pr = MagicMock()
     mock_repo = _mock_repo()
@@ -567,10 +635,16 @@ def test_invalid_review_config_raises_before_fetch() -> None:
     mock_get_adapter.assert_not_called()
 
 
-def test_run_review_load_config_default_path() -> None:
+def test_run_review_load_config_default_path(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     mock_pr = MagicMock()
     mock_repo = _mock_repo()
     mock_sticky = _mock_sticky()
+
+    # Hermetic: anchor the consumer root so the resolved path is deterministic
+    # and does not depend on the ambient process CWD/env (CR-01).
+    monkeypatch.delenv("PREVUE_CONFIG_PATH", raising=False)
+    monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+    monkeypatch.setenv("PREVUE_CONSUMER_ROOT", str(tmp_path))
 
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
@@ -586,7 +660,12 @@ def test_run_review_load_config_default_path() -> None:
 
         mock_load_config.side_effect = real_load_config
         run_review(adapter=FindingsEngine())
-        mock_load_config.assert_called_once_with(".github/prevue.yml")
+        # CR-01: run_review now routes the default path through
+        # resolve_consumer_config_path first, so load_config receives a
+        # resolved absolute path anchored at PREVUE_CONSUMER_ROOT — not the
+        # pre-fix unresolved relative ".github/prevue.yml".
+        expected = str((tmp_path / ".github" / "prevue.yml").resolve())
+        mock_load_config.assert_called_once_with(expected)
 
 
 def test_run_review_fallback_skipped_when_all_matched() -> None:
@@ -610,6 +689,84 @@ def test_run_review_fallback_skipped_when_all_matched() -> None:
     ):
         run_review(adapter=SpyEngine())
         mock_llm.assert_not_called()
+
+
+def test_fallback_only_on_packed() -> None:
+    """D-19/D-22: budget-skipped unmatched paths must not trigger llm_classify."""
+    from prevue.classify.models import RuleSet
+    from prevue.config import FallbackConfig, PrevueConfig, SkillsConfig, SkipConfig
+    from prevue.gate import ReviewConfig
+
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+    budget_diff = DiffBundle(
+        pr_number=PR_NUMBER,
+        base_sha=BASE_SHA,
+        head_sha=HEAD_SHA,
+        files=[
+            ChangedFile(
+                path="src/App.tsx",
+                status="modified",
+                additions=1,
+                deletions=0,
+                patch="@@",
+            ),
+            ChangedFile(
+                path="data/mystery_a.bin",
+                status="added",
+                additions=1,
+                deletions=0,
+                patch="+" * 400,
+            ),
+            ChangedFile(
+                path="data/mystery_b.bin",
+                status="added",
+                additions=1,
+                deletions=0,
+                patch="+" * 200_000,
+            ),
+        ],
+    )
+    tight_config = PrevueConfig(
+        ruleset=RuleSet(
+            ignore_globs=[],
+            label_rules={"frontend": ["**/*.tsx"]},
+            routing_map={},
+        ),
+        # Tight budget: mystery_b.bin (~50k tokens) must not fit; mystery_a.bin (~100) must.
+        review=ReviewConfig(max_input_tokens=5000, output_reserve_tokens=100),
+        skip=SkipConfig(),
+        fallback=FallbackConfig(enabled=True),
+        skills=SkillsConfig(),
+        engine="fake",
+    )
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=budget_diff),
+        patch("prevue.review.load_config", return_value=tight_config),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch(
+            "prevue.review.load_skills",
+            side_effect=lambda *a, **kw: ([], []) if kw.get("return_skipped") else [],
+        ),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True),
+        patch(
+            "prevue.review.llm_classify",
+            return_value=({"data/mystery_a.bin": "backend"}, None),
+        ) as mock_llm,
+    ):
+        run_review(adapter=FindingsEngine())
+
+    mock_llm.assert_called_once()
+    classified_paths = mock_llm.call_args[0][0]
+    assert "data/mystery_b.bin" not in classified_paths
+    assert "data/mystery_a.bin" in classified_paths
+    assert mock_upsert.call_args.kwargs["not_reviewed_file_count"] == 1
 
 
 def test_run_review_fallback_fires_on_unmatched_paths() -> None:
@@ -657,6 +814,131 @@ def test_run_review_fallback_fires_on_unmatched_paths() -> None:
     assert "backend" in classification.labels
     assert classification.labels["backend"] == "mystery.bin"
     assert "general" not in classification.labels
+
+
+def _mixed_diff() -> DiffBundle:
+    """A diff with one rule-matched file and one unmatched file (triggers fallback)."""
+    return DiffBundle(
+        pr_number=PR_NUMBER,
+        base_sha=BASE_SHA,
+        head_sha=HEAD_SHA,
+        files=[
+            ChangedFile(
+                path="src/App.tsx",
+                status="modified",
+                additions=1,
+                deletions=0,
+                patch="@@",
+            ),
+            ChangedFile(
+                path="mystery.bin",
+                status="added",
+                additions=1,
+                deletions=0,
+                patch="@@",
+            ),
+        ],
+    )
+
+
+def test_run_review_classify_tokens_zero_on_full_degrade() -> None:
+    """WR-02: a fully degraded fallback must not bill any classify tokens."""
+    from prevue.classify.llm_fallback import FALLBACK_DISCLOSURE, FALLBACK_FAILED_GLOB
+    from prevue.classify.models import GENERAL_LABEL
+
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_mixed_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True),
+        patch(
+            "prevue.review.llm_classify",
+            return_value=({GENERAL_LABEL: FALLBACK_FAILED_GLOB}, FALLBACK_DISCLOSURE),
+        ) as mock_llm,
+    ):
+        run_review(adapter=FindingsEngine())
+
+    mock_llm.assert_called_once()
+    token_meta = mock_upsert.call_args.kwargs["token_meta"]
+    assert token_meta["classify"] == 0
+
+
+def test_run_review_classify_tokens_nonzero_on_real_labels() -> None:
+    """WR-02 pair: a fallback that produces real labels must bill a non-zero estimate."""
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_mixed_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True),
+        patch(
+            "prevue.review.llm_classify",
+            return_value=({"mystery.bin": "backend"}, None),
+        ) as mock_llm,
+    ):
+        run_review(adapter=FindingsEngine())
+
+    mock_llm.assert_called_once()
+    token_meta = mock_upsert.call_args.kwargs["token_meta"]
+    assert token_meta["classify"] > 0
+
+
+def test_run_review_partial_degrade_bills_routes_and_retains_general() -> None:
+    """WR-01: a partial-degrade fallback shape must bill tokens, route real labels,
+    and retain the partial-disclosure GENERAL_LABEL (not pop it)."""
+    from prevue.classify.llm_fallback import FALLBACK_PARTIAL_GLOB
+    from prevue.classify.models import GENERAL_LABEL
+
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    partial_disclosure = (
+        "classification fallback partially degraded — some files reviewed as general"
+    )
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_mixed_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True),
+        patch(
+            "prevue.review.llm_classify",
+            return_value=(
+                {"mystery.bin": "backend", GENERAL_LABEL: FALLBACK_PARTIAL_GLOB},
+                partial_disclosure,
+            ),
+        ) as mock_llm,
+    ):
+        run_review(adapter=FindingsEngine())
+
+    mock_llm.assert_called_once()
+    kwargs = mock_upsert.call_args.kwargs
+    # (a) non-zero classify estimate because real labels were produced
+    assert kwargs["token_meta"]["classify"] > 0
+    # (b) the real path → label entry was routed via the inversion
+    classification = kwargs["classification"]
+    assert classification.labels["backend"] == "mystery.bin"
+    # (c) the partial-disclosure general label is retained, not popped by the dedup
+    assert classification.labels[GENERAL_LABEL] == FALLBACK_PARTIAL_GLOB
+    # disclosure is forwarded verbatim to the sticky comment
+    assert kwargs["classification_disclosure"] == partial_disclosure
 
 
 def test_engine_selection_via_prevue_engine(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -724,3 +1006,111 @@ def test_run_review_raises_when_review_check_not_published() -> None:
     ):
         with pytest.raises(RuntimeError, match="review check run"):
             run_review(adapter=FindingsEngine())
+
+
+def test_run_review_malformed_consumer_skill_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed consumer skill: fail-closed check run, engine never invoked."""
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+
+    class SpyEngine:
+        name = "spy"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            raise AssertionError("engine must not be called on skill validation failure")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch(
+            "prevue.review.load_skills",
+            side_effect=ValidationError.from_exception_data("Skill", []),
+        ),
+        patch("prevue.review.upsert_skip_note") as mock_skip_note,
+        patch("prevue.review.conclude_skip_check", return_value=True) as mock_skip_check,
+        patch("prevue.review.upsert_sticky") as mock_sticky,
+        patch("prevue.review.conclude_review_check") as mock_check,
+    ):
+        run_review(adapter=SpyEngine())
+
+    mock_skip_note.assert_called_once()
+    reason = mock_skip_note.call_args.kwargs.get("reason", "")
+    assert "Invalid consumer skill" in reason
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        HEAD_SHA,
+        conclusion="failure",
+        reason=reason,
+        title="review failed",
+    )
+    mock_sticky.assert_not_called()
+    mock_check.assert_not_called()
+
+
+def test_run_review_consumer_override_and_cap_disclosure(
+    tmp_path: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Consumer skill override wins; oversized skill is disclosed in sticky cap_skipped."""
+    from prevue.classify.models import RuleSet
+    from prevue.config import FallbackConfig, PrevueConfig, SkillsConfig, SkipConfig
+    from prevue.gate import ReviewConfig
+
+    # Build consumer skills tree under tmp_path/.github/prevue/skills/security/
+    skills_dir = tmp_path / ".github" / "prevue" / "skills" / "security"
+    skills_dir.mkdir(parents=True)
+
+    # Override skill — should win over built-in security bundle
+    override = skills_dir / "committed-secrets.md"
+    override.write_text(
+        "---\n"
+        "name: Committed Secrets (Consumer)\n"
+        "description: consumer override\n"
+        "applies-to:\n  - '**/*'\n"
+        "---\n"
+        "CONSUMER OVERRIDE sentinel\n"
+    )
+    # Oversized skill — exceeds max_skill_bytes cap, should appear in cap_skipped
+    oversized = skills_dir / "oversized.md"
+    oversized.write_text(
+        "---\nname: Oversized\ndescription: too big\napplies-to:\n  - '**/*'\n---\n" + "x" * 70_000
+    )
+
+    monkeypatch.setenv("PREVUE_CONSUMER_ROOT", str(tmp_path))
+
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+    tight_skills = SkillsConfig(max_skill_bytes=50_000)
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.load_config") as mock_config,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        mock_config.return_value = PrevueConfig(
+            ruleset=RuleSet(ignore_globs=[], label_rules={}, routing_map={}),
+            review=ReviewConfig(),
+            skip=SkipConfig(),
+            fallback=FallbackConfig(enabled=False),
+            skills=tight_skills,
+            engine="fake",
+        )
+        run_review(adapter=FindingsEngine())
+
+    call_kwargs = mock_upsert.call_args.kwargs
+    cap_skipped = call_kwargs["cap_skipped"]
+    assert any("oversized.md" in s for s in cap_skipped), (
+        f"oversized not in cap_skipped: {cap_skipped}"
+    )
+    loaded = call_kwargs["loaded_skills"]
+    assert any("Consumer" in s for s in loaded), f"consumer override not in loaded_skills: {loaded}"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+from html import escape as escape_html
 
 from github import GithubException
 
@@ -36,6 +37,18 @@ def _escape_table_cell(value: str) -> str:
     """Escape pipes and collapse newlines for markdown table cells."""
     escaped = value.replace("|", "\\|")
     return escaped.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
+
+
+def _escape_location(path: str, line: int) -> str:
+    """Escape untrusted location values for markdown code span."""
+    safe_path = _escape_table_cell(path).replace("`", "\\`")
+    return f"`{safe_path}:{line}`"
+
+
+def _escape_path_code(path: str) -> str:
+    """Escape a file path for use as a markdown inline code span."""
+    safe = _escape_table_cell(path).replace("`", "\\`")
+    return f"`{safe}`"
 
 
 def _escape_inline_markdown(value: str) -> str:
@@ -74,7 +87,7 @@ def render_findings_table(gate: GateResult) -> str:
         rows.append(
             "| "
             f"{badge} {finding.severity} | "
-            f"`{finding.path}:{finding.line}` | "
+            f"{_escape_location(finding.path, finding.line)} | "
             f"{_escape_table_cell(finding.title)} | "
             f"{PLACEMENT_BADGES[placed.placement]} |"
         )
@@ -88,10 +101,10 @@ def render_finding_details(gate: GateResult) -> str:
         if placed.placement == "inline":
             continue
         finding = placed.finding
-        summary = f"{finding.path}:{finding.line} — {_escape_table_cell(finding.title)}"
-        blocks.append(
-            f"<details><summary>{summary}</summary>\n\n{render_inline_comment(finding)}\n</details>"
-        )
+        summary = escape_html(f"{finding.path}:{finding.line} — {finding.title}")
+        # Encode any HTML tag sequences in LLM output so they can't escape the <details> wrapper.
+        content = re.sub(r"<(?=[/a-zA-Z])", "&lt;", render_inline_comment(finding))
+        blocks.append(f"<details><summary>{summary}</summary>\n\n{content}\n</details>")
     return "\n".join(blocks)
 
 
@@ -102,11 +115,19 @@ def render_body(
     loaded_skills: list[str] | None = None,
     gate: GateResult | None = None,
     classification_disclosure: str | None = None,
+    skipped_paths: list[str] | None = None,
+    skipped_reason: str | None = None,
+    skill_ratios: dict[str, tuple[int, int]] | None = None,
+    token_meta: dict[str, object] | None = None,
+    reviewed_file_count: int | None = None,
+    not_reviewed_file_count: int | None = None,
+    cap_skipped: list[str] | None = None,
 ) -> str:
     """Sectioned sticky body: Verdict / Review / Findings / details / Metadata."""
+    engine_name = result.engine_meta.get("engine", "unknown")
     model = result.engine_meta.get("model", "unknown")
     duration = result.engine_meta.get("duration_s", "?")
-    metadata = f"Engine: copilot-cli · model: {model} · {duration}s"
+    metadata = f"Engine: {engine_name} · model: {model} · {duration}s"
     if classification is not None:
         if classification.labels:
             ordered_labels = [
@@ -147,18 +168,68 @@ def render_body(
             metadata += f"\nFindings: {len(gate.placed)} valid · {gate.dropped_findings} dropped"
         if gate.degraded:
             metadata += "\nstructured findings unavailable (parse failure)"
-        metadata += f"\n{thresholds_line(gate)}"
     if classification_disclosure:
-        metadata += f"\n{classification_disclosure}"
+        metadata += f"\n{_escape_table_cell(classification_disclosure)}"
+
+    if token_meta:
+        review_tokens = token_meta.get("review", 0)
+        classify_tokens = token_meta.get("classify", 0)
+        # Provenance is per metric: review may be an exact engine count while
+        # classify is always a bytes/4 estimate. Fall back to the legacy single
+        # "estimated" flag when the caller does not distinguish the two.
+        legacy_estimated = token_meta.get("estimated")
+        review_est = " ~est" if token_meta.get("review_estimated", legacy_estimated) else ""
+        classify_est = " ~est" if token_meta.get("classify_estimated", legacy_estimated) else ""
+        token_line = f"Tokens: review{review_est} {review_tokens}"
+        if classify_tokens:
+            token_line += f" · classify{classify_est} {classify_tokens}"
+        metadata += f"\n{token_line}"
+
+    if skill_ratios:
+        loaded_total = sum(loaded for loaded, _total in skill_ratios.values())
+        skill_total = sum(total for _loaded, total in skill_ratios.values())
+        ordered_bundles = sorted(skill_ratios.keys(), key=canonical_index)
+        ratio_parts = [
+            f"{bundle} {skill_ratios[bundle][0]}/{skill_ratios[bundle][1]}"
+            for bundle in ordered_bundles
+        ]
+        metadata += f"\nSkill coverage: {loaded_total}/{skill_total} loaded — " + " · ".join(
+            ratio_parts
+        )
+
+    if not_reviewed_file_count and not_reviewed_file_count > 0:
+        reviewed = reviewed_file_count or 0
+        metadata += (
+            f"\nCoverage: classification and skills reflect {reviewed} reviewed file(s) only; "
+            f"{not_reviewed_file_count} file(s) not reviewed (over token budget)."
+        )
+
+    if cap_skipped:
+        metadata += f"\nSkipped {len(cap_skipped)} oversized consumer skill(s): " + ", ".join(
+            _escape_table_cell(s) for s in cap_skipped
+        )
+
+    coverage_section = ""
+    if skipped_paths:
+        count = len(skipped_paths)
+        lines = "\n".join(f"- {_escape_path_code(path)}" for path in skipped_paths)
+        reason = skipped_reason or "over token budget"
+        coverage_section = (
+            f"### Coverage\n"
+            f"**{count} files not reviewed (over token budget)**\n\n"
+            f"<details><summary>Skipped files ({count}) — {reason}</summary>\n\n"
+            f"{lines}\n</details>\n\n"
+        )
 
     return (
         f"{MARKER}\n"
         "## Prevue Review\n\n"
         f"### Verdict\n"
         f"{verdict_section}"
-        f"### Review\n{result.summary_markdown}\n\n"
+        f"### Review\n{re.sub(r'<(?=[/a-zA-Z])', '&lt;', result.summary_markdown)}\n\n"
         f"{findings_section}"
         f"{details_section}"
+        f"{coverage_section}"
         f"### Metadata\n{metadata}\n"
     )
 
@@ -219,6 +290,13 @@ def upsert_sticky(
     loaded_skills: list[str] | None = None,
     gate: GateResult | None = None,
     classification_disclosure: str | None = None,
+    skipped_paths: list[str] | None = None,
+    skipped_reason: str | None = None,
+    skill_ratios: dict[str, tuple[int, int]] | None = None,
+    token_meta: dict[str, object] | None = None,
+    reviewed_file_count: int | None = None,
+    not_reviewed_file_count: int | None = None,
+    cap_skipped: list[str] | None = None,
 ):
     """Create one sticky comment or edit in place when marker exists (D-06)."""
     body = render_body(
@@ -227,6 +305,13 @@ def upsert_sticky(
         loaded_skills=loaded_skills,
         gate=gate,
         classification_disclosure=classification_disclosure,
+        skipped_paths=skipped_paths,
+        skipped_reason=skipped_reason,
+        skill_ratios=skill_ratios,
+        token_meta=token_meta,
+        reviewed_file_count=reviewed_file_count,
+        not_reviewed_file_count=not_reviewed_file_count,
+        cap_skipped=cap_skipped,
     )
     return _upsert_marker_comment(pr, body)
 
@@ -246,14 +331,14 @@ def inline_location_key(path: str, line: int, side: str | None) -> tuple[str, in
     return (path, line, side or "RIGHT")
 
 
-def _existing_prevue_inline_by_location(pr) -> dict[tuple[str, int, str], object]:
-    """Map (path, line, side) → existing Prevue inline review comment."""
-    existing: dict[tuple[str, int, str], object] = {}
+def _existing_prevue_inline_by_location(pr) -> dict[tuple[str, int, str], list[object]]:
+    """Map (path, line, side) → all existing Prevue inline review comments."""
+    existing: dict[tuple[str, int, str], list[object]] = {}
     for comment in pr.get_review_comments():
         if not _is_prevue_inline_comment(comment):
             continue
         key = inline_location_key(comment.path, comment.line, getattr(comment, "side", None))
-        existing.setdefault(key, comment)
+        existing.setdefault(key, []).append(comment)
     return existing
 
 
@@ -285,7 +370,13 @@ def post_inline_review(pr, gate: GateResult) -> set[tuple[str, int, str]]:
     current_keys = {
         inline_location_key(finding.path, finding.line, finding.side) for finding in gate.inline
     }
-    stale_comments = [comment for key, comment in existing.items() if key not in current_keys]
+    stale_comments = [
+        comment
+        for key, comments in existing.items()
+        if key not in current_keys
+        for comment in comments
+    ]
+    to_delete: list[object] = list(stale_comments)
 
     to_create: list[dict[str, object]] = []
     to_update: list[tuple[object, str, Finding]] = []
@@ -293,9 +384,11 @@ def post_inline_review(pr, gate: GateResult) -> set[tuple[str, int, str]]:
     for finding in gate.inline:
         body = render_inline_comment(finding)
         key = inline_location_key(finding.path, finding.line, finding.side)
-        prior = existing.get(key)
-        if prior is not None:
-            to_update.append((prior, body, finding))
+        prior_comments = existing.get(key, [])
+        if prior_comments:
+            to_update.append((prior_comments[0], body, finding))
+            if len(prior_comments) > 1:
+                to_delete.extend(prior_comments[1:])
             continue
         to_create.append(
             {
@@ -313,8 +406,6 @@ def post_inline_review(pr, gate: GateResult) -> set[tuple[str, int, str]]:
     # Stale comments + any comment whose edit failed: a failed edit leaves the
     # OLD body on the diff while the finding is downgraded to summary-only, so
     # remove it (best-effort) to avoid a misleading authoritative-looking thread.
-    to_delete: list[object] = list(stale_comments)
-
     for prior, body, finding in to_update:
         try:
             prior.edit(body)
