@@ -22,7 +22,7 @@ from prevue.classify.models import CANONICAL_LABEL_ORDER, GENERAL_LABEL
 from prevue.classify.router import route
 from prevue.config import SkillsConfig, load_config, resolve_consumer_config_path
 from prevue.engines.base import EngineAdapter
-from prevue.engines.prompt import estimate_prompt_overhead_tokens
+from prevue.engines.prompt import MAX_PROMPT_BYTES, build_prompt, estimate_prompt_overhead_tokens
 from prevue.engines.registry import get_adapter
 from prevue.engines.tokens import estimate_tokens
 from prevue.gate import GateResult, PlacedFinding, apply_gate
@@ -57,18 +57,19 @@ def _skill_reserve_tokens(skills_config: SkillsConfig | object) -> int:
     return SkillsConfig().max_total_consumer_bytes // 4
 
 
-def _consumer_skills_root() -> Path | None:
+def _consumer_skills_root() -> tuple[Path | None, str | None]:
+    """Return (skills_dir, rejection_note) — note is set when dir exists but escapes root."""
     root_env = os.environ.get("PREVUE_CONSUMER_ROOT") or os.environ.get("GITHUB_WORKSPACE")
     if not root_env:
-        return None
+        return None, None
     root = Path(root_env).resolve()
     skills_dir = (root / ".github" / "prevue" / "skills").resolve()
     if not skills_dir.is_dir():
-        return None
+        return None, None
     # Guard against symlinks escaping the consumer root (path traversal / symlink attack).
     if not skills_dir.is_relative_to(root):
-        return None
-    return skills_dir
+        return None, "consumer skills directory ignored (escapes checkout root — symlink guard)"
+    return skills_dir, None
 
 
 def _estimate_classify_tokens(paths: list[str]) -> int:
@@ -143,7 +144,7 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     classification_disclosure: str | None = None
     classify_tokens = 0
 
-    consumer_skills_root = _consumer_skills_root()
+    consumer_skills_root, skills_root_warn = _consumer_skills_root()
 
     # Load skills once before packing so builtin overhead is known upfront.
     try:
@@ -165,6 +166,9 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         if not check_published:
             raise RuntimeError("Failed to publish skill-validation failure check run")
         return
+
+    if skills_root_warn:
+        cap_skipped = [skills_root_warn] + cap_skipped
 
     builtin_skill_tokens = sum(estimate_tokens(s.body) for s in skills if s.source == "builtin")
     weight = make_file_weight(ruleset.label_rules, skills=skills)
@@ -302,6 +306,20 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         budget_seconds=300,
         model=os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL")),
     )
+
+    # Guard against estimate drift causing the assembled prompt to exceed the engine's
+    # stdin limit. Token heuristics (bytes/4) can undercount non-ASCII content.
+    if len(build_prompt(req).encode("utf-8")) > MAX_PROMPT_BYTES:
+        upsert_skip_note(pr, reason="PR too large to review within budget")
+        skip_published = conclude_skip_check(
+            get_repo(ctx),
+            diff.head_sha,
+            conclusion="neutral",
+            reason="PR too large to review within budget",
+        )
+        if not skip_published:
+            raise RuntimeError("Failed to publish skip check run")
+        return
 
     result = engine.review(req)
     result.engine_meta["engine"] = engine.name
