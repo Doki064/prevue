@@ -1008,6 +1008,49 @@ def test_run_review_raises_when_review_check_not_published() -> None:
             run_review(adapter=FindingsEngine())
 
 
+def test_run_review_malformed_consumer_skill_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed consumer skill: fail-closed check run, engine never invoked."""
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+
+    class SpyEngine:
+        name = "spy"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            raise AssertionError("engine must not be called on skill validation failure")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch(
+            "prevue.review.load_skills",
+            side_effect=ValidationError.from_exception_data("Skill", []),
+        ),
+        patch("prevue.review.upsert_skip_note") as mock_skip_note,
+        patch("prevue.review.conclude_skip_check", return_value=True) as mock_skip_check,
+        patch("prevue.review.upsert_sticky") as mock_sticky,
+        patch("prevue.review.conclude_review_check") as mock_check,
+    ):
+        run_review(adapter=SpyEngine())
+
+    mock_skip_note.assert_called_once()
+    reason = mock_skip_note.call_args.kwargs.get("reason", "")
+    assert "Invalid consumer skill" in reason
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        HEAD_SHA,
+        conclusion="failure",
+        reason=reason,
+        title="review failed",
+    )
+    mock_sticky.assert_not_called()
+    mock_check.assert_not_called()
+
+
 def test_run_review_consumer_override_and_cap_disclosure(
     tmp_path: pytest.MonkeyPatch,
     monkeypatch: pytest.MonkeyPatch,

@@ -37,7 +37,7 @@ from prevue.github.comments import (
 from prevue.github.diff import fetch_diff
 from prevue.github.positions import build_valid_lines
 from prevue.models import ReviewRequest
-from prevue.pack import make_file_weight, pack_files, trim_packed_files
+from prevue.pack import make_file_weight, pack_files, readmit_files, trim_packed_files
 from prevue.skills.loader import assemble_instructions, load_skills, select_skills
 from prevue.skip import should_skip
 
@@ -218,6 +218,28 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     matched = select_skills(skills, [f.path for f in packed_files])
     skill_ratios = _skill_ratios(skills, matched)
     instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
+
+    # Re-admission pass: when actual matched-skill overhead is smaller than the
+    # conservative first-pass estimate (all builtins + consumer cap), recover the
+    # freed budget and re-admit skipped files in priority order.
+    if skipped_files:
+        packed_files, skipped_files = readmit_files(
+            packed_files,
+            skipped_files,
+            instructions=instructions,
+            available_tokens=available,
+            weight=weight,
+        )
+        skipped_paths = [f.path for f in skipped_files]
+        skipped_reason = (
+            "Files ranked by classification risk; whole files dropped when over token budget."
+            if skipped_paths
+            else None
+        )
+        matched = select_skills(skills, [f.path for f in packed_files])
+        skill_ratios = _skill_ratios(skills, matched)
+        instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
+
     if not packed_files:
         upsert_skip_note(pr, reason="PR too large to review within budget")
         skip_published = conclude_skip_check(

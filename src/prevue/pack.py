@@ -82,3 +82,29 @@ def trim_packed_files(
         else:
             dropped.append(f)
     return kept, dropped
+
+
+def readmit_files(
+    packed: list[ChangedFile],
+    skipped: list[ChangedFile],
+    *,
+    instructions: str,
+    available_tokens: int,
+    weight: WeightFn,
+) -> tuple[list[ChangedFile], list[ChangedFile]]:
+    """Re-admit skipped files using actual instruction overhead (second pass after trim)."""
+    overhead = estimate_prompt_overhead_tokens(instructions=instructions)
+    diff_budget = max(0, available_tokens - overhead)
+    used = sum(estimate_file_prompt_tokens(f) for f in packed)
+    admitted: list[ChangedFile] = []
+    still_skipped: list[ChangedFile] = []
+    for f in sorted(skipped, key=weight):
+        cost = estimate_file_prompt_tokens(f)
+        if used + cost <= diff_budget:
+            admitted.append(f)
+            used += cost
+        else:
+            still_skipped.append(f)
+    if not admitted:
+        return packed, skipped
+    return sorted(packed + admitted, key=weight), still_skipped

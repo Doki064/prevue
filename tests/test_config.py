@@ -19,7 +19,12 @@ from prevue.engines.registry import DEFAULT_ENGINE
 from prevue.gate import ReviewConfig
 
 
-def test_absent_file_all_defaults(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_absent_file_all_defaults(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PREVUE_ENGINE", raising=False)
     missing = tmp_path / ".github" / "prevue.yml"
     cfg = load_config(str(missing))
     assert isinstance(cfg, PrevueConfig)
