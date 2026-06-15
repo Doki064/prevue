@@ -1006,3 +1006,71 @@ def test_run_review_raises_when_review_check_not_published() -> None:
     ):
         with pytest.raises(RuntimeError, match="review check run"):
             run_review(adapter=FindingsEngine())
+
+
+def test_run_review_consumer_override_and_cap_disclosure(
+    tmp_path: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Consumer skill override wins; oversized skill is disclosed in sticky cap_skipped."""
+    from prevue.classify.models import RuleSet
+    from prevue.config import FallbackConfig, PrevueConfig, SkillsConfig, SkipConfig
+    from prevue.gate import ReviewConfig
+
+    # Build consumer skills tree under tmp_path/.github/prevue/skills/security/
+    skills_dir = tmp_path / ".github" / "prevue" / "skills" / "security"
+    skills_dir.mkdir(parents=True)
+
+    # Override skill — should win over built-in security bundle
+    override = skills_dir / "committed-secrets.md"
+    override.write_text(
+        "---\n"
+        "name: Committed Secrets (Consumer)\n"
+        "description: consumer override\n"
+        "applies-to:\n  - '**/*'\n"
+        "---\n"
+        "CONSUMER OVERRIDE sentinel\n"
+    )
+    # Oversized skill — exceeds max_skill_bytes cap, should appear in cap_skipped
+    oversized = skills_dir / "oversized.md"
+    oversized.write_text(
+        "---\nname: Oversized\ndescription: too big\napplies-to:\n  - '**/*'\n---\n"
+        + "x" * 70_000
+    )
+
+    monkeypatch.setenv("PREVUE_CONSUMER_ROOT", str(tmp_path))
+
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+    tight_skills = SkillsConfig(max_skill_bytes=50_000)
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.load_config") as mock_config,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        mock_config.return_value = PrevueConfig(
+            ruleset=RuleSet(ignore_globs=[], label_rules={}, routing_map={}),
+            review=ReviewConfig(),
+            skip=SkipConfig(),
+            fallback=FallbackConfig(enabled=False),
+            skills=tight_skills,
+            engine="fake",
+        )
+        run_review(adapter=FindingsEngine())
+
+    call_kwargs = mock_upsert.call_args.kwargs
+    cap_skipped = call_kwargs["cap_skipped"]
+    assert any("oversized.md" in s for s in cap_skipped), (
+        f"oversized not in cap_skipped: {cap_skipped}"
+    )
+    loaded = call_kwargs["loaded_skills"]
+    assert any("Consumer" in s for s in loaded), (
+        f"consumer override not in loaded_skills: {loaded}"
+    )

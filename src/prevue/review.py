@@ -61,8 +61,14 @@ def _consumer_skills_root() -> Path | None:
     root_env = os.environ.get("PREVUE_CONSUMER_ROOT") or os.environ.get("GITHUB_WORKSPACE")
     if not root_env:
         return None
-    skills_dir = Path(root_env) / ".github" / "prevue" / "skills"
-    return skills_dir if skills_dir.is_dir() else None
+    root = Path(root_env).resolve()
+    skills_dir = (root / ".github" / "prevue" / "skills").resolve()
+    if not skills_dir.is_dir():
+        return None
+    # Guard against symlinks escaping the consumer root (path traversal / symlink attack).
+    if not skills_dir.is_relative_to(root):
+        return None
+    return skills_dir
 
 
 def _estimate_classify_tokens(paths: list[str]) -> int:
@@ -138,8 +144,29 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     classify_tokens = 0
 
     consumer_skills_root = _consumer_skills_root()
-    builtin_skills = load_skills(consumer_skills_root=None)
-    builtin_skill_tokens = sum(estimate_tokens(s.body) for s in builtin_skills)
+
+    # Load skills once before packing so builtin overhead is known upfront.
+    try:
+        skills, cap_skipped = load_skills(
+            consumer_skills_root=consumer_skills_root,
+            skills_config=config.skills,
+            return_skipped=True,
+        )
+    except ValidationError as exc:
+        reason = f"Invalid consumer skill file: {exc}"
+        upsert_skip_note(pr, reason=reason)
+        check_published = conclude_skip_check(
+            get_repo(ctx),
+            diff.head_sha,
+            conclusion="failure",
+            reason=reason,
+            title="review failed",
+        )
+        if not check_published:
+            raise RuntimeError("Failed to publish skill-validation failure check run")
+        return
+
+    builtin_skill_tokens = sum(estimate_tokens(s.body) for s in skills if s.source == "builtin")
     weight = make_file_weight(ruleset.label_rules)
     available = review_cfg.max_input_tokens - review_cfg.output_reserve_tokens
     skill_reserve = _skill_reserve_tokens(config.skills) if consumer_skills_root is not None else 0
@@ -171,26 +198,6 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         )
         if not skip_published:
             raise RuntimeError("Failed to publish skip check run")
-        return
-
-    try:
-        skills, cap_skipped = load_skills(
-            consumer_skills_root=consumer_skills_root,
-            skills_config=config.skills,
-            return_skipped=True,
-        )
-    except ValidationError as exc:
-        reason = f"Invalid consumer skill file: {exc}"
-        upsert_skip_note(pr, reason=reason)
-        check_published = conclude_skip_check(
-            get_repo(ctx),
-            diff.head_sha,
-            conclusion="failure",
-            reason=reason,
-            title="review failed",
-        )
-        if not check_published:
-            raise RuntimeError("Failed to publish skill-validation failure check run")
         return
     matched = select_skills(skills, [f.path for f in packed_files])
     instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
@@ -343,11 +350,43 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         )
     except GithubException as exc:
         print(
-            f"prevue: sticky comment upsert failed (HTTP {getattr(exc, 'status', '?')})",
+            f"prevue: sticky comment upsert failed (HTTP {getattr(exc, 'status', '?')}), retrying",
             file=sys.stderr,
         )
-        sticky = None
-        sticky_failed = True
+        try:
+            sticky = upsert_sticky(
+                pr,
+                result,
+                classification=result_cls,
+                loaded_skills=[
+                    f"{s.name} ({s.bundle})"
+                    if s.source == "builtin"
+                    else f"{s.name} ({s.bundle}, consumer)"
+                    for s in matched
+                ],
+                gate=gate,
+                classification_disclosure=classification_disclosure,
+                skipped_paths=skipped_paths,
+                skipped_reason=skipped_reason,
+                skill_ratios=skill_ratios,
+                token_meta={
+                    **engine_tokens,
+                    "classify": classify_tokens,
+                    "review_estimated": bool(engine_tokens.get("estimated")),
+                    "classify_estimated": True,
+                },
+                reviewed_file_count=len(packed_files),
+                not_reviewed_file_count=len(skipped_files),
+                cap_skipped=cap_skipped,
+            )
+            sticky_failed = False
+        except GithubException as retry_exc:
+            print(
+                f"prevue: sticky retry failed (HTTP {getattr(retry_exc, 'status', '?')})",
+                file=sys.stderr,
+            )
+            sticky = None
+            sticky_failed = True
     else:
         sticky_failed = False
     check_published = conclude_review_check(
