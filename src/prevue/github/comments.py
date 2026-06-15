@@ -51,6 +51,17 @@ def _escape_path_code(path: str) -> str:
     return f"`{safe}`"
 
 
+def _neutralize_html(text: str) -> str:
+    """Encode `<` that starts an HTML-ish token in untrusted/LLM text.
+
+    Covers tags and closing tags (`<tag`, `</tag`) plus comments and declarations/PIs
+    (`<!--`, `<?`) so adversarial engine output cannot break out of the `<details>`
+    wrappers. Bare `<` followed by whitespace/digits is left as-is to avoid mangling
+    prose like "x < 3".
+    """
+    return re.sub(r"<(?=[/!?a-zA-Z])", "&lt;", text)
+
+
 def _escape_inline_markdown(value: str) -> str:
     """Escape markdown control chars for short inline title/body snippets."""
     escaped = value.replace("\\", "\\\\")
@@ -62,12 +73,17 @@ def _escape_inline_markdown(value: str) -> str:
 def render_inline_comment(finding: Finding) -> str:
     """D-21 uniform inline-comment template from Finding fields."""
     badge = SEVERITY_BADGES[finding.severity]
+    # Neutralize HTML before markdown-escaping: inline comments render to all PR
+    # viewers, so adversarial engine markup in title/body must not become live HTML.
     parts = [
-        f"{badge} **{_escape_inline_markdown(finding.title)}**",
+        f"{badge} **{_escape_inline_markdown(_neutralize_html(finding.title))}**",
         "",
-        _escape_inline_markdown(finding.body),
+        _escape_inline_markdown(_neutralize_html(finding.body)),
     ]
     if finding.suggestion is not None:
+        # Suggestion is NOT HTML-neutralized: it renders inside a code fence (GitHub does
+        # not render HTML there), and entity-escaping `<` would corrupt the displayed code.
+        # The dynamic-length fence in _safe_suggestion_block prevents fence breakout.
         parts.extend(["", "**Suggested change**", _safe_suggestion_block(finding.suggestion)])
     parts.extend(["", INLINE_MARKER])
     return "\n".join(parts)
@@ -88,7 +104,7 @@ def render_findings_table(gate: GateResult) -> str:
             "| "
             f"{badge} {finding.severity} | "
             f"{_escape_location(finding.path, finding.line)} | "
-            f"{_escape_table_cell(finding.title)} | "
+            f"{_escape_table_cell(_neutralize_html(finding.title))} | "
             f"{PLACEMENT_BADGES[placed.placement]} |"
         )
     return "\n".join(rows)
@@ -102,9 +118,9 @@ def render_finding_details(gate: GateResult) -> str:
             continue
         finding = placed.finding
         summary = escape_html(f"{finding.path}:{finding.line} — {finding.title}")
-        blocks.append(
-            f"<details><summary>{summary}</summary>\n\n{render_inline_comment(finding)}\n</details>"
-        )
+        # Encode any HTML tag sequences in LLM output so they can't escape the <details> wrapper.
+        content = _neutralize_html(render_inline_comment(finding))
+        blocks.append(f"<details><summary>{summary}</summary>\n\n{content}\n</details>")
     return "\n".join(blocks)
 
 
@@ -136,8 +152,12 @@ def render_body(
             ordered_labels.extend(
                 label for label in classification.labels if label not in set(ordered_labels)
             )
+            # The matched value is a trusted glob for rule-matched labels but an
+            # untrusted PR path after LLM fallback (review.py sets labels[label] = path).
+            # Escape it as an inline code span so backticks/pipes can't break layout.
             labels_line = ", ".join(
-                f"{label} (matched `{classification.labels[label]}`)" for label in ordered_labels
+                f"{label} (matched {_escape_path_code(classification.labels[label])})"
+                for label in ordered_labels
             )
             metadata += f"\nLabels: {labels_line}"
         if classification.bundles:
@@ -147,7 +167,7 @@ def render_body(
             metadata += f"\nFiltered: {classification.dropped_count} filtered"
         if loaded_skills:
             metadata += f"\nSkills: {', '.join(loaded_skills)}"
-        elif classification is not None:
+        else:
             metadata += "\nSkills: none (baseline only)"
 
     if gate is None:
@@ -169,7 +189,7 @@ def render_body(
         if gate.degraded:
             metadata += "\nstructured findings unavailable (parse failure)"
     if classification_disclosure:
-        metadata += f"\n{classification_disclosure}"
+        metadata += f"\n{_escape_table_cell(classification_disclosure)}"
 
     if token_meta:
         review_tokens = token_meta.get("review", 0)
@@ -205,15 +225,18 @@ def render_body(
         )
 
     if cap_skipped:
-        metadata += f"\nSkipped {len(cap_skipped)} oversized consumer skill(s): " + ", ".join(
-            cap_skipped
+        # Entries carry their own reason in parens (oversized / symlink guard /
+        # missing consumer root), so use a neutral label here rather than "oversized".
+        metadata += f"\nConsumer skill notices ({len(cap_skipped)}): " + ", ".join(
+            _escape_table_cell(s) for s in cap_skipped
         )
 
     coverage_section = ""
     if skipped_paths:
         count = len(skipped_paths)
         lines = "\n".join(f"- {_escape_path_code(path)}" for path in skipped_paths)
-        reason = skipped_reason or "over token budget"
+        # Neutralize HTML so a reason containing </summary> can't break out of the wrapper.
+        reason = _neutralize_html(skipped_reason or "over token budget")
         coverage_section = (
             f"### Coverage\n"
             f"**{count} files not reviewed (over token budget)**\n\n"
@@ -226,7 +249,7 @@ def render_body(
         "## Prevue Review\n\n"
         f"### Verdict\n"
         f"{verdict_section}"
-        f"### Review\n{result.summary_markdown}\n\n"
+        f"### Review\n{_neutralize_html(result.summary_markdown)}\n\n"
         f"{findings_section}"
         f"{details_section}"
         f"{coverage_section}"
@@ -262,7 +285,12 @@ def _is_prevue_sticky(comment) -> bool:
 
 
 def _upsert_marker_comment(pr, body: str):
-    """Create or edit the single bot sticky comment identified by MARKER."""
+    """Create or edit the single bot sticky comment identified by MARKER.
+
+    Re-fetches comments on every call and matches by MARKER, so a retry after a
+    GithubException is idempotent: if a prior attempt actually created the comment,
+    the retry finds and edits it rather than creating a duplicate.
+    """
     for comment in pr.get_issue_comments():
         if _is_prevue_sticky(comment):
             comment.edit(body)

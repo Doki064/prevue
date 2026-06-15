@@ -19,7 +19,12 @@ from prevue.engines.registry import DEFAULT_ENGINE
 from prevue.gate import ReviewConfig
 
 
-def test_absent_file_all_defaults(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+def test_absent_file_all_defaults(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PREVUE_ENGINE", raising=False)
     missing = tmp_path / ".github" / "prevue.yml"
     cfg = load_config(str(missing))
     assert isinstance(cfg, PrevueConfig)
@@ -150,9 +155,16 @@ def test_review_output_reserve_above_max_input_fails(tmp_path: Path) -> None:
         load_config(str(path))
 
 
-def test_resolve_absolute_consumer_config_path_requires_checkout_root(tmp_path: Path) -> None:
+def test_resolve_absolute_consumer_config_path_requires_checkout_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     config_file = tmp_path / "prevue.yml"
     config_file.write_text("review:\n  max_inline_comments: 5\n")
+    monkeypatch.delenv("PREVUE_CONSUMER_ROOT", raising=False)
+    monkeypatch.delenv("GITHUB_WORKSPACE", raising=False)
+    # This invariant covers the non-Actions branch (local/library use); Actions has its
+    # own fail-closed sentinel path covered by test_resolve_config_no_workspace_fallback.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(ValueError, match="requires PREVUE_CONSUMER_ROOT or GITHUB_WORKSPACE"):
         resolve_consumer_config_path(str(config_file), consumer_root=None)
 
@@ -167,8 +179,45 @@ def test_resolve_absolute_consumer_config_path_under_workspace(
     config_file.write_text("review:\n  max_inline_comments: 2\n")
 
     monkeypatch.setenv("GITHUB_WORKSPACE", str(workspace))
+    monkeypatch.delenv("PREVUE_CONSUMER_ROOT", raising=False)
+    # GITHUB_WORKSPACE fallback only applies outside Actions (SKIL-04 base-ref guard).
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     resolved = resolve_consumer_config_path(str(config_file), consumer_root=None)
     assert resolved == config_file.resolve()
+
+
+def test_resolve_config_no_workspace_fallback_in_actions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """SKIL-04: inside Actions without PREVUE_CONSUMER_ROOT, both absolute and relative
+    config paths fail closed to a sentinel so load_config() uses framework defaults —
+    never reading a PR-head prevue.yml from GITHUB_WORKSPACE or cwd."""
+    from prevue.config import NO_CONSUMER_CONFIG_SENTINEL
+
+    workspace = tmp_path / "workspace"
+    config_dir = workspace / ".github"
+    config_dir.mkdir(parents=True)
+    config_file = config_dir / "prevue.yml"
+    config_file.write_text("review:\n  max_inline_comments: 2\n")
+
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(workspace))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.delenv("PREVUE_CONSUMER_ROOT", raising=False)
+
+    # Absolute path: returns sentinel, not the consumer file.
+    resolved_abs = resolve_consumer_config_path(str(config_file), consumer_root=None)
+    assert resolved_abs == Path(NO_CONSUMER_CONFIG_SENTINEL)
+
+    # Default relative path: also returns sentinel (the cwd footgun is closed).
+    resolved_rel = resolve_consumer_config_path(".github/prevue.yml", consumer_root=None)
+    assert resolved_rel == Path(NO_CONSUMER_CONFIG_SENTINEL)
+
+    # Sentinel does not exist → load_config falls back to framework defaults.
+    assert not resolved_rel.is_file()
+    cfg = load_config(str(resolved_rel))
+    assert cfg.review == ReviewConfig()
+
+    assert "consumer config ignored" in capsys.readouterr().err
 
 
 def test_skills_extra_forbid_typo_fails(tmp_path: Path) -> None:

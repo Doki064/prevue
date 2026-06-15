@@ -51,6 +51,22 @@ def test_backend_only_pr_selects_backend_not_frontend(fixture_skills) -> None:
     assert "frontend" not in bundles
 
 
+def test_select_skills_negated_applies_to_uses_check_file() -> None:
+    """A negated (!) applies-to glob must agree with pack.make_file_weight's
+    check_file().include semantics — select_skills must not match an excluded path."""
+    skill = Skill(
+        name="JS only, not tests",
+        description="x",
+        applies_to=["**/*.js", "!**/*.test.js"],
+    )
+    skill.bundle = "frontend"
+    skill.filename = "js.md"
+
+    # The negation excludes *.test.js; a plain *.js still matches.
+    assert select_skills([skill], ["src/app.test.js"]) == []
+    assert select_skills([skill], ["src/app.js"]) == [skill]
+
+
 def test_dedupe_by_path(fixture_skills) -> None:
     """D-09: a skill matched by multiple globs appears once."""
     matched = select_skills(fixture_skills, ["src/example.py"])

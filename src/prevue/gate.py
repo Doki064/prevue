@@ -25,11 +25,12 @@ class ReviewConfig(BaseModel):
     min_severity_to_fail: Severity | None = None
     max_inline_comments: int = Field(default=10, ge=0)
     # Default 120k tokens (~480k bytes at bytes/4) stays under MAX_PROMPT_BYTES (~250k tokens).
-    max_input_tokens: int = Field(default=120000, ge=1)
+    # Upper bound matches MAX_PROMPT_BYTES // 4 so packing success implies invoke success.
+    max_input_tokens: int = Field(default=120000, ge=1, le=250_000)
     output_reserve_tokens: int = Field(default=12000, ge=0)
 
     @model_validator(mode="after")
-    def _validate_token_budget(self) -> "ReviewConfig":
+    def _validate_token_budget(self) -> ReviewConfig:
         if self.output_reserve_tokens > self.max_input_tokens:
             raise ValueError("review.output_reserve_tokens must be <= review.max_input_tokens")
         return self
@@ -88,6 +89,7 @@ class GateResult(BaseModel):
     config: ReviewConfig
     degraded: bool = False
     dropped_findings: int = 0
+    partial: bool = False
 
 
 def apply_gate(
@@ -151,6 +153,7 @@ def apply_gate(
         config=cfg,
         degraded=degraded,
         dropped_findings=dropped_findings,
+        partial=partial,
     )
 
 
@@ -161,6 +164,10 @@ def verdict_title(gate: GateResult) -> str:
         return "✅ Pass — no findings"
     if gate.conclusion == "failure":
         return "❌ Fail — findings at or above fail threshold"
+    # A partial review with zero findings is neutral only because files were skipped,
+    # not because findings exist — say so rather than implying findings were posted.
+    if gate.partial and not any(gate.severity_counts.values()):
+        return "⚠️ Partial review — some files not reviewed"
     return "⚠️ Findings — not blocking"
 
 

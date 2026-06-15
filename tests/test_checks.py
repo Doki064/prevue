@@ -59,6 +59,31 @@ class TestConcludeReviewCheck:
         assert url in summary
         assert f"]({url})" in summary
 
+    def test_sticky_failed_note_in_summary(self) -> None:
+        repo = MagicMock()
+        gate = _gate(conclusion="neutral")
+        conclude_review_check(repo, "sha123", gate, sticky_failed=True)
+        summary = repo.create_check_run.call_args.kwargs["output"]["summary"]
+        assert "summary comment failed to post" in summary
+
+    def test_sticky_failed_partial_coverage_surfaced_in_check(self) -> None:
+        """When the sticky fails AND the review was partial, the skipped-file count must
+        appear in the check summary so the gate panel reflects incomplete coverage."""
+        repo = MagicMock()
+        gate = _gate(conclusion="success")
+        conclude_review_check(repo, "sha123", gate, sticky_failed=True, skipped_count=3)
+        summary = repo.create_check_run.call_args.kwargs["output"]["summary"]
+        assert "Partial review: 3 file(s) not reviewed" in summary
+
+    def test_sticky_ok_partial_coverage_not_duplicated_in_check(self) -> None:
+        """When the sticky posts fine, the partial-coverage note stays in the sticky only."""
+        repo = MagicMock()
+        gate = _gate(conclusion="success")
+        url = "https://github.com/o/r/pull/1#issuecomment-1"
+        conclude_review_check(repo, "sha123", gate, sticky_url=url, skipped_count=3)
+        summary = repo.create_check_run.call_args.kwargs["output"]["summary"]
+        assert "Partial review" not in summary
+
     def test_returns_false_when_check_run_post_fails(self, capsys) -> None:
         repo = MagicMock()
         repo.create_check_run.side_effect = GithubException(502, {"message": "Bad Gateway"}, None)

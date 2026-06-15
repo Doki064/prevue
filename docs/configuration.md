@@ -15,6 +15,8 @@ review:
 
 `max_input_tokens` stays under the ~250k-token stdin guard (`MAX_PROMPT_BYTES` / 4). Oversized PRs pack whole files by risk weight; skipped files are disclosed.
 
+**Limitation — LLM-only paths under tight budgets:** Pack priority is computed from `labels` globs and skill `applies-to` *before* the LLM classification fallback runs. A file that no deterministic glob matches gets the lowest pack priority and is dropped first when over budget — so the LLM fallback (which might have flagged it security-relevant) never sees it. Under tight `max_input_tokens`, unrule-matched high-risk files can be silently excluded. Mitigation: add an explicit `labels` glob for security-sensitive path patterns (e.g. `**/auth/**`, `**/*secret*`) so they pack ahead of generic files, or raise the budget.
+
 ## Skills
 
 ```yaml

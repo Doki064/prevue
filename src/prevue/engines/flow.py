@@ -19,6 +19,26 @@ def _token_meta(prompt: str, stdout: str = "") -> dict[str, int | bool]:
     }
 
 
+def _retry_token_meta(
+    prompt: str, retry_prompt: str, first_stdout: str, retry_stdout: str
+) -> dict[str, int | bool]:
+    """Sum both invocations' real inputs/outputs once each.
+
+    `retry_prompt` already embeds the full original `prompt` (see _build_retry_prompt),
+    so it is counted as the second invocation's input on its own — never concatenated
+    onto `prompt`, which would count the original prompt twice.
+    """
+    return {
+        "review": (
+            estimate_tokens(prompt)
+            + estimate_tokens(first_stdout)
+            + estimate_tokens(retry_prompt)
+            + estimate_tokens(retry_stdout)
+        ),
+        "estimated": True,
+    }
+
+
 def _degraded_result(
     prose: str,
     parse_error: str,
@@ -28,15 +48,14 @@ def _degraded_result(
     retried: bool,
     dropped_findings: int = 0,
     model_label: str,
-    prompt: str = "",
-    stdout: str = "",
+    tokens: dict[str, int | bool],
 ) -> ReviewResult:
     meta: dict[str, object] = {
         "model": model_label,
         "duration_s": round(time.monotonic() - start, 1),
         "retried": retried,
         "parse_error": parse_error,
-        "tokens": _token_meta(prompt, stdout),
+        "tokens": tokens,
     }
     return ReviewResult(
         summary_markdown=prose,
@@ -65,8 +84,10 @@ def review_with_retry(
 
     start = time.monotonic()
     retried = False
+    retry_prompt = ""
 
     stdout = invoke(prompt)
+    first_stdout = stdout
     prose, payload, fence_err = extract_json_fence(stdout)
 
     if fence_err:
@@ -79,14 +100,14 @@ def review_with_retry(
                 start,
                 retried=False,
                 model_label=model_label,
-                prompt=prompt,
-                stdout=stdout,
+                tokens=_token_meta(prompt, first_stdout),
             )
 
         retried = True
         try:
             stdout = invoke(retry_prompt)
         except EngineFailure:
+            # Retry input was sent but produced no output before failing.
             return _degraded_result(
                 prose,
                 fence_err,
@@ -94,7 +115,7 @@ def review_with_retry(
                 start,
                 retried=True,
                 model_label=model_label,
-                prompt=retry_prompt,
+                tokens=_retry_token_meta(prompt, retry_prompt, first_stdout, ""),
             )
 
         prose, payload, fence_err = extract_json_fence(stdout)
@@ -106,9 +127,13 @@ def review_with_retry(
                 start,
                 retried=True,
                 model_label=model_label,
-                prompt=retry_prompt,
-                stdout=stdout,
+                tokens=_retry_token_meta(prompt, retry_prompt, first_stdout, stdout),
             )
+
+    def _tokens() -> dict[str, int | bool]:
+        if retried:
+            return _retry_token_meta(prompt, retry_prompt, first_stdout, stdout)
+        return _token_meta(prompt, stdout)
 
     valid, dropped = validate_findings(payload or [])
     if payload and not valid:
@@ -121,7 +146,7 @@ def review_with_retry(
                 "model": model_label,
                 "duration_s": round(time.monotonic() - start, 1),
                 "retried": retried,
-                "tokens": _token_meta(prompt, stdout),
+                "tokens": _tokens(),
             },
         )
 
@@ -134,6 +159,6 @@ def review_with_retry(
             "model": model_label,
             "duration_s": round(time.monotonic() - start, 1),
             "retried": retried,
-            "tokens": _token_meta(prompt, stdout),
+            "tokens": _tokens(),
         },
     )
