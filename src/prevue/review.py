@@ -175,12 +175,14 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     except ValidationError as exc:
         reason = f"Invalid consumer skill file: {exc}"
         upsert_skip_note(pr, reason=reason)
-        conclude_skip_check(
+        check_published = conclude_skip_check(
             get_repo(ctx),
             diff.head_sha,
             conclusion="failure",
             reason=reason,
         )
+        if not check_published:
+            raise RuntimeError("Failed to publish skill-validation failure check run")
         return
     matched = select_skills(skills, [f.path for f in packed_files])
     instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
