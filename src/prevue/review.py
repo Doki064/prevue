@@ -320,65 +320,40 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         )
     engine_tokens = result.engine_meta.get("tokens")
     engine_tokens = engine_tokens if isinstance(engine_tokens, dict) else {}
+    sticky_kwargs = {
+        "classification": result_cls,
+        "loaded_skills": [
+            f"{s.name} ({s.bundle})"
+            if s.source == "builtin"
+            else f"{s.name} ({s.bundle}, consumer)"
+            for s in matched
+        ],
+        "gate": gate,
+        "classification_disclosure": classification_disclosure,
+        "skipped_paths": skipped_paths,
+        "skipped_reason": skipped_reason,
+        "skill_ratios": skill_ratios,
+        "token_meta": {
+            **engine_tokens,
+            "classify": classify_tokens,
+            # review provenance comes from the engine's own "estimated" flag;
+            # classify is always a bytes/4 estimate (estimate_classify_tokens).
+            "review_estimated": bool(engine_tokens.get("estimated")),
+            "classify_estimated": True,
+        },
+        "reviewed_file_count": len(packed_files),
+        "not_reviewed_file_count": len(skipped_files),
+        "cap_skipped": cap_skipped,
+    }
     try:
-        sticky = upsert_sticky(
-            pr,
-            result,
-            classification=result_cls,
-            loaded_skills=[
-                f"{s.name} ({s.bundle})"
-                if s.source == "builtin"
-                else f"{s.name} ({s.bundle}, consumer)"
-                for s in matched
-            ],
-            gate=gate,
-            classification_disclosure=classification_disclosure,
-            skipped_paths=skipped_paths,
-            skipped_reason=skipped_reason,
-            skill_ratios=skill_ratios,
-            token_meta={
-                **engine_tokens,
-                "classify": classify_tokens,
-                # review provenance comes from the engine's own "estimated" flag;
-                # classify is always a bytes/4 estimate (estimate_classify_tokens).
-                "review_estimated": bool(engine_tokens.get("estimated")),
-                "classify_estimated": True,
-            },
-            reviewed_file_count=len(packed_files),
-            not_reviewed_file_count=len(skipped_files),
-            cap_skipped=cap_skipped,
-        )
+        sticky = upsert_sticky(pr, result, **sticky_kwargs)
     except GithubException as exc:
         print(
             f"prevue: sticky comment upsert failed (HTTP {getattr(exc, 'status', '?')}), retrying",
             file=sys.stderr,
         )
         try:
-            sticky = upsert_sticky(
-                pr,
-                result,
-                classification=result_cls,
-                loaded_skills=[
-                    f"{s.name} ({s.bundle})"
-                    if s.source == "builtin"
-                    else f"{s.name} ({s.bundle}, consumer)"
-                    for s in matched
-                ],
-                gate=gate,
-                classification_disclosure=classification_disclosure,
-                skipped_paths=skipped_paths,
-                skipped_reason=skipped_reason,
-                skill_ratios=skill_ratios,
-                token_meta={
-                    **engine_tokens,
-                    "classify": classify_tokens,
-                    "review_estimated": bool(engine_tokens.get("estimated")),
-                    "classify_estimated": True,
-                },
-                reviewed_file_count=len(packed_files),
-                not_reviewed_file_count=len(skipped_files),
-                cap_skipped=cap_skipped,
-            )
+            sticky = upsert_sticky(pr, result, **sticky_kwargs)
             sticky_failed = False
         except GithubException as retry_exc:
             print(

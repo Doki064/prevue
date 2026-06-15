@@ -22,7 +22,7 @@ Findings may only reference lines present in the reviewed diff (position validat
 | 1 | Diff hunk content | 4-backtick diff fences, backtick escaping, `UNTRUSTED DATA` blocks, `INSTRUCTION_REASSERTION` tail |
 | 2 | File paths / status | JSON-escaped paths, fenced `UNTRUSTED DATA`, reassertion tail |
 | 3 | Classify fallback prompt | `build_classify_prompt` fences paths; reassertion tail |
-| 4 | Engine tool reach (PR metadata / network) | Adapters invoke CLIs with **no `--allow-tool` flags** (code-audited). Copilot: `copilot -s --no-ask-user`. Claude: `claude --bare -p --output-format text`. Cursor: `cursor-agent -p --output-format text -f`. Gemini adapter is a v1 skeleton (not invoked). **Human live-verify recommended** before production (07-05 UAT). |
+| 4 | Engine tool reach (PR metadata / network) | Adapters invoke CLIs with **no `--allow-tool` flags** (code-audited). Copilot: `copilot -s --no-ask-user`. Claude: `claude --bare -p --output-format text`. Cursor: `cursor-agent -p --output-format text -f`. Gemini adapter is a v1 skeleton (not invoked). **Live engine tool-posture verify (D-08) is a required pre-production checkpoint** — run each adapter in a sandbox PR and confirm no unexpected tool calls occur before enabling in merge-gate workflows. See 07-05 UAT checklist. |
 
 ## SKIL-04: base-ref-only loading
 

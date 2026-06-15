@@ -1034,8 +1034,7 @@ def test_run_review_consumer_override_and_cap_disclosure(
     # Oversized skill — exceeds max_skill_bytes cap, should appear in cap_skipped
     oversized = skills_dir / "oversized.md"
     oversized.write_text(
-        "---\nname: Oversized\ndescription: too big\napplies-to:\n  - '**/*'\n---\n"
-        + "x" * 70_000
+        "---\nname: Oversized\ndescription: too big\napplies-to:\n  - '**/*'\n---\n" + "x" * 70_000
     )
 
     monkeypatch.setenv("PREVUE_CONSUMER_ROOT", str(tmp_path))
@@ -1071,6 +1070,4 @@ def test_run_review_consumer_override_and_cap_disclosure(
         f"oversized not in cap_skipped: {cap_skipped}"
     )
     loaded = call_kwargs["loaded_skills"]
-    assert any("Consumer" in s for s in loaded), (
-        f"consumer override not in loaded_skills: {loaded}"
-    )
+    assert any("Consumer" in s for s in loaded), f"consumer override not in loaded_skills: {loaded}"
