@@ -225,6 +225,7 @@ class TestVerdictStrings:
         counts: dict[str, int] | None = None,
         degraded: bool = False,
         fail: str | None = None,
+        partial: bool = False,
     ) -> GateResult:
         cfg = ReviewConfig(min_severity_to_fail=fail)  # type: ignore[arg-type]
         return GateResult(
@@ -234,6 +235,7 @@ class TestVerdictStrings:
             inline=[],
             config=cfg,
             degraded=degraded,
+            partial=partial,
         )
 
     def test_verdict_title_success(self) -> None:
@@ -250,6 +252,19 @@ class TestVerdictStrings:
     def test_verdict_title_failure(self) -> None:
         gate = self._gate(conclusion="failure")
         assert verdict_title(gate) == "❌ Fail — findings at or above fail threshold"
+
+    def test_verdict_title_partial_zero_findings(self) -> None:
+        """A neutral-because-partial review with zero findings reads as a coverage
+        notice, not a findings verdict."""
+        gate = self._gate(conclusion="neutral", partial=True)
+        assert verdict_title(gate) == "⚠️ Partial review — some files not reviewed"
+
+    def test_verdict_title_partial_with_findings_still_findings(self) -> None:
+        """Partial + actual findings keeps the findings verdict (coverage is secondary)."""
+        gate = self._gate(
+            conclusion="neutral", partial=True, counts={"error": 0, "warning": 1, "info": 0}
+        )
+        assert verdict_title(gate) == "⚠️ Findings — not blocking"
 
     def test_severity_counts_line(self) -> None:
         gate = self._gate(

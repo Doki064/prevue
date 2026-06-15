@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 from pydantic import ValidationError
 
+from prevue.config import SkillsConfig
 from prevue.engines.errors import EngineFailure
 from prevue.engines.registry import UnknownEngineError
 from prevue.github.client import PrContext
@@ -532,6 +534,7 @@ def test_no_fit_neutral_skip() -> None:
     tiny_budget.review = MagicMock(max_input_tokens=100, output_reserve_tokens=0)
     tiny_budget.fallback = MagicMock(enabled=False)
     tiny_budget.skip = MagicMock()
+    tiny_budget.skills = SkillsConfig()
     tiny_budget.engine = "fake"
 
     class SpyEngine:
@@ -567,6 +570,106 @@ def test_no_fit_neutral_skip() -> None:
         conclusion="neutral",
         reason="PR too large to review within budget",
     )
+    mock_sticky.assert_not_called()
+    mock_check.assert_not_called()
+
+
+def test_empty_consumer_tree_does_not_over_reserve_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """With PREVUE_CONSUMER_ROOT set but zero consumer skills loaded, the pack budget
+    must not reserve the consumer ceiling (~64k tokens) — a file that fits the real
+    budget is reviewed, not dropped for headroom that never materializes."""
+    from prevue.classify.models import RuleSet
+    from prevue.config import FallbackConfig, PrevueConfig, SkillsConfig, SkipConfig
+    from prevue.gate import ReviewConfig
+
+    monkeypatch.setenv("PREVUE_CONSUMER_ROOT", str(tmp_path))
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    # ~40k-token file: fits under available (108k) but NOT under the old ceiling-reserved
+    # budget (108k - 65k = ~43k once builtin overhead is subtracted it would be dropped).
+    big = DiffBundle(
+        pr_number=PR_NUMBER,
+        base_sha=BASE_SHA,
+        head_sha=HEAD_SHA,
+        files=[
+            ChangedFile(
+                path="src/big.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+                patch="+" * 160_000,  # ~40k tokens at bytes/4
+            )
+        ],
+    )
+    config = PrevueConfig(
+        ruleset=RuleSet(ignore_globs=[], label_rules={"backend": ["**/*.py"]}, routing_map={}),
+        review=ReviewConfig(),  # default 120k budget
+        skip=SkipConfig(),
+        fallback=FallbackConfig(enabled=False),
+        skills=SkillsConfig(),
+        engine="fake",
+    )
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=big),
+        patch("prevue.review.load_config", return_value=config),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        # No consumer skills load (empty tree); builtins also empty for a clean budget.
+        patch(
+            "prevue.review.load_skills",
+            side_effect=lambda *a, **kw: ([], []) if kw.get("return_skipped") else [],
+        ),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        run_review(adapter=FindingsEngine())
+
+    kwargs = mock_upsert.call_args.kwargs
+    assert kwargs["reviewed_file_count"] == 1, "file dropped despite fitting the real budget"
+    assert kwargs["not_reviewed_file_count"] == 0
+
+
+def test_byte_limit_skip_runs_before_classify(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-24: a packed prompt exceeding MAX_PROMPT_BYTES (byte-estimate drift) yields a
+    neutral skip BEFORE llm_classify runs — no engine call, no classify tokens spent."""
+    monkeypatch.setattr("prevue.review.MAX_PROMPT_BYTES", 10)
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+
+    class SpyEngine:
+        name = "spy"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            raise AssertionError("engine must not be called when prompt exceeds byte limit")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.llm_classify") as mock_llm,
+        patch("prevue.review.upsert_skip_note") as mock_skip,
+        patch("prevue.review.conclude_skip_check", return_value=True) as mock_skip_check,
+        patch("prevue.review.upsert_sticky") as mock_sticky,
+        patch("prevue.review.conclude_review_check") as mock_check,
+    ):
+        run_review(adapter=SpyEngine())
+
+    mock_skip.assert_called_once_with(mock_pr, reason="PR too large to review within budget")
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        HEAD_SHA,
+        conclusion="neutral",
+        reason="PR too large to review within budget",
+    )
+    mock_llm.assert_not_called()  # byte guard runs before classification fallback
     mock_sticky.assert_not_called()
     mock_check.assert_not_called()
 
@@ -633,9 +736,7 @@ def test_invalid_review_config_raises_before_fetch() -> None:
     mock_get_adapter.assert_not_called()
 
 
-def test_run_review_load_config_default_path(
-    monkeypatch: pytest.MonkeyPatch, tmp_path
-) -> None:
+def test_run_review_load_config_default_path(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     mock_pr = MagicMock()
     mock_repo = _mock_repo()
     mock_sticky = _mock_sticky()
@@ -724,7 +825,7 @@ def test_fallback_only_on_packed() -> None:
                 status="added",
                 additions=1,
                 deletions=0,
-                patch="+" * 400,
+                patch="+" * 200_000,
             ),
         ],
     )
@@ -734,7 +835,8 @@ def test_fallback_only_on_packed() -> None:
             label_rules={"frontend": ["**/*.tsx"]},
             routing_map={},
         ),
-        review=ReviewConfig(max_input_tokens=150, output_reserve_tokens=0),
+        # Tight budget: mystery_b.bin (~50k tokens) must not fit; mystery_a.bin (~100) must.
+        review=ReviewConfig(max_input_tokens=5000, output_reserve_tokens=100),
         skip=SkipConfig(),
         fallback=FallbackConfig(enabled=True),
         skills=SkillsConfig(),
@@ -747,6 +849,10 @@ def test_fallback_only_on_packed() -> None:
         patch("prevue.review.load_config", return_value=tight_config),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
+        patch(
+            "prevue.review.load_skills",
+            side_effect=lambda *a, **kw: ([], []) if kw.get("return_skipped") else [],
+        ),
         patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
         patch("prevue.review.conclude_review_check", return_value=True),
@@ -901,7 +1007,9 @@ def test_run_review_partial_degrade_bills_routes_and_retains_general() -> None:
     mock_repo = _mock_repo()
     mock_sticky = _mock_sticky()
 
-    partial_disclosure = "classification fallback partially degraded — some files reviewed as general"
+    partial_disclosure = (
+        "classification fallback partially degraded — some files reviewed as general"
+    )
 
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
@@ -999,3 +1107,244 @@ def test_run_review_raises_when_review_check_not_published() -> None:
     ):
         with pytest.raises(RuntimeError, match="review check run"):
             run_review(adapter=FindingsEngine())
+
+
+def test_consumer_skills_root_skips_workspace_fallback_in_actions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """SKIL-04: inside Actions, GITHUB_WORKSPACE must not load consumer skills (may be PR head)."""
+    from prevue.review import _consumer_skills_root
+
+    skills_dir = tmp_path / ".github" / "prevue" / "skills"
+    skills_dir.mkdir(parents=True)
+
+    monkeypatch.setenv("GITHUB_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.delenv("PREVUE_CONSUMER_ROOT", raising=False)
+
+    root, note = _consumer_skills_root()
+    assert root is None, "GITHUB_WORKSPACE must not be used as skills root inside Actions"
+    # The skip is disclosed (sticky cap_skipped) and logged to stderr.
+    assert note is not None and "PREVUE_CONSUMER_ROOT not set" in note
+    assert "PREVUE_CONSUMER_ROOT not set" in capsys.readouterr().err
+
+    # Explicit PREVUE_CONSUMER_ROOT still loads, even in Actions.
+    monkeypatch.setenv("PREVUE_CONSUMER_ROOT", str(tmp_path))
+    root2, _ = _consumer_skills_root()
+    assert root2 == skills_dir.resolve()
+
+
+def test_run_review_malformed_consumer_skill_fail_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Malformed consumer skill: fail-closed check run, engine never invoked."""
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+
+    class SpyEngine:
+        name = "spy"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            raise AssertionError("engine must not be called on skill validation failure")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch(
+            "prevue.review.load_skills",
+            side_effect=ValidationError.from_exception_data("Skill", []),
+        ),
+        patch("prevue.review.upsert_skip_note") as mock_skip_note,
+        patch("prevue.review.conclude_skip_check", return_value=True) as mock_skip_check,
+        patch("prevue.review.upsert_sticky") as mock_sticky,
+        patch("prevue.review.conclude_review_check") as mock_check,
+    ):
+        run_review(adapter=SpyEngine())
+
+    mock_skip_note.assert_called_once()
+    reason = mock_skip_note.call_args.kwargs.get("reason", "")
+    assert "consumer skill" in reason
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        HEAD_SHA,
+        conclusion="failure",
+        reason=reason,
+        title="review failed",
+    )
+    mock_sticky.assert_not_called()
+    mock_check.assert_not_called()
+
+
+def test_run_review_unreadable_consumer_skill_fail_closed() -> None:
+    """OSError/UnicodeDecodeError from load_skills also fails closed (not just ValidationError)."""
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+
+    class SpyEngine:
+        name = "spy"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            raise AssertionError("engine must not be called on skill load failure")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch(
+            "prevue.review.load_skills",
+            side_effect=OSError("/secret/path/skill file unreadable"),
+        ),
+        patch("prevue.review.upsert_skip_note") as mock_skip_note,
+        patch("prevue.review.conclude_skip_check", return_value=True) as mock_skip_check,
+        patch("prevue.review.upsert_sticky") as mock_sticky,
+        patch("prevue.review.conclude_review_check") as mock_check,
+    ):
+        run_review(adapter=SpyEngine())
+
+    mock_skip_note.assert_called_once()
+    reason = mock_skip_note.call_args.kwargs.get("reason", "")
+    assert "consumer skill" in reason
+    # The public message must not leak the raw exception text (paths / parser dumps).
+    assert "/secret/path" not in reason
+    assert "OSError" in reason
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        HEAD_SHA,
+        conclusion="failure",
+        reason=reason,
+        title="review failed",
+    )
+    mock_sticky.assert_not_called()
+    mock_check.assert_not_called()
+
+
+def test_run_review_consumer_override_and_cap_disclosure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Consumer skill override wins; oversized skill is disclosed in sticky cap_skipped."""
+    from prevue.classify.models import RuleSet
+    from prevue.config import FallbackConfig, PrevueConfig, SkillsConfig, SkipConfig
+    from prevue.gate import ReviewConfig
+
+    # Build consumer skills tree under tmp_path/.github/prevue/skills/security/
+    skills_dir = tmp_path / ".github" / "prevue" / "skills" / "security"
+    skills_dir.mkdir(parents=True)
+
+    # Override skill — should win over built-in security bundle
+    override = skills_dir / "committed-secrets.md"
+    override.write_text(
+        "---\n"
+        "name: Committed Secrets (Consumer)\n"
+        "description: consumer override\n"
+        "applies-to:\n  - '**/*'\n"
+        "---\n"
+        "CONSUMER OVERRIDE sentinel\n"
+    )
+    # Oversized skill — exceeds max_skill_bytes cap, should appear in cap_skipped
+    oversized = skills_dir / "oversized.md"
+    oversized.write_text(
+        "---\nname: Oversized\ndescription: too big\napplies-to:\n  - '**/*'\n---\n" + "x" * 70_000
+    )
+
+    monkeypatch.setenv("PREVUE_CONSUMER_ROOT", str(tmp_path))
+
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+    tight_skills = SkillsConfig(max_skill_bytes=50_000)
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.load_config") as mock_config,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        mock_config.return_value = PrevueConfig(
+            ruleset=RuleSet(ignore_globs=[], label_rules={}, routing_map={}),
+            review=ReviewConfig(),
+            skip=SkipConfig(),
+            fallback=FallbackConfig(enabled=False),
+            skills=tight_skills,
+            engine="fake",
+        )
+        run_review(adapter=FindingsEngine())
+
+    call_kwargs = mock_upsert.call_args.kwargs
+    cap_skipped = call_kwargs["cap_skipped"]
+    assert any("oversized.md" in s for s in cap_skipped), (
+        f"oversized not in cap_skipped: {cap_skipped}"
+    )
+    loaded = call_kwargs["loaded_skills"]
+    assert any("Consumer" in s for s in loaded), f"consumer override not in loaded_skills: {loaded}"
+
+
+def test_run_review_invalid_yaml_frontmatter_fail_closed(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A consumer skill with syntactically invalid YAML frontmatter fails closed
+    (yaml.YAMLError from frontmatter.loads) instead of crashing the job."""
+    from prevue.classify.models import RuleSet
+    from prevue.config import FallbackConfig, PrevueConfig, SkillsConfig, SkipConfig
+    from prevue.gate import ReviewConfig
+
+    skills_dir = tmp_path / ".github" / "prevue" / "skills" / "security"
+    skills_dir.mkdir(parents=True)
+    # Invalid YAML: unbalanced bracket / bad indentation in the frontmatter block.
+    bad = skills_dir / "broken.md"
+    bad.write_text("---\nname: [unclosed\n  bad: : :\napplies-to: ]\n---\nbody\n")
+
+    monkeypatch.setenv("PREVUE_CONSUMER_ROOT", str(tmp_path))
+
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+
+    class SpyEngine:
+        name = "spy"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            raise AssertionError("engine must not be called on invalid YAML frontmatter")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.load_config") as mock_config,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.upsert_skip_note") as mock_skip_note,
+        patch("prevue.review.conclude_skip_check", return_value=True) as mock_skip_check,
+        patch("prevue.review.upsert_sticky") as mock_sticky,
+        patch("prevue.review.conclude_review_check") as mock_check,
+    ):
+        mock_config.return_value = PrevueConfig(
+            ruleset=RuleSet(ignore_globs=[], label_rules={}, routing_map={}),
+            review=ReviewConfig(),
+            skip=SkipConfig(),
+            fallback=FallbackConfig(enabled=False),
+            skills=SkillsConfig(),
+            engine="fake",
+        )
+        run_review(adapter=SpyEngine())
+
+    mock_skip_note.assert_called_once()
+    reason = mock_skip_note.call_args.kwargs.get("reason", "")
+    assert "consumer skill" in reason
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        HEAD_SHA,
+        conclusion="failure",
+        reason=reason,
+        title="review failed",
+    )
+    mock_sticky.assert_not_called()
+    mock_check.assert_not_called()

@@ -88,6 +88,12 @@ skip:
 - **Custom skills:** [skills.md](./skills.md)
 - **`skills.exclude`:** list paths like `security/committed-secrets.md` to drop a skill regardless of built-in or consumer source.
 
+### ⚠️ Tight budgets can skip unclassified files
+
+Files are packed by risk priority (label rules + skill `applies-to`) **before** the LLM classification fallback runs. Under a tight `max_input_tokens`, a file that matches **no** deterministic rule or skill is packed last and may be **budget-skipped entirely** — so the LLM fallback never sees it and it is **not reviewed**. The check can still conclude neutral/pass with zero findings while those paths went unreviewed; the sticky comment's **Coverage** section lists exactly which files were skipped.
+
+To avoid silently dropping risk-bearing paths: add an explicit `labels` glob for sensitive patterns (e.g. `**/auth/**`, `**/*secret*`) so they pack ahead of generic files, or raise `review.max_input_tokens`. Always read the Coverage section on partial reviews — the verdict reads **"⚠️ Partial review — some files not reviewed"** when files were skipped with no findings.
+
 ## Required permissions
 
 The caller workflow must grant these scopes to the reusable workflow:
@@ -100,9 +106,27 @@ The caller workflow must grant these scopes to the reusable workflow:
 
 Do **not** use `secrets: inherit`. Pass only the named secret for your chosen engine.
 
+## Consumer config/skills require a base-ref checkout
+
+The bundled reusable workflow sets **`PREVUE_CONSUMER_ROOT`** automatically (to a base-ref checkout), so your `.github/prevue.yml` and `.github/prevue/skills/` are loaded. If you integrate the Python entrypoint into your **own** workflow and do **not** set `PREVUE_CONSUMER_ROOT`, Prevue runs with **framework defaults**: consumer config is ignored and consumer skills are skipped (a SKIL-04 base-ref safeguard — `GITHUB_WORKSPACE` may point to the PR merge ref, so it is never used as the trust root). The skip is logged to stderr in the Action log. To activate your custom thresholds and skills, set `PREVUE_CONSUMER_ROOT` to a checkout of the trusted base ref.
+
 ## Branch protection
 
 Require the **`prevue/review`** check (posted by Prevue Python), not the **`prevue / review`** workflow job check. On skip, Prevue posts `prevue/review` as **neutral**; the Actions job still exits 0 and its job check shows **success** — that is expected and must not be the required gate.
+
+**Partial reviews are neutral by design.** When a PR exceeds the token budget, Prevue reviews the highest-priority files and reports the rest in the sticky comment's Coverage section; with no threshold-triggering findings the check concludes **neutral**, not failure. If your branch protection treats neutral as success, a PR with budget-skipped files can merge — read the Coverage section, or raise `review.max_input_tokens` so more files fit. (If the sticky comment itself fails to post, the skipped-file count is surfaced in the check summary instead.)
+
+## Engine tool-posture check before merge gates (D-08)
+
+Before you make `prevue/review` a **required** check, run a live tool-posture verification of each engine you enable. Prevue's adapters pass **no `--allow-tool` flags** (statically tested), but a headless engine CLI's default tool access (network, GitHub API, shell) is **vendor-controlled** and cannot be proven by source scan alone — see the D-08 row in [SECURITY.md](../SECURITY.md).
+
+**Required once per engine, in a sandbox repo:**
+
+1. Open a throwaway PR that the engine reviews.
+2. Confirm in the Action logs that the engine made **no unexpected tool calls** (no outbound network beyond the model API, no GitHub writes outside Prevue's own check/comment calls).
+3. Only then enable `prevue/review` as a required gate on protected branches.
+
+Treat this as **mandatory, not optional**, when enabling merge gates.
 
 ## Per-engine named secrets
 

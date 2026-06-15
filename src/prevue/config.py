@@ -15,6 +15,10 @@ from prevue.classify.rules import load_default_rules, merge_rules
 from prevue.engines.registry import DEFAULT_ENGINE
 from prevue.gate import ReviewConfig
 
+# Sentinel path that never exists on a runner; signals load_config() to use framework
+# defaults when no trusted base-ref root is available in Actions (SKIL-04 fail-closed).
+NO_CONSUMER_CONFIG_SENTINEL = "/nonexistent/prevue-no-consumer-config.yml"
+
 
 class SkipConfig(BaseModel):
     """Consumer skip policy (NOIS-01, D-13/14/15)."""
@@ -51,8 +55,14 @@ class SkillsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     exclude: list[str] = Field(default_factory=list)
+    # Per-skill body cap: 64 KiB (65536) — one skill ≈ 16k tokens at bytes/4, a
+    # generous ceiling for a focused guideline while bounding any single file.
     max_skill_bytes: int = Field(default=65536, ge=1)
+    # Aggregate consumer-skill body cap: 256 KiB (262144) — ~64k tokens, roughly half
+    # the 120k default review budget, leaving room for the diff itself.
     max_total_consumer_bytes: int = Field(default=262144, ge=1)
+    # Count cap: 50 consumer skills — bounds per-PR loading work; well above the
+    # handful a typical repo defines.
     max_consumer_skills: int = Field(default=50, ge=1)
 
 
@@ -85,7 +95,22 @@ def resolve_consumer_config_path(
     if ".." in rel.parts:
         raise ValueError("config path must not contain '..'")
 
-    root_candidate = root_env or os.environ.get("GITHUB_WORKSPACE")
+    if root_env:
+        root_candidate: str | None = root_env
+    elif os.environ.get("GITHUB_ACTIONS"):
+        # In Actions, neither GITHUB_WORKSPACE nor cwd is guaranteed to be the base ref
+        # — both can be the PR merge ref, so a PR-head prevue.yml could weaken its own
+        # review thresholds (SKIL-04 gap). Fail closed: return a sentinel non-existent
+        # path so load_config() uses framework defaults and never reads PR-head config.
+        print(
+            "prevue: PREVUE_CONSUMER_ROOT not set in Actions; consumer config ignored, "
+            "using framework defaults (SKIL-04: workspace/cwd may be PR head, not base ref). "
+            "Set PREVUE_CONSUMER_ROOT to the base-ref checkout to load consumer prevue.yml.",
+            file=sys.stderr,
+        )
+        return Path(NO_CONSUMER_CONFIG_SENTINEL)
+    else:
+        root_candidate = os.environ.get("GITHUB_WORKSPACE")
     if root_candidate is None:
         if rel.is_absolute():
             raise ValueError(

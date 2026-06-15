@@ -78,6 +78,22 @@ def test_exclude_removes_builtin(skills_fixture_root: Path) -> None:
     assert "security/committed-secrets.md" not in keys
 
 
+def test_exclude_typo_warns(skills_fixture_root: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A skills.exclude key that matches no loaded skill warns on stderr AND is disclosed
+    in the skipped/sticky list (not silent, not log-only)."""
+    cfg = SkillsConfig(exclude=["security/committed-secret.md"])  # typo: missing 's'
+    _skills, skipped = load_skills(
+        consumer_skills_root=_consumer_root(),
+        builtin_skills_root=skills_fixture_root,
+        skills_config=cfg,
+        return_skipped=True,
+    )
+    err = capsys.readouterr().err
+    assert "matched no loaded skill" in err
+    assert "committed-secret.md" in err
+    assert any("committed-secret.md" in e and "exclude key" in e for e in skipped)
+
+
 def test_over_cap_skips_and_discloses(skills_fixture_root: Path) -> None:
     cfg = SkillsConfig(max_skill_bytes=65536)
     skills, skipped = load_skills(
@@ -89,3 +105,57 @@ def test_over_cap_skips_and_discloses(skills_fixture_root: Path) -> None:
     keys = {f"{s.bundle}/{s.filename}" for s in skills}
     assert "security/oversized.md" not in keys
     assert any("security/oversized.md" in entry for entry in skipped)
+
+
+def test_oversized_skipped_before_full_read(
+    skills_fixture_root: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The per-skill cap is enforced on file size before the body is read into memory."""
+    consumer = tmp_path / "consumer" / "security"
+    consumer.mkdir(parents=True)
+    big = consumer / "huge.md"
+    big.write_text(
+        "---\nname: Huge\ndescription: big\napplies-to:\n  - '**/*'\n---\n" + "z" * 80_000
+    )
+
+    # read_text must never be called on a file rejected by the st_size precheck.
+    real_read_text = Path.read_text
+
+    def _guard_read_text(self: Path, *a, **kw):
+        if self.name == "huge.md":
+            raise AssertionError("oversized file read into memory despite st_size precheck")
+        return real_read_text(self, *a, **kw)
+
+    monkeypatch.setattr(Path, "read_text", _guard_read_text)
+
+    cfg = SkillsConfig(max_skill_bytes=65536)
+    skills, skipped = load_skills(
+        consumer_skills_root=tmp_path / "consumer",
+        builtin_skills_root=skills_fixture_root,
+        skills_config=cfg,
+        return_skipped=True,
+    )
+    assert any("security/huge.md" in e and "max_skill_bytes" in e for e in skipped)
+    assert all(s.filename != "huge.md" for s in skills)
+
+
+def test_symlinked_skill_escaping_root_disclosed(skills_fixture_root: Path, tmp_path: Path) -> None:
+    """A consumer skill file symlinked outside the root is skipped AND disclosed."""
+    secret = tmp_path / "outside-secret.md"
+    secret.write_text("---\nname: Evil\ndescription: x\napplies-to:\n  - '**/*'\n---\npwn\n")
+
+    consumer = tmp_path / "consumer" / "security"
+    consumer.mkdir(parents=True)
+    link = consumer / "escape.md"
+    try:
+        link.symlink_to(secret)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not supported on this platform")
+
+    skills, skipped = load_skills(
+        consumer_skills_root=tmp_path / "consumer",
+        builtin_skills_root=skills_fixture_root,
+        return_skipped=True,
+    )
+    assert all(s.filename != "escape.md" for s in skills)
+    assert any("escape.md" in e and "symlink guard" in e for e in skipped)

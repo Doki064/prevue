@@ -78,6 +78,19 @@ def test_render_body_metadata_canonical_label_order() -> None:
     assert bundles_section.index("security") < bundles_section.index("infra")
 
 
+def test_render_body_label_value_backticks_escaped() -> None:
+    """After LLM fallback, a label value can be an untrusted PR path; backticks in it
+    must be escaped so they cannot break the inline code span / sticky layout."""
+    classification = ClassificationResult(
+        labels={"backend": "src/eval`rm -rf`.py"},
+        bundles=["backend"],
+    )
+    body = render_body(_sample_result(), classification=classification)
+    labels_section = body.split("Labels: ", 1)[1].split("\nBundles:", 1)[0]
+    assert "\\`" in labels_section  # backtick escaped
+    assert "`rm -rf`" not in labels_section  # raw unescaped span did not survive
+
+
 def test_render_body_loaded_skills() -> None:
     body = render_body(
         _sample_result(),
@@ -640,6 +653,19 @@ class TestStickyWithGate:
         assert "bad\\|pipe" in body
         assert "| 🔴 error | `x.py:5` | bad\\|pipe | 💬 inline |" in body
 
+    def test_table_neutralizes_html_in_title(self) -> None:
+        finding = self._finding(title="<b>x</b>", path="x.py", line=5)
+        gate = GateResult(
+            conclusion="neutral",
+            severity_counts={"error": 1, "warning": 0, "info": 0},
+            placed=[PlacedFinding(finding=finding, placement="inline")],
+            inline=[finding],
+            config=ReviewConfig(),
+        )
+        body = render_body(_sample_result(), gate=gate)
+        assert "<b>" not in body
+        assert "&lt;b>x&lt;/b>" in body
+
     def test_upsert_sticky_returns_created_comment(self) -> None:
         created = MagicMock()
         pr = MagicMock()
@@ -678,6 +704,36 @@ class TestStickyWithGate:
         assert "`docs/readme.md`" in body
         assert "`assets/logo.png`" in body
         assert body.index("### Coverage") < body.index("### Metadata")
+
+    def test_skipped_reason_html_escaped_in_summary(self) -> None:
+        """A skipped_reason containing HTML cannot break out of the <summary> wrapper."""
+        body = render_body(
+            _sample_result(),
+            gate=self._gate(),
+            skipped_paths=["docs/readme.md"],
+            skipped_reason="boom</summary><script>alert(1)</script>",
+        )
+        # Escaping the leading `<` (as render_finding_details does) is enough to stop
+        # the tag closing the wrapper — the raw `</summary><script>` must not survive.
+        assert "boom</summary>" not in body
+        assert "<script>" not in body
+        assert "boom&lt;/summary>&lt;script>" in body
+
+    def test_llm_summary_html_comment_neutralized(self) -> None:
+        """An HTML comment / declaration in untrusted LLM summary is neutralized too
+        (not only tags), so it cannot hide content or aid a <details> breakout."""
+        result = ReviewResult(
+            summary_markdown="ok <!-- </details> --> <?php ?> done",
+            findings=[],
+            engine_meta={"model": "fake", "duration_s": 0.1},
+        )
+        body = render_body(result, gate=self._gate())
+        # Scope to the Review section — the sticky MARKER is itself an HTML comment.
+        review = body.split("### Review\n", 1)[1].split("\n\n", 1)[0]
+        assert "<!--" not in review
+        assert "<?php" not in review
+        assert "&lt;!--" in review
+        assert "&lt;?php" in review
 
     def test_token_line_estimated(self) -> None:
         body = render_body(
@@ -788,6 +844,16 @@ class TestInlineTemplate:
     def test_inline_body_escapes_markdown_control_chars(self) -> None:
         rendered = render_inline_comment(self._finding(body="ping [link](x) and `code`"))
         assert "ping \\[link\\](x) and \\`code\\`" in rendered
+
+    def test_inline_comment_neutralizes_html(self) -> None:
+        """Inline comments render to all PR viewers — HTML in title/body must be encoded."""
+        rendered = render_inline_comment(
+            self._finding(title="<img src=x onerror=alert(1)>", body="<script>evil()</script>")
+        )
+        assert "<img" not in rendered
+        assert "<script>" not in rendered
+        assert "&lt;img" in rendered
+        assert "&lt;script>" in rendered
 
 
 def test_upsert_sticky_skips_bot_comment_when_marker_not_at_start() -> None:
