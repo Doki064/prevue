@@ -69,3 +69,11 @@ class TestOutputContract:
         prompt = _build_prompt(make_sample_request())
         assert "Clear, Concise, Correct, Complete" in prompt
         assert prompt.index("Clear") < prompt.index("UNTRUSTED DATA")
+
+    def test_reassertion_after_untrusted_block(self) -> None:
+        from prevue.engines.prompt import INSTRUCTION_REASSERTION
+
+        prompt = _build_prompt(make_sample_request())
+        last_fence = prompt.rfind("~~~")
+        assert INSTRUCTION_REASSERTION in prompt
+        assert prompt.index(INSTRUCTION_REASSERTION) > last_fence

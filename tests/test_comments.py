@@ -91,6 +91,47 @@ def test_render_body_loaded_skills() -> None:
     assert "Skills: Committed Secrets & Credentials (security)" in body
 
 
+def test_render_body_engine_from_meta() -> None:
+    result = ReviewResult(
+        summary_markdown="## Review",
+        findings=[],
+        engine_meta={"model": "fake", "duration_s": 0.1, "engine": "cursor-cli"},
+    )
+    body = render_body(result)
+
+    assert "Engine: cursor-cli" in body
+    assert "Engine: copilot-cli" not in body
+
+
+def test_render_body_skill_consumer_source() -> None:
+    body = render_body(
+        _sample_result(),
+        classification=ClassificationResult(
+            labels={"security": "**/*"},
+            bundles=["security"],
+        ),
+        loaded_skills=["Custom Rule (security, consumer)"],
+    )
+
+    assert "Skills: Custom Rule (security, consumer)" in body
+
+
+def test_render_body_single_skills_line_with_loaded_and_ratios() -> None:
+    """WR-01: loaded_skills + skill_ratios must not emit two conflicting Skills lines."""
+    body = render_body(
+        _sample_result(),
+        classification=ClassificationResult(
+            labels={"security": "**/*"},
+            bundles=["security"],
+        ),
+        loaded_skills=["Committed Secrets & Credentials (security)"],
+        skill_ratios={"security": (1, 2)},
+    )
+
+    assert body.count("\nSkills:") == 1
+    assert "Skill coverage: 1/2 loaded" in body
+
+
 def test_render_body_metadata_shows_dropped_count() -> None:
     """D-09: dropped-file count surfaced in Metadata audit trail."""
     classification = ClassificationResult(
@@ -554,6 +595,8 @@ class TestStickyWithGate:
         assert verdict_title(gate) in body
         assert severity_counts_line(gate) in body
         assert thresholds_line(gate) in body
+        # WR-02: thresholds belong under Verdict only — not duplicated in Metadata.
+        assert body.count("Thresholds:") == 1
 
     def test_findings_table_row_count(self) -> None:
         body = render_body(_sample_result(), gate=self._gate())
@@ -621,6 +664,57 @@ class TestStickyWithGate:
         pr.create_issue_comment.return_value = created
 
         assert upsert_skip_note(pr, dropped_count=2) is created
+
+    def test_skipped_files_disclosure(self) -> None:
+        body = render_body(
+            _sample_result(),
+            gate=self._gate(),
+            skipped_paths=["docs/readme.md", "assets/logo.png"],
+            skipped_reason="security/risk-weighted whole-file packing",
+        )
+
+        assert "2 files not reviewed (over token budget)" in body
+        assert "<details>" in body
+        assert "`docs/readme.md`" in body
+        assert "`assets/logo.png`" in body
+        assert body.index("### Coverage") < body.index("### Metadata")
+
+    def test_token_line_estimated(self) -> None:
+        body = render_body(
+            _sample_result(),
+            token_meta={"review": 1200, "classify": 80, "estimated": True},
+        )
+        assert "Tokens: review ~est 1200" in body
+        assert "classify ~est 80" in body
+
+    def test_token_line_per_metric_provenance(self) -> None:
+        """WR-03: review can be exact while classify is estimated — markers independent."""
+        body = render_body(
+            _sample_result(),
+            token_meta={
+                "review": 1200,
+                "classify": 80,
+                "review_estimated": False,
+                "classify_estimated": True,
+            },
+        )
+        assert "Tokens: review 1200" in body
+        assert "review ~est" not in body
+        assert "classify ~est 80" in body
+
+    def test_per_bundle_ratio_line(self) -> None:
+        body = render_body(
+            _sample_result(),
+            skill_ratios={
+                "security": (2, 3),
+                "frontend": (1, 4),
+                "backend": (0, 3),
+            },
+        )
+        assert "Skill coverage: 3/10 loaded" in body
+        assert "security 2/3" in body
+        assert "frontend 1/4" in body
+        assert "backend 0/3" in body
 
 
 class TestInlineTemplate:
