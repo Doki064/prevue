@@ -226,7 +226,7 @@ def render_body(
         "## Prevue Review\n\n"
         f"### Verdict\n"
         f"{verdict_section}"
-        f"### Review\n{result.summary_markdown}\n\n"
+        f"### Review\n{re.sub(r'<(?=[/a-zA-Z])', '&lt;', result.summary_markdown)}\n\n"
         f"{findings_section}"
         f"{details_section}"
         f"{coverage_section}"

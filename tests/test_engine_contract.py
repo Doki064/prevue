@@ -234,3 +234,18 @@ def test_gemini_classify_raises_not_implemented() -> None:
     adapter = get_adapter("gemini-cli")
     with pytest.raises(NotImplementedError, match="does not implement classify"):
         adapter.classify(["src/main.py"], CANONICAL_LABEL_ORDER)
+
+
+def test_adapter_cli_commands_contain_no_allow_tool_flags() -> None:
+    """D-08 regression: no adapter may pass --allow-tool to its CLI subprocess."""
+    import pathlib
+
+    engines_dir = pathlib.Path("src/prevue/engines")
+    violations: list[str] = []
+
+    for py_file in sorted(engines_dir.glob("*.py")):
+        source = py_file.read_text(encoding="utf-8")
+        if "--allow-tool" in source:
+            violations.append(f"{py_file}: contains '--allow-tool' flag")
+
+    assert not violations, "Adapters must not pass --allow-tool to CLI: " + "; ".join(violations)
