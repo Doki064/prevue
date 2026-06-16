@@ -1,6 +1,6 @@
 name: Prevue Review
 
-# Dogfood: pull_request attaches to PR; wait-ci gates on test-and-lint check_run.
+# Dogfood: pull_request attaches to PR; wait-ci gates on pull_request CI workflow.
 # LIFE-04 resolveReviewThread requires contents:write — see prevue-review.yml / consumer-setup.md.
 on:
   pull_request:
@@ -17,12 +17,12 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.draft != true
     permissions:
-      checks: read
+      actions: read
     runs-on: ubuntu-latest
     outputs:
       ci_ok: ${{ steps.wait.outputs.ci_ok }}
     steps:
-      - name: Wait for CI test-and-lint
+      - name: Wait for pull_request CI workflow
         id: wait
         env:
           GH_TOKEN: ${{ github.token }}
@@ -32,26 +32,30 @@ jobs:
           set -euo pipefail
           deadline=$((SECONDS + 1800))
           while [ "$SECONDS" -lt "$deadline" ]; do
-            runs=$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/check-runs?per_page=100" \
-              --jq '[.check_runs[] | select(.name=="test-and-lint")]')
-            count=$(printf '%s' "$runs" | jq 'length')
+            run=$(gh run list \
+              --repo "$REPOSITORY" \
+              --workflow ci.yml \
+              --commit "$HEAD_SHA" \
+              --event pull_request \
+              --limit 1 \
+              --json status,conclusion,event)
+            count=$(printf '%s' "$run" | jq 'length')
             if [ "$count" -eq 0 ]; then
-              echo "No test-and-lint check run yet; waiting..."
+              echo "No pull_request CI workflow run yet; waiting..."
               sleep 15
               continue
             fi
-            latest=$(printf '%s' "$runs" | jq 'sort_by(.started_at) | last')
-            status=$(printf '%s' "$latest" | jq -r .status)
-            conclusion=$(printf '%s' "$latest" | jq -r .conclusion)
-            echo "test-and-lint: status=${status} conclusion=${conclusion}"
+            status=$(printf '%s' "$run" | jq -r '.[0].status')
+            conclusion=$(printf '%s' "$run" | jq -r '.[0].conclusion')
+            echo "CI (pull_request): status=${status} conclusion=${conclusion}"
             if [ "$status" = "completed" ]; then
               case "$conclusion" in
                 success)
                   echo "ci_ok=true" >> "$GITHUB_OUTPUT"
                   exit 0
                   ;;
-                failure|cancelled|timed_out|action_required)
-                  echo "CI test-and-lint did not pass; skipping Prevue review."
+                failure|cancelled|timed_out|action_required|startup_failure|stale)
+                  echo "pull_request CI did not pass; skipping Prevue review."
                   echo "ci_ok=false" >> "$GITHUB_OUTPUT"
                   exit 0
                   ;;
@@ -61,7 +65,7 @@ jobs:
               sleep 15
             fi
           done
-          echo "Timed out waiting for test-and-lint; skipping Prevue review." >&2
+          echo "Timed out waiting for pull_request CI; skipping Prevue review." >&2
           echo "ci_ok=false" >> "$GITHUB_OUTPUT"
 
   review:

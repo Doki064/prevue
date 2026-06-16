@@ -52,12 +52,16 @@ def test_dogfood_triggers_on_pull_request_and_waits_for_ci() -> None:
     jobs = wf.get("jobs", {})
     assert "wait-ci" in jobs
     wait_run = jobs["wait-ci"]["steps"][0]["run"]
-    assert "test-and-lint" in wait_run
+    assert "--workflow ci.yml" in wait_run
+    assert "--event pull_request" in wait_run
     assert jobs["wait-ci"]["outputs"]["ci_ok"] == "${{ steps.wait.outputs.ci_ok }}"
 
     review_job = jobs.get("review", {})
     assert review_job.get("needs") == "wait-ci"
+    wait_if = jobs["wait-ci"].get("if", "")
     review_if = review_job.get("if", "")
+    assert "pull_request.head.repo.full_name == github.repository" in wait_if
+    assert "pull_request.head.repo.full_name == github.repository" in review_if
     assert "needs.wait-ci.outputs.ci_ok == 'true'" in review_if
     assert "pull_request.draft != true" in review_if
 
@@ -81,7 +85,7 @@ def test_minimal_permissions() -> None:
         "checks": "write",
     }
     wait_perms = wf.get("jobs", {}).get("wait-ci", {}).get("permissions", {})
-    assert wait_perms == {"checks": "read"}
+    assert wait_perms == {"actions": "read"}
 
 
 def test_no_pull_request_target_in_source() -> None:
