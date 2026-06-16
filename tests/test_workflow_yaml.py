@@ -34,25 +34,29 @@ def test_review_workflow_exists() -> None:
     assert REVIEW_WORKFLOW.is_file()
 
 
-def test_pull_request_trigger_only() -> None:
+def test_dogfood_triggers_after_ci_success() -> None:
     wf = _load_review_workflow()
-    on = wf.get("on") or wf.get(True)  # yaml key `on` may parse as True
-    assert on is not None
-    if isinstance(on, dict):
-        assert "pull_request" in on
-        assert "pull_request_target" not in on
-    else:
-        assert on == "pull_request"
-
-
-def test_pull_request_types() -> None:
-    wf = _load_review_workflow()
+    text = REVIEW_WORKFLOW.read_text(encoding="utf-8")
+    assert "zizmor: ignore[dangerous-triggers]" in text
     on = wf.get("on") or wf.get(True)
     assert isinstance(on, dict)
-    pr = on["pull_request"]
-    if isinstance(pr, dict):
-        assert pr.get("branches") == ["main"]
-        assert pr.get("types") == ["opened", "synchronize", "reopened", "ready_for_review"]
+    assert on.get("workflow_run", {}).get("workflows") == ["CI"]
+    assert on.get("workflow_run", {}).get("types") == ["completed"]
+    review_job = wf.get("jobs", {}).get("review", {})
+    review_if = review_job.get("if", "")
+    assert "workflow_run.conclusion == 'success'" in review_if
+    assert "workflow_run.event == 'pull_request'" in review_if
+
+
+def test_dogfood_passes_pr_shas_via_workflow_run_inputs() -> None:
+    wf = _load_review_workflow()
+    with_block = wf.get("jobs", {}).get("review", {}).get("with", {})
+    assert with_block.get("prevue-ref") == "${{ github.event.workflow_run.head_sha }}"
+    assert with_block.get("pr-head-sha") == "${{ github.event.workflow_run.head_sha }}"
+    assert (
+        with_block.get("consumer-base-sha")
+        == "${{ github.event.workflow_run.pull_requests[0].base.sha }}"
+    )
 
 
 def test_minimal_permissions() -> None:
@@ -73,9 +77,7 @@ def test_no_pull_request_target_in_source() -> None:
 def test_review_yml_uses_reusable_workflow() -> None:
     wf = _load_review_workflow()
     review_job = wf.get("jobs", {}).get("review", {})
-    assert review_job.get("if") == (
-        "${{ github.event.pull_request.head.repo.full_name == github.repository }}"
-    )
+    assert "workflow_run.conclusion == 'success'" in review_job.get("if", "")
     uses = review_job.get("uses", "")
     assert "./.github/workflows/prevue-review.yml" in uses or uses.endswith("prevue-review.yml")
     assert "runs-on" not in review_job
@@ -100,7 +102,7 @@ def test_dogfood_caller_engine_from_repo_variable() -> None:
 def test_dogfood_caller_passes_prevue_ref_head_sha() -> None:
     wf = _load_review_workflow()
     with_block = wf.get("jobs", {}).get("review", {}).get("with", {})
-    assert with_block.get("prevue-ref") == "${{ github.event.pull_request.head.sha }}"
+    assert with_block.get("prevue-ref") == "${{ github.event.workflow_run.head_sha }}"
 
 
 def test_single_prevue_review_invocation_in_reusable() -> None:
@@ -223,7 +225,10 @@ def test_consumer_checkout_uses_base_sha_in_reusable() -> None:
             path = str(with_block.get("path", ""))
             if path == "consumer":
                 consumer_refs.append(str(with_block.get("ref", "")))
-    assert consumer_refs == ["${{ github.event.pull_request.base.sha }}"]
+    assert len(consumer_refs) == 1
+    ref = consumer_refs[0]
+    assert "inputs.consumer-base-sha" in ref
+    assert "github.event.pull_request.base.sha" in ref
 
 
 def _get_reusable_steps() -> list[dict]:

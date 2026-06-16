@@ -15,6 +15,14 @@ on:
         type: string
         required: false
         default: ""
+      pr-head-sha:
+        type: string
+        required: false
+        default: ""
+      consumer-base-sha:
+        type: string
+        required: false
+        default: ""
       seed-consumer-config:
         type: boolean
         required: false
@@ -40,7 +48,15 @@ jobs:
     # Skip drafts; and forks (v1 does not review fork PRs — defense-in-depth so a
     # caller that omits its own fork guard still avoids checkout/uv/CLI spend before
     # the Python guard fires).
-    if: ${{ !github.event.pull_request.draft && github.event.pull_request.head.repo.full_name == github.repository }}
+    if: >-
+      ${{
+        (inputs.pr-head-sha != '' && inputs.consumer-base-sha != '')
+        || (
+          github.event.pull_request
+          && !github.event.pull_request.draft
+          && github.event.pull_request.head.repo.full_name == github.repository
+        )
+      }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Prevue framework
@@ -54,7 +70,7 @@ jobs:
       - name: Checkout consumer base ref
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ inputs.consumer-base-sha != '' && inputs.consumer-base-sha || github.event.pull_request.base.sha }}
           path: consumer
           persist-credentials: false
 
@@ -81,7 +97,7 @@ jobs:
         working-directory: .prevue
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_SHA: ${{ inputs.pr-head-sha != '' && inputs.pr-head-sha || github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO: ${{ github.repository }}
         run: |

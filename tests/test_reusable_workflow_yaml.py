@@ -37,7 +37,8 @@ def test_two_checkouts() -> None:
                 checkout_steps.append(step)
     assert len(checkout_steps) >= 2
     refs = [str((step.get("with") or {}).get("ref", "")) for step in checkout_steps]
-    assert any("${{ github.event.pull_request.base.sha }}" in ref for ref in refs)
+    assert any("github.event.pull_request.base.sha" in ref for ref in refs)
+    assert any("inputs.consumer-base-sha" in ref for ref in refs)
     assert any("prevue" in ref.lower() or "inputs.prevue-ref" in ref for ref in refs)
 
 
