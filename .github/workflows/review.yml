@@ -1,6 +1,7 @@
 name: Prevue Review
 
 # Dogfood: pull_request attaches to PR; wait-ci gates on pull_request CI workflow (ci.yml).
+# ci.yml must run on pull_request for the PR branch (no path-only skip); poll uses head SHA.
 # LIFE-04 resolveReviewThread requires contents:write — see prevue-review.yml / consumer-setup.md.
 on:
   pull_request:
@@ -30,18 +31,41 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # gh run list --commit matches pull_request CI headSha (branch tip), not merge commit.
           CI_POLL_SHA: ${{ github.event.pull_request.head.sha }}
+          CI_BRANCH: ${{ github.head_ref }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
+          if ! gh workflow view ci.yml --repo "$REPOSITORY" >/dev/null 2>&1; then
+            echo "Workflow ci.yml not found; skipping Prevue review." >&2
+            echo "ci_ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          fetch_ci_runs() {
+            local attempt=1
+            while [ "$attempt" -le 3 ]; do
+              if gh run list \
+                --repo "$REPOSITORY" \
+                --workflow ci.yml \
+                --commit "$CI_POLL_SHA" \
+                --branch "$CI_BRANCH" \
+                --event pull_request \
+                --limit 50 \
+                --json status,conclusion,event,createdAt 2>/dev/null; then
+                return 0
+              fi
+              echo "gh run list failed (attempt ${attempt}/3); retrying in $((attempt * 5))s..." >&2
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
+            return 1
+          }
           deadline=$((SECONDS + 1800))
           while [ "$SECONDS" -lt "$deadline" ]; do
-            run=$(gh run list \
-              --repo "$REPOSITORY" \
-              --workflow ci.yml \
-              --commit "$CI_POLL_SHA" \
-              --event pull_request \
-              --limit 20 \
-              --json status,conclusion,event,createdAt)
+            if ! run=$(fetch_ci_runs); then
+              echo "gh run list unavailable; continuing poll..." >&2
+              sleep 15
+              continue
+            fi
             count=$(printf '%s' "$run" | jq 'length')
             if [ "$count" -eq 0 ]; then
               echo "No pull_request CI workflow run yet; waiting..."

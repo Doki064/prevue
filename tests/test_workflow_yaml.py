@@ -85,9 +85,21 @@ def test_wait_ci_polls_pr_head_sha_for_ci_run() -> None:
     wf = _load_review_workflow()
     wait_env = wf["jobs"]["wait-ci"]["steps"][0]["env"]
     assert wait_env.get("CI_POLL_SHA") == "${{ github.event.pull_request.head.sha }}"
+    assert wait_env.get("CI_BRANCH") == "${{ github.head_ref }}"
     assert "${{ github.sha }}" not in str(wait_env)
     with_block = wf["jobs"]["review"]["with"]
     assert with_block.get("pr-head-sha") == "${{ github.event.pull_request.head.sha }}"
+
+
+def test_wait_ci_retries_gh_and_exits_when_workflow_missing() -> None:
+    wait_run = _load_review_workflow()["jobs"]["wait-ci"]["steps"][0]["run"]
+    assert "gh workflow view ci.yml" in wait_run
+    assert "Workflow ci.yml not found" in wait_run
+    assert "fetch_ci_runs()" in wait_run
+    assert "gh run list failed (attempt" in wait_run
+    assert "gh run list unavailable; continuing poll" in wait_run
+    assert '--branch "$CI_BRANCH"' in wait_run
+    assert "--limit 50" in wait_run
 
 
 def test_wait_ci_selects_latest_run_and_skips_on_timeout() -> None:
