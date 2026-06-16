@@ -38,6 +38,67 @@ def build_valid_lines(
     return {f.path: commentable_lines(f.path, f.patch) for f in files}
 
 
+def is_placeable(
+    finding: Finding,
+    valid_lines: dict[str, dict[str, set[int]]],
+) -> bool:
+    """True when (path, line, side) maps to a commentable diff line."""
+    side_lines = valid_lines.get(finding.path, {}).get(finding.side)
+    return side_lines is not None and finding.line in side_lines
+
+
+def annotate_patch(path: str, patch: str | None) -> str:
+    """Prefix diff lines with file line numbers for engine prompts (OUTP-02)."""
+    if not patch:
+        return ""
+    try:
+        ps = PatchSet(f"--- a/{path}\n+++ b/{path}\n{patch}")
+    except UnidiffParseError:
+        return patch
+    lines: list[str] = []
+    for pf in ps:
+        for hunk in pf:
+            lines.append(
+                f"@@ -{hunk.source_start},{hunk.source_length} "
+                f"+{hunk.target_start},{hunk.target_length} @@"
+            )
+            for line in hunk:
+                if line.line_type == "\\":
+                    continue
+                if line.is_removed:
+                    lines.append(f"{line.source_line_no:5d} | -{line.value.rstrip(chr(10))}")
+                elif line.is_added:
+                    lines.append(f"{line.target_line_no:5d} | +{line.value.rstrip(chr(10))}")
+                elif line.is_context:
+                    lines.append(f"{line.target_line_no:5d} |  {line.value.rstrip(chr(10))}")
+    if not lines:
+        return patch
+    return "\n".join(lines)
+
+
+def reconcile_finding_locations(
+    findings: list[Finding],
+    valid_lines: dict[str, dict[str, set[int]]],
+) -> list[Finding]:
+    """Fix path/side when line uniquely matches one commentable diff location."""
+    reconciled: list[Finding] = []
+    for finding in findings:
+        if is_placeable(finding, valid_lines):
+            reconciled.append(finding)
+            continue
+        matches: list[tuple[str, str]] = []
+        for path, sides in valid_lines.items():
+            for side in ("RIGHT", "LEFT"):
+                if finding.line in sides.get(side, set()):
+                    matches.append((path, side))
+        if len(matches) == 1:
+            path, side = matches[0]
+            reconciled.append(finding.model_copy(update={"path": path, "side": side}))
+        else:
+            reconciled.append(finding)
+    return reconciled
+
+
 def regions_changed(path: str, incremental_patch: str | None) -> list[tuple[int, int]]:
     """RIGHT-side (start, end) line ranges touched in an incremental patch (D-09)."""
     if not incremental_patch:

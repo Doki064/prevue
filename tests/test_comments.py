@@ -860,7 +860,13 @@ class TestStickyWithGate:
 
         assert body.count("<details>") == 3  # 2 non-inline findings + collapsible metadata
         assert "c.py:3 — I1" in body
-        assert "d.py:4 — W2" in body
+        assert "d.py — W2" in body
+        assert "d.py:4 — W2" not in body
+
+    def test_position_fallback_omits_line_in_table(self) -> None:
+        body = render_body(_sample_result(), gate=self._gate())
+        assert "`d.py`" in body
+        assert "`d.py:4`" not in body
 
     def test_degraded_notice_in_metadata(self) -> None:
         gate = self._gate(degraded=True, placed=[], inline=[])

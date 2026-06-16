@@ -49,7 +49,12 @@ from prevue.github.diff import (
     fetch_diff_in_scope,
     regions_from_comparison,
 )
-from prevue.github.positions import build_valid_lines, finding_region_changed, regions_changed
+from prevue.github.positions import (
+    build_valid_lines,
+    finding_region_changed,
+    reconcile_finding_locations,
+    regions_changed,
+)
 from prevue.models import Finding, ReviewRequest, ReviewResult
 from prevue.pack import make_file_weight, pack_files, readmit_files, trim_packed_files
 from prevue.preflight import resolve_marker_for_scope
@@ -735,6 +740,7 @@ def run_review(
     active_dismissals = [entry for entry in dismiss_entries if entry.fingerprint in suppressed]
 
     valid_lines = build_valid_lines(packed_files)
+    open_findings = reconcile_finding_locations(open_findings, valid_lines)
     gate = apply_gate(
         open_findings,
         review_cfg,
