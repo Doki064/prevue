@@ -1,0 +1,52 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "pageInfo": {
+            "hasNextPage": false,
+            "endCursor": "Y3Vyc29yOjEw"
+          },
+          "nodes": [
+            {
+              "id": "RT_kwDOExampleOpen0001",
+              "isResolved": false,
+              "isOutdated": false,
+              "path": "src/prevue/review.py",
+              "line": 142,
+              "startLine": null,
+              "diffSide": "RIGHT",
+              "startDiffSide": null,
+              "comments": {
+                "nodes": [
+                  {
+                    "body": "🟡 **Missing error handling**\n\nHandle engine failures explicitly.",
+                    "author": { "login": "github-actions[bot]" }
+                  }
+                ]
+              }
+            },
+            {
+              "id": "RT_kwDOExampleResolved01",
+              "isResolved": true,
+              "isOutdated": true,
+              "path": "src/prevue/github/diff.py",
+              "line": 18,
+              "startLine": null,
+              "diffSide": "RIGHT",
+              "startDiffSide": null,
+              "comments": {
+                "nodes": [
+                  {
+                    "body": "🔴 **SQL injection risk**\n\nUse parameterized queries.",
+                    "author": { "login": "github-actions[bot]" }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

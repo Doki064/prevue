@@ -2,9 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import re
+from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+import responses
+
 from prevue.classify.models import ClassificationResult
+from prevue.fingerprint import fingerprint
 from prevue.gate import (
     GateResult,
     PlacedFinding,
@@ -15,18 +22,29 @@ from prevue.gate import (
 )
 from prevue.github.comments import (
     BOT_LOGINS,
+    INLINE_MARKER,
+    LEGACY_INLINE_MARKER,
     MARKER,
     _escape_inline_markdown,
     _escape_table_cell,
+    _is_prevue_inline_comment,
     _is_prevue_sticky,
     _safe_suggestion_block,
+    derive_prior_findings,
+    parse_marker_sha,
+    parse_severity_from_body,
     post_inline_review,
     render_body,
     render_inline_comment,
+    render_marker,
+    resolve_outdated_prior_findings,
     upsert_skip_note,
     upsert_sticky,
 )
 from prevue.models import Finding, ReviewResult
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
+GRAPHQL_URL = "https://api.github.com/graphql"
 
 
 def _sample_result() -> ReviewResult:
@@ -372,13 +390,15 @@ class TestPostInlineReview:
         assert "1 comment" in err
 
     def test_updates_existing_inline_at_same_location(self) -> None:
+        # Finding is severity "error"; prior body starts with warning badge "🟡" so
+        # escalation is detected and the comment is updated (D-06 / WR-04).
         finding = self._finding(path="a.py", line=1, title="Updated")
         gate = self._gate([finding])
         existing = MagicMock()
         existing.path = "a.py"
         existing.line = 1
         existing.side = "RIGHT"
-        existing.body = "old\n\n<sub>posted by Prevue</sub>"
+        existing.body = "🟡 **Old warning**\n\nFix it.\n\n<sub>posted by Prevue</sub>"
         existing.user.login = "github-actions[bot]"
         pr = MagicMock()
         pr.get_review_comments.return_value = [existing]
@@ -398,7 +418,9 @@ class TestPostInlineReview:
         existing.path = "a.py"
         existing.line = 1
         existing.side = "RIGHT"
-        existing.body = "old\n\n<sub>posted by Prevue</sub>"
+        # Prior a.py comment has "warning" badge; new finding is "error" → escalation
+        # is detected and edit fires (D-06 / WR-04).
+        existing.body = "🟡 **Old warning**\n\nFix it.\n\n<sub>posted by Prevue</sub>"
         existing.user.login = "github-actions[bot]"
         pr = MagicMock()
         pr.get_review_comments.return_value = [existing]
@@ -435,6 +457,53 @@ class TestPostInlineReview:
         pr.create_review.assert_not_called()
         stale.delete.assert_called_once()
 
+    def test_deletes_outdated_line_null_inline_in_scope(self) -> None:
+        """Outdated GitHub threads (line=None) are removed on in-scope re-run."""
+        gate = GateResult(
+            conclusion="success",
+            severity_counts={"error": 0, "warning": 0, "info": 0},
+            placed=[],
+            inline=[],
+            config=ReviewConfig(),
+        )
+        outdated = MagicMock()
+        outdated.path = "src/test2.js"
+        outdated.line = None
+        outdated.original_line = 1
+        outdated.side = "RIGHT"
+        outdated.body = (
+            "🔴 **Undefined identifier console2**\n\n<body>\n\n<sub>posted by Prevue</sub>"
+        )
+        outdated.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [outdated]
+
+        assert post_inline_review(pr, gate, in_scope_paths={"src/test2.js"}) == set()
+
+        outdated.delete.assert_called_once()
+        pr.create_review.assert_not_called()
+
+    def test_outdated_line_null_out_of_scope_not_deleted(self) -> None:
+        gate = GateResult(
+            conclusion="success",
+            severity_counts={"error": 0, "warning": 0, "info": 0},
+            placed=[],
+            inline=[],
+            config=ReviewConfig(),
+        )
+        outdated = MagicMock()
+        outdated.path = "other.py"
+        outdated.line = None
+        outdated.side = "RIGHT"
+        outdated.body = "🔴 **Issue**\n\n<body>\n\n<sub>posted by Prevue</sub>"
+        outdated.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [outdated]
+
+        post_inline_review(pr, gate, in_scope_paths={"a.py"})
+
+        outdated.delete.assert_not_called()
+
     def test_create_failure_still_deletes_stale(self) -> None:
         """Create failure is non-fatal for cleanup: stale comments must still be
         removed so the PR does not end with old + new threads coexisting."""
@@ -470,7 +539,7 @@ class TestPostInlineReview:
         existing.path = "existing.py"
         existing.line = 1
         existing.side = "RIGHT"
-        existing.body = "old\n\n<sub>posted by Prevue</sub>"
+        existing.body = "🟡 **Old warning**\n\nFix it.\n\n<sub>posted by Prevue</sub>"
         existing.user.login = "github-actions[bot]"
         pr = MagicMock()
         pr.get_review_comments.return_value = [existing]
@@ -491,7 +560,7 @@ class TestPostInlineReview:
         existing.path = "existing.py"
         existing.line = 1
         existing.side = "RIGHT"
-        existing.body = "old\n\n<sub>posted by Prevue</sub>"
+        existing.body = "🟡 **Old warning**\n\nFix it.\n\n<sub>posted by Prevue</sub>"
         existing.user.login = "github-actions[bot]"
         existing.edit.side_effect = GithubException(422, {"message": "Validation Failed"}, None)
         stale = MagicMock()
@@ -523,7 +592,7 @@ class TestPostInlineReview:
         existing.path = "edited.py"
         existing.line = 1
         existing.side = "RIGHT"
-        existing.body = "old\n\n<sub>posted by Prevue</sub>"
+        existing.body = "🟡 **Old warning**\n\nFix it.\n\n<sub>posted by Prevue</sub>"
         existing.user.login = "github-actions[bot]"
         pr = MagicMock()
         pr.get_review_comments.return_value = [existing]
@@ -553,6 +622,128 @@ class TestPostInlineReview:
 
         pr.create_review.assert_called_once()
         stale.delete.assert_called_once()
+
+    def test_scoped_carry_forward_preserves_out_of_scope_comment(self) -> None:
+        """Push 2 reviews only file A; file B prior comment untouched (D-05)."""
+        finding = self._finding(path="a.py", line=1, title="A issue")
+        gate = self._gate([finding])
+        out_of_scope = MagicMock()
+        out_of_scope.path = "b.py"
+        out_of_scope.line = 5
+        out_of_scope.side = "RIGHT"
+        out_of_scope.body = "🟡 **B issue**\n\nOld body.\n\n<sub>posted by Prevue</sub>"
+        out_of_scope.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [out_of_scope]
+
+        assert post_inline_review(pr, gate, in_scope_paths={"a.py"}) == set()
+
+        out_of_scope.edit.assert_not_called()
+        out_of_scope.delete.assert_not_called()
+        pr.create_review.assert_called_once()
+
+    def test_escalation_equal_severity_skips_edit(self) -> None:
+        """Same severity at same location → no churn (D-06)."""
+        finding = self._finding(path="a.py", line=1, severity="warning", title="Lint")
+        gate = self._gate([finding])
+        existing = MagicMock()
+        existing.path = "a.py"
+        existing.line = 1
+        existing.side = "RIGHT"
+        existing.body = render_inline_comment(self._finding(severity="warning", title="Lint"))
+        existing.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [existing]
+
+        assert post_inline_review(pr, gate) == set()
+
+        existing.edit.assert_not_called()
+        pr.create_review.assert_not_called()
+
+    def test_escalation_warning_to_error_calls_edit(self) -> None:
+        """Severity escalation refreshes comment in place (D-06)."""
+        finding = self._finding(path="a.py", line=1, severity="error", title="Lint")
+        gate = self._gate([finding])
+        existing = MagicMock()
+        existing.path = "a.py"
+        existing.line = 1
+        existing.side = "RIGHT"
+        existing.body = render_inline_comment(self._finding(severity="warning", title="Lint"))
+        existing.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [existing]
+
+        assert post_inline_review(pr, gate) == set()
+
+        existing.edit.assert_called_once_with(render_inline_comment(finding))
+        pr.create_review.assert_not_called()
+
+    def test_scoped_duplicate_at_key_still_deleted(self) -> None:
+        """Own same-run duplicate extras are hard-deleted (existing path)."""
+        finding = self._finding(path="a.py", line=1, title="A", severity="warning")
+        gate = self._gate([finding])
+        primary = MagicMock()
+        primary.path = "a.py"
+        primary.line = 1
+        primary.side = "RIGHT"
+        primary.body = render_inline_comment(self._finding(severity="warning", title="A"))
+        primary.user.login = "github-actions[bot]"
+        duplicate = MagicMock()
+        duplicate.path = "a.py"
+        duplicate.line = 1
+        duplicate.side = "RIGHT"
+        duplicate.body = "🟡 **A**\n\nDup.\n\n<sub>posted by Prevue</sub>"
+        duplicate.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [primary, duplicate]
+
+        assert post_inline_review(pr, gate, in_scope_paths={"a.py"}) == set()
+
+        duplicate.delete.assert_called_once()
+        primary.edit.assert_not_called()
+
+    def test_rephrase_at_same_line_keeps_inline_unchanged(self) -> None:
+        """Rephrase-at-same-line: current finding has a DIFFERENT fingerprint at the
+        same (path, line, side) as an existing inline, but equal severity.
+        D-06 (fingerprint-aligned skip): must NOT call .edit() and must NOT create
+        a duplicate inline at that location."""
+        prior_finding = self._finding(
+            path="src/test1.js",
+            line=4,
+            severity="error",
+            title="Invalid Console.log — use console.log",
+        )
+        # Current engine finding at same location with DIFFERENT title (new fingerprint).
+        current_finding = self._finding(
+            path="src/test1.js",
+            line=4,
+            severity="error",
+            title="Console.log uses wrong identifier casing",
+        )
+        gate = self._gate([current_finding])
+
+        # Existing inline comment body built from render_inline_comment so the
+        # _parse_title_from_inline_body round-trip works correctly.
+        existing = MagicMock()
+        existing.path = "src/test1.js"
+        existing.line = 4
+        existing.side = "RIGHT"
+        existing.body = render_inline_comment(prior_finding)
+        existing.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [existing]
+
+        assert post_inline_review(pr, gate) == set()
+
+        # No edit because fingerprints differ but severity did not escalate.
+        existing.edit.assert_not_called()
+        # No duplicate inline created at this location.
+        if pr.create_review.called:
+            kwargs = pr.create_review.call_args.kwargs
+            created_paths_lines = [(c["path"], c["line"]) for c in kwargs.get("comments", [])]
+            assert ("src/test1.js", 4) not in created_paths_lines, (
+                "Must not create a duplicate inline at the rephrase location"
+            )
 
 
 class TestStickyWithGate:
@@ -794,7 +985,7 @@ class TestInlineTemplate:
         assert lines[1] == ""
         assert lines[2] == "Use parameterized queries."
         assert "**Suggested change**" not in rendered
-        assert rendered.endswith("<sub>posted by Prevue</sub>")
+        assert rendered.endswith("_posted by Prevue_")
 
     def test_warning_and_info_badges(self) -> None:
         warning = render_inline_comment(self._finding(severity="warning", title="Lint"))
@@ -856,6 +1047,53 @@ class TestInlineTemplate:
         assert "&lt;script>" in rendered
 
 
+class TestInlineMarkerDetection:
+    """Marker detection tests: new GFM marker and legacy <sub> backward compat."""
+
+    def _trusted_comment(self, body: str) -> MagicMock:
+        comment = MagicMock()
+        comment.body = body
+        comment.user.login = "github-actions[bot]"
+        return comment
+
+    def test_new_gfm_marker_is_detected(self) -> None:
+        """New _posted by Prevue_ GFM marker is detected by _is_prevue_inline_comment."""
+        body = f"🔴 **Issue**\n\nDetails.\n\n{INLINE_MARKER}"
+        comment = self._trusted_comment(body)
+        assert _is_prevue_inline_comment(comment) is True
+
+    def test_legacy_sub_marker_still_detected(self) -> None:
+        """Legacy <sub>posted by Prevue</sub> (pre-migration, e.g. PR #23) still detected."""
+        body = f"🔴 **Old issue**\n\nDetails.\n\n{LEGACY_INLINE_MARKER}"
+        comment = self._trusted_comment(body)
+        assert _is_prevue_inline_comment(comment) is True
+
+    def test_no_marker_not_detected(self) -> None:
+        """Body without any Prevue marker is not detected."""
+        body = "🔴 **Issue**\n\nNo marker here."
+        comment = self._trusted_comment(body)
+        assert _is_prevue_inline_comment(comment) is False
+
+    def test_inline_marker_constant_is_gfm_safe(self) -> None:
+        """INLINE_MARKER must not contain HTML tags."""
+        assert "<" not in INLINE_MARKER
+        assert ">" not in INLINE_MARKER
+        assert INLINE_MARKER == "_posted by Prevue_"
+
+    def test_legacy_inline_marker_constant_is_preserved(self) -> None:
+        """LEGACY_INLINE_MARKER retains the old HTML form for backward-compat detection."""
+        assert LEGACY_INLINE_MARKER == "<sub>posted by Prevue</sub>"
+
+    def test_render_inline_comment_uses_new_gfm_marker(self) -> None:
+        """render_inline_comment appends the new GFM marker, not the legacy HTML."""
+        from prevue.models import Finding
+
+        finding = Finding(path="a.py", line=1, severity="error", title="T", body="B")
+        rendered = render_inline_comment(finding)
+        assert rendered.endswith(INLINE_MARKER)
+        assert LEGACY_INLINE_MARKER not in rendered
+
+
 def test_upsert_sticky_skips_bot_comment_when_marker_not_at_start() -> None:
     bot = MagicMock()
     bot.body = f"See also {MARKER} below"
@@ -878,3 +1116,374 @@ def test_safe_suggestion_uses_fence_longer_than_backtick_run() -> None:
 
 def test_escape_inline_markdown_collapses_newlines() -> None:
     assert _escape_inline_markdown("row1\nrow2") == "row1 row2"
+
+
+class TestSeverityParseBack:
+    def _finding(self, **overrides) -> Finding:
+        defaults = {
+            "path": "src/a.py",
+            "line": 10,
+            "severity": "error",
+            "title": "Issue",
+            "body": "Fix it.",
+        }
+        defaults.update(overrides)
+        return Finding(**defaults)
+
+    def test_severity_round_trip_all_levels(self) -> None:
+        for severity in ("error", "warning", "info"):
+            finding = self._finding(severity=severity, title=f"{severity} title")
+            rendered = render_inline_comment(finding)
+            assert parse_severity_from_body(rendered) == severity
+
+    def test_leading_badge_anchoring(self) -> None:
+        assert parse_severity_from_body("🔴 **Something**") == "error"
+        assert parse_severity_from_body("🟡 **Lint**") == "warning"
+        assert parse_severity_from_body("🔵 **Note**") == "info"
+
+    def test_human_comment_without_badge_returns_none(self) -> None:
+        assert parse_severity_from_body("Looks good to me, ship it.") is None
+
+    def test_legacy_alternate_template_with_leading_badge(self) -> None:
+        legacy = "🔴 Old template title\n\nDetails without bold wrapper."
+        assert parse_severity_from_body(legacy) == "error"
+
+    def test_empty_body_returns_none(self) -> None:
+        assert parse_severity_from_body("") is None
+
+    def test_whitespace_only_body_returns_none(self) -> None:
+        assert parse_severity_from_body("   \n  \n") is None
+
+
+class TestMarkerSha:
+    HEAD_SHA = "abc123def456789012345678901234567890abcd"
+
+    def test_render_marker_sha_round_trip(self) -> None:
+        marker = render_marker(self.HEAD_SHA)
+        assert marker == f"<!-- prevue:sticky head={self.HEAD_SHA} -->"
+        assert parse_marker_sha(marker) == self.HEAD_SHA
+
+    def test_parse_legacy_headless_marker_returns_none(self) -> None:
+        assert parse_marker_sha("<!-- prevue:sticky -->") is None
+        assert parse_marker_sha(f"{MARKER}\n## Prevue Review\n\nold body") is None
+
+    def test_parse_no_marker_returns_none(self) -> None:
+        assert parse_marker_sha("## Prevue Review\n\nno marker here") is None
+        assert parse_marker_sha("") is None
+
+    def test_non_hex_sha_rejected(self) -> None:
+        injected = "<!-- prevue:sticky head=../../etc/passwd -->"
+        assert parse_marker_sha(injected) is None
+        assert parse_marker_sha("<!-- prevue:sticky head=not-a-sha -->") is None
+
+    def test_is_prevue_sticky_detects_legacy_marker(self) -> None:
+        comment = MagicMock()
+        comment.body = f"{MARKER}\n## Prevue Review"
+        comment.user.login = next(iter(BOT_LOGINS))
+        assert _is_prevue_sticky(comment) is True
+
+    def test_is_prevue_sticky_detects_head_bearing_marker(self) -> None:
+        comment = MagicMock()
+        comment.body = f"{render_marker(self.HEAD_SHA)}\n## Prevue Review"
+        comment.user.login = next(iter(BOT_LOGINS))
+        assert _is_prevue_sticky(comment) is True
+
+
+def _load_fixture(name: str) -> dict:
+    with (FIXTURES_DIR / name).open() as f:
+        return json.load(f)
+
+
+def _register_graphql(rsps: responses.RequestsMock, payload: dict, *, status: int = 200) -> None:
+    rsps.add(
+        responses.POST,
+        re.compile(rf"{re.escape(GRAPHQL_URL)}/?$"),
+        json=payload,
+        status=status,
+    )
+
+
+@pytest.fixture
+def github_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_test_token")
+
+
+class TestPriorFindings:
+    def _prevue_inline(self, path: str, line: int, finding: Finding) -> MagicMock:
+        comment = MagicMock()
+        comment.path = path
+        comment.line = line
+        comment.side = "RIGHT"
+        comment.body = render_inline_comment(finding)
+        comment.user.login = "github-actions[bot]"
+        return comment
+
+    @responses.activate
+    def test_derive_prior_findings_from_live_comments(self, github_env: None) -> None:
+        finding = Finding(
+            path="src/prevue/review.py",
+            line=142,
+            severity="warning",
+            title="Missing error handling",
+            body="Handle engine failures explicitly.",
+        )
+        pr = MagicMock()
+        pr.number = 42
+        pr.get_review_comments.return_value = [
+            self._prevue_inline("src/prevue/review.py", 142, finding)
+        ]
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+
+        priors = derive_prior_findings(pr, owner="owner", repo="prevue")
+
+        assert len(priors) == 1
+        prior = priors[0]
+        assert prior.path == "src/prevue/review.py"
+        assert prior.line == 142
+        assert prior.severity == "warning"
+        assert prior.fingerprint == fingerprint("src/prevue/review.py", "Missing error handling")
+        assert prior.thread_id == "RT_kwDOExampleOpen0001"
+
+    def test_derive_prior_findings_skips_outdated_line_null(self, github_env: None) -> None:
+        """GitHub REST returns line=None on outdated threads — must not crash Finding validation."""
+        finding = Finding(
+            path="src/test2.js",
+            line=1,
+            severity="error",
+            title="Undefined identifier console2",
+            body="console2 is not defined.",
+        )
+        outdated = self._prevue_inline("src/test2.js", 1, finding)
+        outdated.line = None
+        outdated.original_line = 1
+
+        pr = MagicMock()
+        pr.number = 42
+        pr.get_review_comments.return_value = [outdated]
+
+        priors = derive_prior_findings(pr, owner="owner", repo="prevue")
+
+        assert priors == []
+
+
+class TestOutdatedResolve:
+    OWNER = "owner"
+    REPO = "prevue"
+    PATH = "src/prevue/review.py"
+    LINE = 142
+    TITLE = "Missing error handling"
+
+    def _prior_comment(self) -> MagicMock:
+        finding = Finding(
+            path=self.PATH,
+            line=self.LINE,
+            severity="warning",
+            title=self.TITLE,
+            body="Handle engine failures explicitly.",
+        )
+        comment = MagicMock()
+        comment.path = self.PATH
+        comment.line = self.LINE
+        comment.side = "RIGHT"
+        comment.body = render_inline_comment(finding)
+        comment.user.login = "github-actions[bot]"
+        return comment
+
+    def _pr(self) -> MagicMock:
+        pr = MagicMock()
+        pr.number = 42
+        pr.get_review_comments.return_value = [self._prior_comment()]
+        return pr
+
+    @responses.activate
+    def test_outdated_resolve_when_all_three_conditions_hold(self, github_env: None) -> None:
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+        _register_graphql(responses.mock, _load_fixture("graphql_resolve_ok.json"))
+
+        resolve_outdated_prior_findings(
+            self._pr(),
+            in_scope_paths={self.PATH},
+            regions_by_path={self.PATH: [(140, 145)]},
+            current_fingerprints=set(),
+            owner=self.OWNER,
+            repo=self.REPO,
+        )
+
+        assert len(responses.mock.calls) == 2
+
+    @responses.activate
+    def test_outdated_skips_out_of_scope_prior(self, github_env: None) -> None:
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+
+        resolve_outdated_prior_findings(
+            self._pr(),
+            in_scope_paths={"other.py"},
+            regions_by_path={self.PATH: [(140, 145)]},
+            current_fingerprints=set(),
+            owner=self.OWNER,
+            repo=self.REPO,
+        )
+
+        assert len(responses.mock.calls) == 1
+
+    @responses.activate
+    def test_outdated_skips_unchanged_region(self, github_env: None) -> None:
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+
+        resolve_outdated_prior_findings(
+            self._pr(),
+            in_scope_paths={self.PATH},
+            regions_by_path={self.PATH: [(100, 110)]},
+            current_fingerprints=set(),
+            owner=self.OWNER,
+            repo=self.REPO,
+        )
+
+        assert len(responses.mock.calls) == 1
+
+    @responses.activate
+    def test_outdated_skips_when_fingerprint_in_current(self, github_env: None) -> None:
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+
+        prior_fp = fingerprint(self.PATH, self.TITLE)
+        resolve_outdated_prior_findings(
+            self._pr(),
+            in_scope_paths={self.PATH},
+            regions_by_path={self.PATH: [(140, 145)]},
+            current_fingerprints={prior_fp},
+            owner=self.OWNER,
+            repo=self.REPO,
+        )
+
+        assert len(responses.mock.calls) == 1
+
+    @responses.activate
+    def test_outdated_skips_already_resolved_thread(self, github_env: None) -> None:
+        resolved_path = "src/prevue/github/diff.py"
+        resolved_line = 18
+        finding = Finding(
+            path=resolved_path,
+            line=resolved_line,
+            severity="error",
+            title="SQL injection risk",
+            body="Use parameterized queries.",
+        )
+        comment = MagicMock()
+        comment.path = resolved_path
+        comment.line = resolved_line
+        comment.side = "RIGHT"
+        comment.body = render_inline_comment(finding)
+        comment.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.number = 42
+        pr.get_review_comments.return_value = [comment]
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+
+        resolve_outdated_prior_findings(
+            pr,
+            in_scope_paths={resolved_path},
+            regions_by_path={resolved_path: [(15, 20)]},
+            current_fingerprints=set(),
+            owner=self.OWNER,
+            repo=self.REPO,
+        )
+
+        assert len(responses.mock.calls) == 1
+
+    @responses.activate
+    def test_outdated_403_logged_run_continues(self, github_env: None, capsys) -> None:
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+        _register_graphql(responses.mock, _load_fixture("graphql_forbidden.json"))
+
+        resolve_outdated_prior_findings(
+            self._pr(),
+            in_scope_paths={self.PATH},
+            regions_by_path={self.PATH: [(140, 145)]},
+            current_fingerprints=set(),
+            owner=self.OWNER,
+            repo=self.REPO,
+        )
+
+        err = capsys.readouterr().err
+        assert "prevue: review thread resolve failed" in err
+        assert "FORBIDDEN" in err
+
+    @responses.activate
+    def test_post_inline_resolve_outdated_integration(self, github_env: None) -> None:
+        """post_inline_review with resolve_outdated triggers conservative resolve."""
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+        _register_graphql(responses.mock, _load_fixture("graphql_resolve_ok.json"))
+
+        pr = self._pr()
+        gate = GateResult(
+            conclusion="success",
+            severity_counts={"error": 0, "warning": 0, "info": 0},
+            placed=[],
+            inline=[],
+            config=ReviewConfig(),
+        )
+
+        post_inline_review(
+            pr,
+            gate,
+            in_scope_paths={self.PATH},
+            regions_by_path={self.PATH: [(140, 145)]},
+            owner=self.OWNER,
+            repo=self.REPO,
+            resolve_outdated=True,
+        )
+
+        assert len(responses.mock.calls) == 2
+
+
+class TestRenderBodyIncrementalDisclaimer:
+    """Gap #5: render_body with scope='incremental' prepends a deterministic disclaimer."""
+
+    def test_incremental_review_section_has_scope_disclaimer(self) -> None:
+        """scope='incremental' -> Review section prefixed with deterministic disclaimer."""
+        body = render_body(_sample_result(), scope="incremental")
+        assert "scoped to files changed since" in body
+
+    def test_incremental_disclaimer_mentions_carried_findings_when_present(self) -> None:
+        """scope='incremental' + carried_open_count>0 -> disclaimer mentions carried findings."""
+        body = render_body(_sample_result(), scope="incremental", carried_open_count=3)
+        assert "scoped to files changed since" in body
+        assert "3" in body
+        # Must mention that prior findings are carried forward
+        assert "carried" in body.lower() or "prior" in body.lower()
+
+    def test_incremental_disclaimer_no_carried_clause_when_zero(self) -> None:
+        """Incremental scope with zero carried findings shows disclaimer only."""
+        body = render_body(_sample_result(), scope="incremental", carried_open_count=0)
+        assert "scoped to files changed since" in body
+        # No carried-count mention when zero
+        assert "0 prior" not in body
+        assert "0 carried" not in body
+
+    def test_full_review_section_has_no_disclaimer(self) -> None:
+        """scope='full' -> Review section is engine summary verbatim, no disclaimer."""
+        body = render_body(_sample_result(), scope="full")
+        assert "scoped to files changed since" not in body
+
+    def test_default_scope_no_disclaimer(self) -> None:
+        """scope omitted (default) -> no disclaimer (existing callers unchanged)."""
+        body = render_body(_sample_result())
+        assert "scoped to files changed since" not in body
+
+    def test_disclaimer_is_deterministic_not_engine_derived(self) -> None:
+        """The disclaimer text is constant -- not derived from result.summary_markdown."""
+        result1 = ReviewResult(
+            summary_markdown="Engine says: one file reviewed.",
+            findings=[],
+            engine_meta={"model": "m1", "duration_s": 0.1},
+        )
+        result2 = ReviewResult(
+            summary_markdown="Engine says: three files in scope.",
+            findings=[],
+            engine_meta={"model": "m2", "duration_s": 0.2},
+        )
+        body1 = render_body(result1, scope="incremental")
+        body2 = render_body(result2, scope="incremental")
+        # Both bodies share the same disclaimer prefix (deterministic)
+        assert "scoped to files changed since" in body1
+        assert "scoped to files changed since" in body2

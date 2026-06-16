@@ -8,10 +8,10 @@ from prevue.engines.tokens import estimate_tokens
 from tests.engine_helpers import PROSE_REVIEW, VALID_FINDING, make_sample_request, stdout_with_fence
 
 
-def _build_prompt(req) -> str:
+def _build_prompt(req, **kwargs) -> str:
     from prevue.engines.prompt import build_prompt
 
-    return build_prompt(req)
+    return build_prompt(req, **kwargs)
 
 
 def test_retry_review_tokens_count_each_invocation_once() -> None:
