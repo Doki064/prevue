@@ -1,0 +1,29 @@
+{
+  "url": "https://api.github.com/repos/owner/prevue/compare/deadbeef123456789012345678901234567890ab...deadbeef123456789012345678901234567890ab",
+  "html_url": "https://github.com/owner/prevue/compare/deadbeef...deadbeef",
+  "permalink_url": "https://github.com/owner/prevue/compare/owner:deadbeef...owner:deadbeef",
+  "diff_url": "https://github.com/owner/prevue/compare/deadbeef...deadbeef.diff",
+  "patch_url": "https://github.com/owner/prevue/compare/deadbeef...deadbeef.patch",
+  "base_commit": {
+    "sha": "deadbeef123456789012345678901234567890ab",
+    "node_id": "C_deadbeef",
+    "commit": {
+      "message": "Last reviewed head",
+      "author": { "name": "Dev", "email": "dev@example.com", "date": "2026-06-14T10:00:00Z" }
+    }
+  },
+  "merge_base_commit": {
+    "sha": "deadbeef123456789012345678901234567890ab",
+    "node_id": "C_deadbeef",
+    "commit": {
+      "message": "Last reviewed head",
+      "author": { "name": "Dev", "email": "dev@example.com", "date": "2026-06-14T10:00:00Z" }
+    }
+  },
+  "status": "identical",
+  "ahead_by": 0,
+  "behind_by": 0,
+  "total_commits": 0,
+  "commits": [],
+  "files": []
+}
