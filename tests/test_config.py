@@ -18,6 +18,8 @@ from prevue.config import (
 from prevue.engines.registry import DEFAULT_ENGINE
 from prevue.gate import ReviewConfig
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
 
 def test_absent_file_all_defaults(
     tmp_path: Path,
@@ -225,3 +227,12 @@ def test_skills_extra_forbid_typo_fails(tmp_path: Path) -> None:
     path.write_text("skills:\n  bad_key: true\n")
     with pytest.raises(ValidationError):
         load_config(str(path))
+
+
+def test_dogfood_prevue_yml_fails_on_error_only() -> None:
+    """Repo dogfood config blocks merge on errors; warnings are informational."""
+    path = REPO_ROOT / ".github" / "prevue.yml"
+    if not path.is_file():
+        pytest.skip("dogfood prevue.yml not present")
+    cfg = load_config(str(path))
+    assert cfg.review.min_severity_to_fail == "error"
