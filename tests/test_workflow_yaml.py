@@ -94,8 +94,8 @@ def test_wait_ci_selects_latest_run_and_skips_on_timeout() -> None:
     wait_run = _load_review_workflow()["jobs"]["wait-ci"]["steps"][0]["run"]
     assert "createdAt" in wait_run
     assert "sort_by(.createdAt)" in wait_run
-    assert 'CI_POLL_SHA' in wait_run
-    assert "--commit \"$CI_POLL_SHA\"" in wait_run
+    assert "CI_POLL_SHA" in wait_run
+    assert '--commit "$CI_POLL_SHA"' in wait_run
     assert "Timed out waiting for pull_request CI" in wait_run
     timeout_tail = wait_run.split("Timed out waiting for pull_request CI", 1)[1]
     assert "ci_ok=false" in timeout_tail
