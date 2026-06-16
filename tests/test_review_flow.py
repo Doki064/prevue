@@ -45,7 +45,7 @@ def _default_incremental_mocks(monkeypatch: pytest.MonkeyPatch):
         patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
         patch("prevue.review.derive_prior_findings", return_value=[]),
         patch("prevue.review.resolve_outdated_prior_findings", return_value=set()),
-        patch("prevue.review._read_sticky_body", return_value=None),
+        patch("prevue.review.read_newest_trusted_sticky_body", return_value=None),
     ):
         yield
 
@@ -757,7 +757,7 @@ def test_invalid_review_config_raises_before_fetch() -> None:
             side_effect=ValidationError.from_exception_data("ReviewConfig", []),
         ),
         patch("prevue.review.fetch_diff") as mock_fetch,
-        patch("prevue.review.get_adapter") as mock_get_adapter,
+        patch("prevue.review.require_functional_adapter") as mock_get_adapter,
     ):
         with pytest.raises(ValidationError):
             run_review()
@@ -1086,7 +1086,7 @@ def test_engine_selection_via_prevue_engine(monkeypatch: pytest.MonkeyPatch) -> 
         patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky),
         patch("prevue.review.conclude_review_check", return_value=True),
-        patch("prevue.review.get_adapter") as mock_get_adapter,
+        patch("prevue.review.require_functional_adapter") as mock_get_adapter,
     ):
         mock_get_adapter.return_value = FindingsEngine()
         run_review()
@@ -1649,10 +1649,9 @@ def test_incremental_false_same_sha_is_noop_not_full() -> None:
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
         patch("prevue.review.load_config", return_value=config),
-        # Override the autouse _read_sticky_body=None / decide_scope=full mocks so this
-        # test exercises the real marker_for_scope computation.
+        # Override autouse sticky=None / decide_scope=full mocks for marker_for_scope test.
         patch(
-            "prevue.review._read_sticky_body",
+            "prevue.review.read_newest_trusted_sticky_body",
             return_value=f"<!-- prevue:sticky head={HEAD_SHA} -->\n## Prevue Review",
         ),
         patch("prevue.review.decide_scope", return_value=("noop", None, None)) as mock_scope,
@@ -1725,7 +1724,7 @@ def test_noop_preserves_dismiss_suppress_list() -> None:
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
         patch("prevue.review.load_config", return_value=config),
         patch(
-            "prevue.review._read_sticky_body",
+            "prevue.review.read_newest_trusted_sticky_body",
             return_value=sticky.body,
         ),
         patch("prevue.review.decide_scope", return_value=("noop", None, None)),
@@ -1770,7 +1769,7 @@ def test_force_full_runs_engine_on_unchanged_head_and_resets_marker(fake_engine)
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
         patch(
-            "prevue.review._read_sticky_body",
+            "prevue.review.read_newest_trusted_sticky_body",
             return_value=f"<!-- prevue:sticky head={HEAD_SHA} -->\n## Prevue Review",
         ),
         patch("prevue.review.decide_scope", return_value=("full", None, None)) as mock_scope,
@@ -2312,7 +2311,7 @@ def test_dismiss_audit_suppresses_active_finding() -> None:
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review._read_sticky_body", return_value=sticky.body),
+        patch("prevue.review.read_newest_trusted_sticky_body", return_value=sticky.body),
         patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
         patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
@@ -2366,7 +2365,7 @@ def test_dismiss_expire_resurfaces_on_region_change() -> None:
         patch("prevue.review.fetch_diff", return_value=diff),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review._read_sticky_body", return_value=sticky.body),
+        patch("prevue.review.read_newest_trusted_sticky_body", return_value=sticky.body),
         patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
         patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
@@ -2425,7 +2424,7 @@ def test_dismiss_escalate_resurfaces_on_higher_severity() -> None:
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review._read_sticky_body", return_value=sticky.body),
+        patch("prevue.review.read_newest_trusted_sticky_body", return_value=sticky.body),
         patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
         patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
@@ -2460,7 +2459,7 @@ def test_dismiss_malformed_block_suppresses_nothing() -> None:
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
-        patch("prevue.review._read_sticky_body", return_value=comment.body),
+        patch("prevue.review.read_newest_trusted_sticky_body", return_value=comment.body),
         patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
         patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,

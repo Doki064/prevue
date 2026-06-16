@@ -25,7 +25,7 @@ from prevue.config import load_config, resolve_consumer_config_path
 from prevue.dismiss import active_suppressed_fingerprints, parse_dismiss_block
 from prevue.engines.base import EngineAdapter
 from prevue.engines.prompt import MAX_PROMPT_BYTES, build_prompt, estimate_prompt_overhead_tokens
-from prevue.engines.registry import get_adapter
+from prevue.engines.registry import NonFunctionalEngineError, require_functional_adapter
 from prevue.engines.tokens import estimate_tokens
 from prevue.fingerprint import fingerprint
 from prevue.gate import SEVERITY_RANK, GateResult, PlacedFinding, apply_gate
@@ -34,11 +34,11 @@ from prevue.github.client import PrContext, get_authenticated_pull, get_repo, lo
 from prevue.github.comments import (
     PriorFinding,
     _derive_prior_findings_with_threads,
-    _is_prevue_sticky,
     derive_prior_findings,
     inline_location_key,
     parse_marker_sha,
     post_inline_review,
+    read_newest_trusted_sticky_body,
     resolve_outdated_prior_findings,
     upsert_skip_note,
     upsert_sticky,
@@ -62,9 +62,13 @@ from prevue.skills.loader import assemble_instructions, load_skills, select_skil
 from prevue.skip import should_skip
 
 BASELINE_INSTRUCTIONS = (
-    "You are a senior code reviewer. Review the pull request diff below. "
-    "Focus on correctness, security, maintainability, and test coverage. "
-    "Be concise and actionable."
+    "You are a senior code reviewer. Review the pull request diff for correctness, "
+    "security, maintainability, and test coverage.\n"
+    "- Report every material defect; do not cap, rank away, or omit real issues.\n"
+    "- One finding per distinct problem; merge duplicates on the same root cause.\n"
+    "- Skip praise, filler, and nitpicks that do not change merge risk.\n"
+    "- Prose summary: at most five sentences, findings-first; no file-by-file walkthrough.\n"
+    "- When a fix is localized, put example corrected code in suggestion (see output format)."
 )
 
 FORK_UNSUPPORTED_MSG = "Fork PRs are unsupported in v1; skipping review."
@@ -111,19 +115,35 @@ def _inline_key(finding) -> tuple[str, int, str]:
     return inline_location_key(finding.path, finding.line, finding.side)
 
 
-def _read_sticky_body(pr) -> str | None:
-    """Return the newest trusted Prevue sticky comment body, if any.
-
-    Selecting the LAST match (not the first) aligns with the workflow preflight,
-    which reads the last bot sticky. If duplicate stickies exist (failed cleanup or
-    manual duplication), Python scope/noop decisions then target the same comment
-    the preflight inspected, avoiding install-skip vs review-scope divergence.
-    """
-    newest: str | None = None
-    for comment in pr.get_issue_comments():
-        if _is_prevue_sticky(comment):
-            newest = comment.body or ""
-    return newest
+def _publish_skip(
+    pr,
+    ctx: PrContext,
+    head_sha: str,
+    *,
+    reason: str | None = None,
+    dropped_count: int | None = None,
+    conclusion: str = "success",
+    title: str | None = None,
+) -> None:
+    """Post skip sticky + check run; fail closed if check publish fails."""
+    skip_kwargs: dict[str, object] = {}
+    if reason is not None:
+        skip_kwargs["reason"] = reason
+    if dropped_count is not None:
+        skip_kwargs["dropped_count"] = dropped_count
+    upsert_skip_note(pr, **skip_kwargs)
+    check_kwargs: dict[str, object] = {}
+    if conclusion != "success":
+        check_kwargs["conclusion"] = conclusion
+    if dropped_count is not None:
+        check_kwargs["dropped_count"] = dropped_count
+    if reason is not None:
+        check_kwargs["reason"] = reason
+    if title is not None:
+        check_kwargs["title"] = title
+    published = conclude_skip_check(get_repo(ctx), head_sha, **check_kwargs)
+    if not published:
+        raise RuntimeError("Failed to publish skip check run")
 
 
 def _prior_to_finding(prior: PriorFinding) -> Finding:
@@ -253,6 +273,46 @@ def _fingerprints_outdated_by_region(
     return outdated
 
 
+def _upsert_sticky_with_retry(
+    pr,
+    result: ReviewResult,
+    *,
+    head_sha: str,
+    gate: GateResult,
+    log_prefix: str = "sticky",
+    **kwargs: object,
+) -> tuple[object | None, bool]:
+    try:
+        sticky = upsert_sticky(
+            pr,
+            result,
+            head_sha=head_sha,
+            gate=gate,
+            **kwargs,
+        )
+    except GithubException as exc:
+        print(
+            f"prevue: {log_prefix} upsert failed (HTTP {getattr(exc, 'status', '?')}), retrying",
+            file=sys.stderr,
+        )
+        try:
+            sticky = upsert_sticky(
+                pr,
+                result,
+                head_sha=head_sha,
+                gate=gate,
+                **kwargs,
+            )
+        except GithubException as retry_exc:
+            print(
+                f"prevue: {log_prefix} retry failed (HTTP {getattr(retry_exc, 'status', '?')})",
+                file=sys.stderr,
+            )
+            return None, True
+        return sticky, False
+    return sticky, False
+
+
 def _finish_noop_review(
     pr,
     repo,
@@ -264,17 +324,7 @@ def _finish_noop_review(
     dismiss_entries,
     scope_label: str | None,
 ) -> None:
-    """Identical re-run: refresh marker/check without engine or resolve (Pitfall 3).
-
-    Re-renders the sticky from the freshly recomputed gate (not just the marker
-    prefix) so the visible Verdict/Findings always match the check-run conclusion.
-    Skipping the re-render let the two diverge when carried-prior state changed
-    between same-SHA runs (e.g. a thread resolved out-of-band drops a finding from
-    the recomputed gate while the frozen sticky still showed it).
-
-    Preserves active dismiss suppress-list entries so noop refreshes do not wipe
-    maintainer dismiss state or re-open suppressed findings in the gate.
-    """
+    """Same-SHA re-run: refresh sticky + check from recomputed gate (Pitfall 3)."""
     priors = derive_prior_findings(pr, owner=owner, repo=repo_name)
     open_findings = _open_set_findings([], priors, set())
     suppressed = active_suppressed_fingerprints(dismiss_entries, [], {})
@@ -285,8 +335,6 @@ def _finish_noop_review(
             if fingerprint(finding.path, finding.title) not in suppressed
         ]
     active_dismissals = [entry for entry in dismiss_entries if entry.fingerprint in suppressed]
-    # Verdict-only gate: no current diff, so valid_lines is empty and carried priors
-    # render as position-fallback in the sticky — correct, they are not on a live hunk.
     gate = apply_gate(
         open_findings,
         review_cfg,
@@ -297,43 +345,21 @@ def _finish_noop_review(
             "_No changes since the last reviewed commit; carried findings shown below._"
         )
     )
-    # One retry on transient GithubException — mirrors the full-review _publish_sticky
-    # path so a flaky API call does not leave the marker stale on an otherwise no-op run.
-    try:
-        sticky = upsert_sticky(
-            pr,
-            noop_result,
-            head_sha=head_sha,
-            gate=gate,
-            scope=scope_label,
-            dismissals=active_dismissals or None,
-        )
-    except GithubException as exc:
-        print(
-            f"prevue: noop sticky upsert failed (HTTP {getattr(exc, 'status', '?')}), retrying",
-            file=sys.stderr,
-        )
-        try:
-            sticky = upsert_sticky(
-                pr,
-                noop_result,
-                head_sha=head_sha,
-                gate=gate,
-                scope=scope_label,
-                dismissals=active_dismissals or None,
-            )
-        except GithubException as retry_exc:
-            print(
-                f"prevue: noop sticky retry failed (HTTP {getattr(retry_exc, 'status', '?')})",
-                file=sys.stderr,
-            )
-            sticky = None
+    sticky, sticky_failed = _upsert_sticky_with_retry(
+        pr,
+        noop_result,
+        head_sha=head_sha,
+        gate=gate,
+        scope=scope_label,
+        dismissals=active_dismissals or None,
+        log_prefix="noop sticky",
+    )
     check_published = conclude_review_check(
         repo,
         head_sha,
         gate,
         sticky_url=getattr(sticky, "html_url", None),
-        sticky_failed=sticky is None,
+        sticky_failed=sticky_failed,
     )
     if not check_published:
         raise RuntimeError("Failed to publish review check run")
@@ -371,21 +397,19 @@ def run_review(
 
     skip_reason = should_skip(pr, config.skip)
     if skip_reason:
-        upsert_skip_note(pr, reason=skip_reason)
-        skip_published = conclude_skip_check(
-            get_repo(ctx),
+        _publish_skip(
+            pr,
+            ctx,
             pr.head.sha,
-            conclusion="neutral",
             reason=skip_reason,
+            conclusion="neutral",
         )
-        if not skip_published:
-            raise RuntimeError("Failed to publish skip check run")
         return
 
     repo = get_repo(ctx)
     head_sha = pr.head.sha
     owner, repo_name = ctx.repo_full.split("/", 1)
-    sticky_body = _read_sticky_body(pr)
+    sticky_body = read_newest_trusted_sticky_body(pr)
     last_sha = parse_marker_sha(sticky_body) if sticky_body else None
     dismiss_entries = parse_dismiss_block(sticky_body)
     marker_for_scope = resolve_marker_for_scope(
@@ -428,17 +452,23 @@ def run_review(
                 scope_label="incremental",
             )
             return
-        upsert_skip_note(pr, dropped_count=len(dropped))
-        skip_published = conclude_skip_check(
-            get_repo(ctx), diff.head_sha, dropped_count=len(dropped)
-        )
-        if not skip_published:
-            raise RuntimeError("Failed to publish skip check run")
+        _publish_skip(pr, ctx, diff.head_sha, dropped_count=len(dropped))
         return
 
     # config.engine already encodes PREVUE_ENGINE > prevue.yml > default precedence
     # via _resolve_engine — re-reading the env here would duplicate that rule (WR-06).
-    engine = adapter or get_adapter(config.engine)
+    try:
+        engine = adapter or require_functional_adapter(config.engine)
+    except NonFunctionalEngineError as exc:
+        _publish_skip(
+            pr,
+            ctx,
+            diff.head_sha,
+            reason=str(exc),
+            conclusion="failure",
+            title="review failed",
+        )
+        return
 
     classification_disclosure: str | None = None
     classify_tokens = 0
@@ -464,16 +494,14 @@ def run_review(
             f"Could not load a consumer skill file ({type(exc).__name__}). "
             "See the workflow logs for details."
         )
-        upsert_skip_note(pr, reason=reason)
-        check_published = conclude_skip_check(
-            get_repo(ctx),
+        _publish_skip(
+            pr,
+            ctx,
             diff.head_sha,
-            conclusion="failure",
             reason=reason,
+            conclusion="failure",
             title="review failed",
         )
-        if not check_published:
-            raise RuntimeError("Failed to publish skill-validation failure check run")
         return
 
     if skills_root_warn:
@@ -507,15 +535,13 @@ def run_review(
     )
 
     if not packed_files:
-        upsert_skip_note(pr, reason="PR too large to review within budget")
-        skip_published = conclude_skip_check(
-            get_repo(ctx),
+        _publish_skip(
+            pr,
+            ctx,
             diff.head_sha,
-            conclusion="neutral",
             reason="PR too large to review within budget",
+            conclusion="neutral",
         )
-        if not skip_published:
-            raise RuntimeError("Failed to publish skip check run")
         return
     matched = select_skills(skills, [f.path for f in packed_files])
     instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
@@ -575,15 +601,13 @@ def run_review(
             instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
 
     if not packed_files:
-        upsert_skip_note(pr, reason="PR too large to review within budget")
-        skip_published = conclude_skip_check(
-            get_repo(ctx),
+        _publish_skip(
+            pr,
+            ctx,
             diff.head_sha,
-            conclusion="neutral",
             reason="PR too large to review within budget",
+            conclusion="neutral",
         )
-        if not skip_published:
-            raise RuntimeError("Failed to publish skip check run")
         return
 
     # Derive priors and known_items early so the byte-limit guard below accounts for
@@ -638,15 +662,13 @@ def run_review(
         )
         > MAX_PROMPT_BYTES
     ):
-        upsert_skip_note(pr, reason="PR too large to review within budget")
-        skip_published = conclude_skip_check(
-            get_repo(ctx),
+        _publish_skip(
+            pr,
+            ctx,
             diff.head_sha,
-            conclusion="neutral",
             reason="PR too large to review within budget",
+            conclusion="neutral",
         )
-        if not skip_published:
-            raise RuntimeError("Failed to publish skip check run")
         return
 
     result_cls = classify(packed_files, ruleset.label_rules)
@@ -785,38 +807,6 @@ def run_review(
         "dismissals": active_dismissals,
     }
 
-    def _publish_sticky(gate_for_sticky: GateResult) -> tuple[object | None, bool]:
-        try:
-            sticky_comment = upsert_sticky(
-                pr,
-                result,
-                head_sha=diff.head_sha,
-                gate=gate_for_sticky,
-                **sticky_base_kwargs,
-            )
-        except GithubException as exc:
-            status = getattr(exc, "status", "?")
-            print(
-                f"prevue: sticky comment upsert failed (HTTP {status}), retrying",
-                file=sys.stderr,
-            )
-            try:
-                sticky_comment = upsert_sticky(
-                    pr,
-                    result,
-                    head_sha=diff.head_sha,
-                    gate=gate_for_sticky,
-                    **sticky_base_kwargs,
-                )
-            except GithubException as retry_exc:
-                print(
-                    f"prevue: sticky retry failed (HTTP {getattr(retry_exc, 'status', '?')})",
-                    file=sys.stderr,
-                )
-                return None, True
-            return sticky_comment, False
-        return sticky_comment, False
-
     failed_inline_keys = post_inline_review(
         pr,
         gate,
@@ -849,7 +839,13 @@ def run_review(
             dropped_findings=gate.dropped_findings,
             partial=gate.partial,
         )
-    sticky, sticky_failed = _publish_sticky(gate)
+    sticky, sticky_failed = _upsert_sticky_with_retry(
+        pr,
+        result,
+        head_sha=diff.head_sha,
+        gate=gate,
+        **sticky_base_kwargs,
+    )
     check_published = conclude_review_check(
         get_repo(ctx),
         diff.head_sha,

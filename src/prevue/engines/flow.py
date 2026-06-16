@@ -22,12 +22,7 @@ def _token_meta(prompt: str, stdout: str = "") -> dict[str, int | bool]:
 def _retry_token_meta(
     prompt: str, retry_prompt: str, first_stdout: str, retry_stdout: str
 ) -> dict[str, int | bool]:
-    """Sum both invocations' real inputs/outputs once each.
-
-    `retry_prompt` already embeds the full original `prompt` (see _build_retry_prompt),
-    so it is counted as the second invocation's input on its own — never concatenated
-    onto `prompt`, which would count the original prompt twice.
-    """
+    """Sum both invocations without double-counting the embedded original prompt."""
     return {
         "review": (
             estimate_tokens(prompt)
