@@ -1,9 +1,11 @@
 name: Prevue Review
 
+# Dogfood: run only after CI completes successfully on the PR (not on every push event).
 on:
-  pull_request:
-    branches: [main]
-    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_run:
+    # zizmor: ignore[dangerous-triggers] - gated: CI success, pull_request only, same-repo, non-draft
+    workflows: [CI]
+    types: [completed]
 
 # LIFE-04 resolveReviewThread requires contents:write — see prevue-review.yml / consumer-setup.md.
 permissions:
@@ -12,16 +14,22 @@ permissions:
   checks: write
 
 concurrency:
-  group: prevue-${{ github.event.pull_request.number }}
+  group: prevue-${{ github.event.workflow_run.pull_requests[0].number }}
   cancel-in-progress: true
 
 jobs:
   review:
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.pull_requests[0].draft != true
     uses: ./.github/workflows/prevue-review.yml
     with:
       engine: ${{ vars.PREVUE_ENGINE || 'copilot-cli' }}
-      prevue-ref: ${{ github.event.pull_request.head.sha }}
+      prevue-ref: ${{ github.event.workflow_run.head_sha }}
+      pr-head-sha: ${{ github.event.workflow_run.head_sha }}
+      consumer-base-sha: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
       seed-consumer-config: true
     secrets:
       copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
