@@ -81,11 +81,11 @@ def test_wait_ci_maps_terminal_conclusions_without_poll_loop() -> None:
     assert wait_run.count("ci_ok=false") >= 2
 
 
-def test_wait_ci_polls_merge_commit_not_pr_head() -> None:
+def test_wait_ci_polls_pr_head_sha_for_ci_run() -> None:
     wf = _load_review_workflow()
     wait_env = wf["jobs"]["wait-ci"]["steps"][0]["env"]
-    assert wait_env.get("CI_POLL_SHA") == "${{ github.sha }}"
-    assert "pull_request.head.sha" not in str(wait_env)
+    assert wait_env.get("CI_POLL_SHA") == "${{ github.event.pull_request.head.sha }}"
+    assert "${{ github.sha }}" not in str(wait_env)
     with_block = wf["jobs"]["review"]["with"]
     assert with_block.get("pr-head-sha") == "${{ github.event.pull_request.head.sha }}"
 

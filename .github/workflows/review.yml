@@ -28,8 +28,8 @@ jobs:
         id: wait
         env:
           GH_TOKEN: ${{ github.token }}
-          # pull_request CI runs bind to merge commit (github.sha), not branch tip.
-          CI_POLL_SHA: ${{ github.sha }}
+          # gh run list --commit matches pull_request CI headSha (branch tip), not merge commit.
+          CI_POLL_SHA: ${{ github.event.pull_request.head.sha }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
