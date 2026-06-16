@@ -5,7 +5,7 @@ from __future__ import annotations
 from unidiff import PatchSet
 from unidiff.errors import UnidiffParseError
 
-from prevue.models import ChangedFile
+from prevue.models import ChangedFile, Finding
 
 
 def commentable_lines(path: str, patch: str | None) -> dict[str, set[int]]:
@@ -36,3 +36,34 @@ def build_valid_lines(
 ) -> dict[str, dict[str, set[int]]]:
     """Map each changed file path to commentable line sets per side."""
     return {f.path: commentable_lines(f.path, f.patch) for f in files}
+
+
+def regions_changed(path: str, incremental_patch: str | None) -> list[tuple[int, int]]:
+    """RIGHT-side (start, end) line ranges touched in an incremental patch (D-09)."""
+    if not incremental_patch:
+        return []
+    try:
+        ps = PatchSet(f"--- a/{path}\n+++ b/{path}\n{incremental_patch}")
+    except UnidiffParseError:
+        return []
+    regions: list[tuple[int, int]] = []
+    for pf in ps:
+        for hunk in pf:
+            target_lines: list[int] = []
+            for line in hunk:
+                if (line.is_added or line.is_context) and line.target_line_no is not None:
+                    target_lines.append(line.target_line_no)
+            if target_lines:
+                regions.append((min(target_lines), max(target_lines)))
+    return regions
+
+
+def finding_region_changed(
+    finding: Finding,
+    regions: list[tuple[int, int]],
+    context: int = 3,
+) -> bool:
+    """True when finding line overlaps a touched hunk or is within C lines of it."""
+    return any(
+        start <= finding.line + context and finding.line - context <= end for start, end in regions
+    )
