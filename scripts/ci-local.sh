@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 ACTIONLINT_VERSION="v1.7.12"
-ZIZMOR_IMAGE="ghcr.io/zizmorcore/zizmor:v1.25.2"
+ZIZMOR_VERSION="1.25.2"
 WORKFLOW_FILES=(
   .github/workflows/ci.yml
   .github/workflows/review.yml
@@ -45,21 +45,7 @@ ensure_actionlint() {
 }
 
 run_zizmor() {
-  if command -v zizmor >/dev/null 2>&1; then
-    zizmor audit .github/workflows
-    return
-  fi
-  if command -v docker >/dev/null 2>&1; then
-    docker run --rm \
-      -v "${ROOT}/.github/workflows:/workflows:ro" \
-      "${ZIZMOR_IMAGE}" \
-      audit /workflows
-    return
-  fi
-  echo "zizmor not found. Install a binary or Docker, then retry:" >&2
-  echo "  docker pull ${ZIZMOR_IMAGE}" >&2
-  echo "  https://docs.zizmor.sh/installation/" >&2
-  exit 1
+  uvx "zizmor==${ZIZMOR_VERSION}" .github/workflows
 }
 
 step "uv sync --locked"

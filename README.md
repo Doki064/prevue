@@ -83,6 +83,6 @@ Run the same checks as CI before opening a PR:
 ./scripts/ci-local.sh
 ```
 
-Requires `go` (actionlint) and `zizmor` or Docker (workflow security scan). Python steps use `uv` only.
+Requires `go` (actionlint, or install actionlint directly). Python and zizmor use `uv` / `uvx` only.
 
 Live Copilot runs require `COPILOT_GITHUB_TOKEN` and a PR event context (`GITHUB_EVENT_PATH`, `GITHUB_REPOSITORY`); unit tests mock those boundaries.
