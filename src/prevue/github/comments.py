@@ -5,24 +5,314 @@ from __future__ import annotations
 import os
 import re
 import sys
+from dataclasses import dataclass
 from html import escape as escape_html
 
+import requests
 from github import GithubException
 
 from prevue.classify.models import CANONICAL_LABEL_ORDER, ClassificationResult, canonical_index
-from prevue.gate import GateResult, severity_counts_line, thresholds_line, verdict_title
+from prevue.fingerprint import fingerprint
+from prevue.gate import (
+    SEVERITY_RANK,
+    GateResult,
+    severity_counts_line,
+    thresholds_line,
+    verdict_title,
+)
+from prevue.github.graphql import GraphQLError, fetch_review_threads, resolve_review_thread
+from prevue.github.positions import finding_region_changed
 from prevue.models import Finding, ReviewResult
 
 MARKER = "<!-- prevue:sticky -->"
-INLINE_MARKER = "<sub>posted by Prevue</sub>"
+MARKER_WITH_SHA = "<!-- prevue:sticky head={sha} -->"
+_MARKER_RE = re.compile(r"<!--\s*prevue:sticky(?:\s+head=([0-9a-f]{7,40}))?\s*-->")
+INLINE_MARKER = "_posted by Prevue_"
+LEGACY_INLINE_MARKER = "<sub>posted by Prevue</sub>"
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
 
 SEVERITY_BADGES = {"error": "🔴", "warning": "🟡", "info": "🔵"}
+BADGE_TO_SEVERITY = {badge: sev for sev, badge in SEVERITY_BADGES.items()}
 PLACEMENT_BADGES = {
     "inline": "💬 inline",
     "summary-only": "📋 summary-only",
     "position-fallback": "⚠️ position-fallback",
 }
+
+# Deterministic disclaimer prepended to the sticky Review section on incremental runs (gap #5).
+# This text is a constant — it must not be derived from engine output.
+_INCREMENTAL_SCOPE_DISCLAIMER = (
+    "> **Incremental review:** This review is scoped to files changed since the last reviewed "
+    "commit. Prior open findings on unchanged files are carried forward."
+)
+_INCREMENTAL_CARRIED_CLAUSE = (
+    " {count} prior open finding(s) may be on files outside this incremental diff."
+)
+
+
+def parse_marker_sha(body: str) -> str | None:
+    """Extract last-reviewed head SHA from sticky marker body (D-01).
+
+    Returns None for legacy head-less markers or missing markers — caller treats
+    that as first-run / full review.
+    """
+    match = _MARKER_RE.search(body or "")
+    return match.group(1) if (match and match.group(1)) else None
+
+
+def render_marker(head_sha: str) -> str:
+    """Render the SHA-bearing sticky marker comment prefix (D-01)."""
+    return MARKER_WITH_SHA.format(sha=head_sha)
+
+
+def parse_severity_from_body(body: str) -> str | None:
+    """Recover severity from a live inline comment's leading badge emoji (D-12).
+
+    Anchors to the first non-empty line's leading character(s) only — pattern-match,
+    never eval the body. Returns None on no match (fail-safe for human/legacy comments).
+    """
+    if not body:
+        return None
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        for badge, severity in BADGE_TO_SEVERITY.items():
+            if stripped.startswith(badge):
+                return severity
+        return None
+    return None
+
+
+_TITLE_FROM_BODY_RE = re.compile(r"^[🔴🟡🔵]\s+\*\*(.+?)\*\*")
+# Fallback for legacy inline comments that have a severity badge but no **bold** title
+# wrapper (pre-bold-migration). Without this, _is_prevue_inline_comment still detects
+# them but _parse_title_from_inline_body returns None, silently dropping them from
+# carry-forward on incremental runs.
+_TITLE_FROM_BODY_FALLBACK_RE = re.compile(r"^[🔴🟡🔵]\s+(.+?)\s*$")
+
+
+def _unescape_inline_markdown(value: str) -> str:
+    """Reverse _escape_inline_markdown for title re-derivation from live comments."""
+    for token in ("`", "*", "_", "[", "]"):
+        value = value.replace(f"\\{token}", token)
+    return value.replace("\\\\", "\\")
+
+
+def _parse_title_from_inline_body(body: str) -> str | None:
+    """Extract finding title from rendered inline comment first line."""
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        match = _TITLE_FROM_BODY_RE.match(stripped)
+        if match:
+            return _unescape_inline_markdown(match.group(1))
+        fallback = _TITLE_FROM_BODY_FALLBACK_RE.match(stripped)
+        if fallback:
+            # Legacy badge-only comment: strip any stray bold markers before unescaping.
+            return _unescape_inline_markdown(fallback.group(1).strip("* "))
+        return None
+    return None
+
+
+@dataclass(frozen=True)
+class PriorFinding:
+    """Re-derived prior inline finding from live PR comments (D-01/D-12)."""
+
+    path: str
+    line: int
+    side: str
+    title: str
+    fingerprint: str
+    severity: str | None
+    thread_id: str | None
+
+
+def _log_thread_fetch_failure(context: str, exc: Exception) -> None:
+    """Log a thread-fetch failure with enough detail to tell auth/outage from a no-op.
+
+    A bare ``Exception`` log made a misconfigured GITHUB_TOKEN (401/403) or a
+    sustained API outage indistinguishable from a PR that simply has no prior
+    threads. Surface the HTTP status / GraphQL error type so operators can detect
+    degraded lifecycle mode (priors lose thread_id; resolution cannot run).
+    """
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        detail = f"HTTP {exc.response.status_code}"
+    elif isinstance(exc, GraphQLError):
+        detail = "GraphQL errors"
+        if isinstance(exc.errors, list) and exc.errors:
+            first = exc.errors[0]
+            if isinstance(first, dict):
+                # GitHub error messages (e.g. "Resource not accessible by integration")
+                # are diagnostic, not secret — surface type and message so operators can
+                # tell a permission gap from an outage. Truncate to bound log noise.
+                err_type = first.get("type")
+                message = first.get("message")
+                if err_type and message:
+                    detail = f"GraphQL {err_type}: {str(message)[:200]}"
+                elif err_type:
+                    detail = f"GraphQL {err_type}"
+                elif message:
+                    detail = f"GraphQL: {str(message)[:200]}"
+    else:
+        detail = type(exc).__name__
+    print(
+        f"prevue: {context} failed ({detail}); "
+        "lifecycle degraded — priors derived without thread_id, resolution skipped",
+        file=sys.stderr,
+    )
+
+
+def _thread_id_by_location(threads: list[dict]) -> dict[tuple[str, int, str], str]:
+    """Map (path, line, side) → review thread id from GraphQL nodes.
+
+    The ``side`` field comes from the GraphQL ``side`` scalar ("LEFT" or "RIGHT").
+    Including side prevents silent last-write-wins collision when two threads exist
+    on the same file+line on different diff sides.
+    """
+    mapping: dict[tuple[str, int, str], str] = {}
+    for thread in threads:
+        path = thread.get("path")
+        line = thread.get("line")
+        side = thread.get("side") or "RIGHT"
+        thread_id = thread.get("id")
+        if path is not None and line is not None and thread_id:
+            mapping[(path, line, side)] = thread_id
+    return mapping
+
+
+def _derive_prior_findings_with_threads(
+    pr,
+    *,
+    owner: str | None = None,
+    repo: str | None = None,
+) -> tuple[list[PriorFinding], list[dict]]:
+    """Re-derive prior findings and return the fetched threads alongside them.
+
+    Internal helper so callers that need threads for a second operation (e.g.
+    resolve_outdated_prior_findings) can reuse the already-fetched list instead
+    of issuing a redundant GraphQL round-trip.
+    """
+    threads: list[dict] = []
+    if owner is not None and repo is not None:
+        try:
+            threads = fetch_review_threads(owner, repo, pr.number)
+        except (GraphQLError, requests.RequestException) as exc:
+            _log_thread_fetch_failure("fetch review threads", exc)
+    thread_ids = _thread_id_by_location(threads)
+    resolved_threads = {t["id"] for t in threads if t.get("isResolved")}
+
+    priors: list[PriorFinding] = []
+    for key, comments in _existing_prevue_inline_by_location(pr).items():
+        path, line, side = key
+        comment = comments[0]
+        body = comment.body or ""
+        title = _parse_title_from_inline_body(body)
+        if title is None:
+            continue
+        thread_id = thread_ids.get((path, line, side))
+        if thread_id is not None and thread_id in resolved_threads:
+            # A resolved thread is a closed finding (D-11: open-set is union MINUS
+            # resolved). Skip it entirely so a thread resolved by the framework's own
+            # resolve_outdated pass, by a maintainer, or on a prior run does not get
+            # perpetually re-carried as an open finding. If the issue genuinely still
+            # exists the engine re-emits it this run as a fresh current finding.
+            continue
+        priors.append(
+            PriorFinding(
+                path=path,
+                line=line,
+                side=side,
+                title=title,
+                fingerprint=fingerprint(path, title),
+                severity=parse_severity_from_body(body),
+                thread_id=thread_id,
+            )
+        )
+    return priors, threads
+
+
+def derive_prior_findings(
+    pr,
+    *,
+    owner: str | None = None,
+    repo: str | None = None,
+) -> list[PriorFinding]:
+    """Re-derive prior Prevue inline findings from live comments (D-01/D-12)."""
+    priors, _threads = _derive_prior_findings_with_threads(pr, owner=owner, repo=repo)
+    return priors
+
+
+def resolve_outdated_prior_findings(
+    pr,
+    *,
+    in_scope_paths: set[str],
+    regions_by_path: dict[str, list[tuple[int, int]]],
+    current_fingerprints: set[str],
+    owner: str,
+    repo: str,
+    threads: list[dict] | None = None,
+) -> set[str]:
+    """Resolve outdated review threads conservatively (D-08/D-09).
+
+    Returns fingerprints of priors whose threads were resolved this run.
+    Accepts an already-fetched ``threads`` list to avoid a redundant round-trip
+    when the caller (run_review) has already fetched threads via derive_prior_findings.
+    """
+    if threads is None:
+        try:
+            threads = fetch_review_threads(owner, repo, pr.number)
+        except (GraphQLError, requests.RequestException) as exc:
+            _log_thread_fetch_failure("fetch review threads for resolve", exc)
+            return set()
+    resolved_ids = {t["id"] for t in threads if t.get("isResolved")}
+    thread_ids = _thread_id_by_location(threads)
+    resolved_fps: set[str] = set()
+
+    for key, comments in _existing_prevue_inline_by_location(pr).items():
+        path, line, side = key
+        if path not in in_scope_paths:
+            continue
+        body = comments[0].body or ""
+        title = _parse_title_from_inline_body(body)
+        if title is None:
+            continue
+        prior_fp = fingerprint(path, title)
+        if prior_fp in current_fingerprints:
+            continue
+        regions = regions_by_path.get(path, [])
+        stub = Finding(
+            path=path,
+            line=line,
+            side=side,
+            severity=parse_severity_from_body(body) or "info",
+            title=title,
+            body="",
+        )
+        if not finding_region_changed(stub, regions):
+            continue
+        thread_id = thread_ids.get((path, line, side))
+        if not thread_id or thread_id in resolved_ids:
+            continue
+        if resolve_review_thread(thread_id):
+            resolved_ids.add(thread_id)
+            resolved_fps.add(prior_fp)
+
+    return resolved_fps
+
+
+def _severity_escalated(prior_body: str, new_severity: str) -> bool:
+    """True when new finding severity is strictly more severe than prior comment.
+
+    Returns False when the prior severity cannot be parsed (unknown/legacy badge
+    format) — keep the existing comment as-is per D-06 rather than churning it
+    unconditionally on every run.
+    """
+    prior_severity = parse_severity_from_body(prior_body)
+    if prior_severity is None:
+        return False  # unknown prior: don't churn; edit only on explicit escalation
+    return SEVERITY_RANK[new_severity] < SEVERITY_RANK[prior_severity]
 
 
 def _safe_suggestion_block(text: str) -> str:
@@ -138,8 +428,18 @@ def render_body(
     reviewed_file_count: int | None = None,
     not_reviewed_file_count: int | None = None,
     cap_skipped: list[str] | None = None,
+    head_sha: str | None = None,
+    scope: str | None = None,
+    carried_open_count: int = 0,
 ) -> str:
-    """Sectioned sticky body: Verdict / Review / Findings / details / Metadata."""
+    """Sectioned sticky body: Verdict / Review / Findings / details / Metadata.
+
+    When scope='incremental', the Review section is prefixed with a deterministic
+    disclaimer naming the incremental scope and, when carried_open_count > 0,
+    that prior open findings exist outside this diff. All other scope values
+    (including None/'full') leave the Review section unchanged (engine summary only).
+    """
+    marker_line = render_marker(head_sha) if head_sha else MARKER
     engine_name = result.engine_meta.get("engine", "unknown")
     model = result.engine_meta.get("model", "unknown")
     duration = result.engine_meta.get("duration_s", "?")
@@ -244,12 +544,20 @@ def render_body(
             f"{lines}\n</details>\n\n"
         )
 
+    # Build the Review section content: deterministic disclaimer on incremental runs (gap #5).
+    review_content = _neutralize_html(result.summary_markdown)
+    if scope == "incremental":
+        disclaimer = _INCREMENTAL_SCOPE_DISCLAIMER
+        if carried_open_count > 0:
+            disclaimer += _INCREMENTAL_CARRIED_CLAUSE.format(count=carried_open_count)
+        review_content = f"{disclaimer}\n\n{review_content}"
+
     return (
-        f"{MARKER}\n"
+        f"{marker_line}\n"
         "## Prevue Review\n\n"
         f"### Verdict\n"
         f"{verdict_section}"
-        f"### Review\n{_neutralize_html(result.summary_markdown)}\n\n"
+        f"### Review\n{review_content}\n\n"
         f"{findings_section}"
         f"{details_section}"
         f"{coverage_section}"
@@ -279,7 +587,9 @@ def _is_trusted_sticky_actor(comment) -> bool:
 
 def _is_prevue_sticky(comment) -> bool:
     """True for trusted automation comments whose body starts with marker."""
-    if not (comment.body or "").lstrip().startswith(MARKER):
+    body = (comment.body or "").lstrip()
+    match = _MARKER_RE.search(body)
+    if not match or match.start() != 0:
         return False
     return _is_trusted_sticky_actor(comment)
 
@@ -290,11 +600,17 @@ def _upsert_marker_comment(pr, body: str):
     Re-fetches comments on every call and matches by MARKER, so a retry after a
     GithubException is idempotent: if a prior attempt actually created the comment,
     the retry finds and edits it rather than creating a duplicate.
+
+    Edits the NEWEST sticky (last match) so this stays consistent with
+    _read_sticky_body and the workflow preflight when duplicate stickies exist.
     """
+    target = None
     for comment in pr.get_issue_comments():
         if _is_prevue_sticky(comment):
-            comment.edit(body)
-            return comment
+            target = comment
+    if target is not None:
+        target.edit(body)
+        return target
     return pr.create_issue_comment(body)
 
 
@@ -325,6 +641,9 @@ def upsert_sticky(
     reviewed_file_count: int | None = None,
     not_reviewed_file_count: int | None = None,
     cap_skipped: list[str] | None = None,
+    head_sha: str | None = None,
+    scope: str | None = None,
+    carried_open_count: int = 0,
 ):
     """Create one sticky comment or edit in place when marker exists (D-06)."""
     body = render_body(
@@ -340,13 +659,22 @@ def upsert_sticky(
         reviewed_file_count=reviewed_file_count,
         not_reviewed_file_count=not_reviewed_file_count,
         cap_skipped=cap_skipped,
+        head_sha=head_sha,
+        scope=scope,
+        carried_open_count=carried_open_count,
     )
     return _upsert_marker_comment(pr, body)
 
 
 def _is_prevue_inline_comment(comment) -> bool:
-    """True for trusted automation review comments tagged with INLINE_MARKER."""
-    if INLINE_MARKER not in (comment.body or ""):
+    """True for trusted automation review comments tagged with INLINE_MARKER.
+
+    Backward-compatible: also detects the LEGACY_INLINE_MARKER (HTML sub tag)
+    for comments posted before the GFM-safe migration so carry-forward / dedupe /
+    resolve on PRs like #23 remain unbroken.
+    """
+    body = comment.body or ""
+    if INLINE_MARKER not in body and LEGACY_INLINE_MARKER not in body:
         return False
     return _is_trusted_sticky_actor(comment)
 
@@ -365,9 +693,31 @@ def _existing_prevue_inline_by_location(pr) -> dict[tuple[str, int, str], list[o
     for comment in pr.get_review_comments():
         if not _is_prevue_inline_comment(comment):
             continue
+        # GitHub sets line=None on outdated threads; skip for upsert/prior derive.
+        if comment.path is None or comment.line is None:
+            continue
         key = inline_location_key(comment.path, comment.line, getattr(comment, "side", None))
         existing.setdefault(key, []).append(comment)
     return existing
+
+
+def _outdated_prevue_inline_comments(
+    pr,
+    *,
+    in_scope_paths: set[str] | None = None,
+) -> list[object]:
+    """Prevue inline comments GitHub marked outdated (line is null on REST API)."""
+    outdated: list[object] = []
+    for comment in pr.get_review_comments():
+        if not _is_prevue_inline_comment(comment):
+            continue
+        if comment.line is not None:
+            continue
+        path = getattr(comment, "path", None)
+        if in_scope_paths is not None and path not in in_scope_paths:
+            continue
+        outdated.append(comment)
+    return outdated
 
 
 def _delete_prevue_inline_comments(comments: list[object]) -> None:
@@ -385,7 +735,16 @@ def _delete_prevue_inline_comments(comments: list[object]) -> None:
             )
 
 
-def post_inline_review(pr, gate: GateResult) -> set[tuple[str, int, str]]:
+def post_inline_review(
+    pr,
+    gate: GateResult,
+    *,
+    in_scope_paths: set[str] | None = None,
+    regions_by_path: dict[str, list[tuple[int, int]]] | None = None,
+    owner: str | None = None,
+    repo: str | None = None,
+    resolve_outdated: bool = False,
+) -> set[tuple[str, int, str]]:
     """Post, update, or remove inline findings — upsert by (path, line, side) on re-run.
 
     Returns the set of inline location keys that could NOT be represented on the PR
@@ -401,10 +760,11 @@ def post_inline_review(pr, gate: GateResult) -> set[tuple[str, int, str]]:
     stale_comments = [
         comment
         for key, comments in existing.items()
-        if key not in current_keys
+        if key not in current_keys and (in_scope_paths is None or key[0] in in_scope_paths)
         for comment in comments
     ]
     to_delete: list[object] = list(stale_comments)
+    to_delete.extend(_outdated_prevue_inline_comments(pr, in_scope_paths=in_scope_paths))
 
     to_create: list[dict[str, object]] = []
     to_update: list[tuple[object, str, Finding]] = []
@@ -414,7 +774,9 @@ def post_inline_review(pr, gate: GateResult) -> set[tuple[str, int, str]]:
         key = inline_location_key(finding.path, finding.line, finding.side)
         prior_comments = existing.get(key, [])
         if prior_comments:
-            to_update.append((prior_comments[0], body, finding))
+            prior = prior_comments[0]
+            if _severity_escalated(prior.body or "", finding.severity):
+                to_update.append((prior, body, finding))
             if len(prior_comments) > 1:
                 to_delete.extend(prior_comments[1:])
             continue
@@ -467,4 +829,24 @@ def post_inline_review(pr, gate: GateResult) -> set[tuple[str, int, str]]:
             )
 
     _delete_prevue_inline_comments(to_delete)
+
+    if (
+        resolve_outdated
+        and in_scope_paths is not None
+        and regions_by_path is not None
+        and owner is not None
+        and repo is not None
+    ):
+        current_fingerprints = {
+            fingerprint(pf.finding.path, pf.finding.title) for pf in gate.placed
+        }
+        resolve_outdated_prior_findings(
+            pr,
+            in_scope_paths=in_scope_paths,
+            regions_by_path=regions_by_path,
+            current_fingerprints=current_fingerprints,
+            owner=owner,
+            repo=repo,
+        )
+
     return failed_keys

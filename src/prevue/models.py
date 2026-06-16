@@ -28,6 +28,8 @@ class ReviewRequest(BaseModel):
     instructions: str
     budget_seconds: int = 300
     model: str | None = None
+    known_issues: list[tuple[str, int, str]] = Field(default_factory=list)
+    max_known_issues: int = 20
 
 
 class Finding(BaseModel):

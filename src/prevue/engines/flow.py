@@ -71,11 +71,15 @@ def review_with_retry(
     *,
     invoke: Callable[[str], str],
     secret: str,
-    build_prompt: Callable[[ReviewRequest], str],
+    build_prompt: Callable[..., str],
     max_prompt_bytes: int,
     model_label: str,
 ) -> ReviewResult:
-    prompt = build_prompt(req)
+    prompt = build_prompt(
+        req,
+        known_issues=req.known_issues,
+        max_known_issues=req.max_known_issues,
+    )
     prompt_bytes = len(prompt.encode("utf-8"))
     if prompt_bytes > max_prompt_bytes:
         raise EngineFailure(
