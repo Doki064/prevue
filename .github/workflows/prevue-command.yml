@@ -1,0 +1,128 @@
+name: Prevue Command
+
+on:
+  issue_comment:
+    types: [created]
+
+# LIFE-04 resolveReviewThread requires contents:write — verified live 2026-06 (08-07).
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+
+jobs:
+  command:
+    # Pre-filter: /prevue on a PR issue only. OWNER/MEMBER/COLLABORATOR — write
+    # check is in Python (read-only users denied without engine spend).
+    if: >-
+      ${{ github.event.issue.pull_request
+          && startsWith(github.event.comment.body, '/prevue')
+          && contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fork PR guard
+        id: fork_guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          PR_HEAD=$(gh api "repos/${REPOSITORY}/pulls/${ISSUE_NUMBER}" --jq '.head.repo.full_name')
+          if [ "$PR_HEAD" != "$REPOSITORY" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            gh api "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+              -f body="Fork PRs are unsupported in v1; skipping review."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect command verb
+        id: verb
+        if: steps.fork_guard.outputs.skip != 'true'
+        env:
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          VERB=$(printf '%s\n' "$COMMENT_BODY" | grep -m1 '^/prevue ' | awk '{print $2}' || true)
+          echo "verb=${VERB:-}" >> "$GITHUB_OUTPUT"
+          if [ "$VERB" = "review" ]; then
+            echo "needs_engine=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "needs_engine=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout Prevue framework
+        if: steps.fork_guard.outputs.skip != 'true'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: Doki064/prevue
+          ref: ${{ vars.PREVUE_REF || 'v0.6.0' }}
+          path: .prevue
+          persist-credentials: false
+
+      - name: Checkout consumer default branch
+        if: steps.fork_guard.outputs.skip != 'true'
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          path: consumer
+          persist-credentials: false
+
+      - name: Set up uv
+        if: steps.fork_guard.outputs.skip != 'true'
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+          version: "0.11.21"
+
+      - name: Install dependencies
+        if: steps.fork_guard.outputs.skip != 'true'
+        working-directory: .prevue
+        run: uv sync --locked
+
+      - name: Install engine CLI
+        if: >-
+          steps.fork_guard.outputs.skip != 'true'
+          && steps.verb.outputs.needs_engine == 'true'
+        env:
+          PREVUE_ENGINE: ${{ vars.PREVUE_ENGINE || 'copilot-cli' }}
+        run: |
+          case "$PREVUE_ENGINE" in
+            copilot-cli)
+              npm install -g @github/copilot@1.0.61
+              command -v copilot
+              ;;
+            claude-code-cli)
+              npm install -g @anthropic-ai/claude-code@2.1.177
+              command -v claude
+              ;;
+            cursor-cli)
+              curl -fsS https://cursor.com/install -o "$RUNNER_TEMP/cursor-install.sh"
+              bash "$RUNNER_TEMP/cursor-install.sh"
+              command -v cursor-agent
+              ;;
+            *)
+              echo "Unsupported engine: $PREVUE_ENGINE" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Prevue command
+        if: steps.fork_guard.outputs.skip != 'true'
+        working-directory: .prevue
+        run: uv run prevue command
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVUE_COMMENT_BODY: ${{ github.event.comment.body }}
+          PREVUE_COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          PREVUE_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PREVUE_ENGINE: ${{ vars.PREVUE_ENGINE || 'copilot-cli' }}
+          PREVUE_CONSUMER_ROOT: ${{ github.workspace }}/consumer
+          PREVUE_CONFIG_PATH: .github/prevue.yml
+          COPILOT_GITHUB_TOKEN: >-
+            ${{ (vars.PREVUE_ENGINE || 'copilot-cli') == 'copilot-cli'
+                && secrets.COPILOT_GITHUB_TOKEN || '' }}
+          ANTHROPIC_API_KEY: >-
+            ${{ vars.PREVUE_ENGINE == 'claude-code-cli'
+                && secrets.ANTHROPIC_API_KEY || '' }}
+          CURSOR_API_KEY: >-
+            ${{ vars.PREVUE_ENGINE == 'cursor-cli'
+                && secrets.CURSOR_API_KEY || '' }}

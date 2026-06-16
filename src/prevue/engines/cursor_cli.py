@@ -42,6 +42,8 @@ class CursorAdapter(EngineAdapter):
             cmd = ["cursor-agent", "-p", "--output-format", "text", "-f", tmp_path]
             if model:
                 cmd.extend(["-m", model])
+            consumer_root = os.environ.get("PREVUE_CONSUMER_ROOT", "")
+            cwd = consumer_root if consumer_root and os.path.isdir(consumer_root) else None
             try:
                 proc = subprocess.run(
                     cmd,
@@ -49,6 +51,7 @@ class CursorAdapter(EngineAdapter):
                     capture_output=True,
                     text=True,
                     timeout=budget_seconds,
+                    cwd=cwd,
                 )
             except subprocess.TimeoutExpired as e:
                 raise EngineFailure(f"Cursor CLI timed out after {budget_seconds}s") from e

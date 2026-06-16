@@ -12,6 +12,7 @@ import requests
 from github import GithubException
 
 from prevue.classify.models import CANONICAL_LABEL_ORDER, ClassificationResult, canonical_index
+from prevue.dismiss import DismissEntry, render_dismiss_block
 from prevue.fingerprint import fingerprint
 from prevue.gate import (
     SEVERITY_RANK,
@@ -26,6 +27,8 @@ from prevue.models import Finding, ReviewResult
 
 MARKER = "<!-- prevue:sticky -->"
 MARKER_WITH_SHA = "<!-- prevue:sticky head={sha} -->"
+METADATA_SUMMARY = "<details><summary>Metadata</summary>"
+LEGACY_METADATA_HEADING = "### Metadata"
 _MARKER_RE = re.compile(r"<!--\s*prevue:sticky(?:\s+head=([0-9a-f]{7,40}))?\s*-->")
 INLINE_MARKER = "_posted by Prevue_"
 LEGACY_INLINE_MARKER = "<sub>posted by Prevue</sub>"
@@ -253,6 +256,7 @@ def resolve_outdated_prior_findings(
     owner: str,
     repo: str,
     threads: list[dict] | None = None,
+    authoritative: bool = False,
 ) -> set[str]:
     """Resolve outdated review threads conservatively (D-08/D-09).
 
@@ -290,7 +294,7 @@ def resolve_outdated_prior_findings(
             title=title,
             body="",
         )
-        if not finding_region_changed(stub, regions):
+        if not authoritative and not finding_region_changed(stub, regions):
             continue
         thread_id = thread_ids.get((path, line, side))
         if not thread_id or thread_id in resolved_ids:
@@ -302,8 +306,8 @@ def resolve_outdated_prior_findings(
     return resolved_fps
 
 
-def _severity_escalated(prior_body: str, new_severity: str) -> bool:
-    """True when new finding severity is strictly more severe than prior comment.
+def _inline_severity_changed(prior_body: str, new_severity: str) -> bool:
+    """True when parseable prior and new severities differ (escalation or de-escalation).
 
     Returns False when the prior severity cannot be parsed (unknown/legacy badge
     format) — keep the existing comment as-is per D-06 rather than churning it
@@ -311,8 +315,8 @@ def _severity_escalated(prior_body: str, new_severity: str) -> bool:
     """
     prior_severity = parse_severity_from_body(prior_body)
     if prior_severity is None:
-        return False  # unknown prior: don't churn; edit only on explicit escalation
-    return SEVERITY_RANK[new_severity] < SEVERITY_RANK[prior_severity]
+        return False
+    return SEVERITY_RANK[new_severity] != SEVERITY_RANK[prior_severity]
 
 
 def _safe_suggestion_block(text: str) -> str:
@@ -431,6 +435,7 @@ def render_body(
     head_sha: str | None = None,
     scope: str | None = None,
     carried_open_count: int = 0,
+    dismissals: list[DismissEntry] | None = None,
 ) -> str:
     """Sectioned sticky body: Verdict / Review / Findings / details / Metadata.
 
@@ -561,7 +566,8 @@ def render_body(
         f"{findings_section}"
         f"{details_section}"
         f"{coverage_section}"
-        f"### Metadata\n{metadata}\n"
+        f"{render_dismiss_block(dismissals) if dismissals else ''}"
+        f"{METADATA_SUMMARY}\n\n{metadata}\n</details>\n"
     )
 
 
@@ -644,6 +650,7 @@ def upsert_sticky(
     head_sha: str | None = None,
     scope: str | None = None,
     carried_open_count: int = 0,
+    dismissals: list[DismissEntry] | None = None,
 ):
     """Create one sticky comment or edit in place when marker exists (D-06)."""
     body = render_body(
@@ -662,6 +669,7 @@ def upsert_sticky(
         head_sha=head_sha,
         scope=scope,
         carried_open_count=carried_open_count,
+        dismissals=dismissals,
     )
     return _upsert_marker_comment(pr, body)
 
@@ -775,7 +783,7 @@ def post_inline_review(
         prior_comments = existing.get(key, [])
         if prior_comments:
             prior = prior_comments[0]
-            if _severity_escalated(prior.body or "", finding.severity):
+            if _inline_severity_changed(prior.body or "", finding.severity):
                 to_update.append((prior, body, finding))
             if len(prior_comments) > 1:
                 to_delete.extend(prior_comments[1:])
