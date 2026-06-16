@@ -78,7 +78,26 @@ def estimate_file_prompt_tokens(f: ChangedFile) -> int:
     return max(estimate_tokens(list_line) + estimate_tokens(block), 1)
 
 
-def estimate_prompt_overhead_tokens(*, instructions: str) -> int:
+def build_known_issues_block(
+    items: list[tuple[str, int, str]],
+    max_n: int,
+) -> str:
+    """Render capped known-issues list as fenced UNTRUSTED DATA (D-07, SECR-02)."""
+    if not items or max_n <= 0:
+        return ""
+    lines = "\n".join(
+        f"- path={_escape_line(path)} line={line} title={_escape_line(title)}"
+        for path, line, title in items[:max_n]
+    )
+    return f"## Already reported (do not re-report)\n~~~UNTRUSTED DATA\n{lines}\n~~~\n\n"
+
+
+def estimate_prompt_overhead_tokens(
+    *,
+    instructions: str,
+    known_issues: list[tuple[str, int, str]] | None = None,
+    max_known_issues: int = 20,
+) -> int:
     """Non-diff tokens in _build_prompt (instructions, contract, framing, reassertion)."""
     from prevue.engines.tokens import estimate_tokens
 
@@ -92,15 +111,24 @@ def estimate_prompt_overhead_tokens(*, instructions: str) -> int:
         "~~~UNTRUSTED DATA\n"
         "~~~\n"
     )
+    known_block = build_known_issues_block(known_issues or [], max_known_issues)
     return (
         estimate_tokens(instructions)
         + estimate_tokens(OUTPUT_CONTRACT)
         + estimate_tokens(framing)
+        + estimate_tokens(known_block)
         + estimate_tokens(INSTRUCTION_REASSERTION)
     )
 
 
-def _build_prompt(req: ReviewRequest) -> str:
+def _build_prompt(
+    req: ReviewRequest,
+    *,
+    known_issues: list[tuple[str, int, str]] | None = None,
+    max_known_issues: int | None = None,
+) -> str:
+    issues = req.known_issues if known_issues is None else known_issues
+    max_n = req.max_known_issues if max_known_issues is None else max_known_issues
     files = "\n".join(
         f"- path={_escape_line(f.path)} status={_escape_line(f.status)}" for f in req.diff.files
     )
@@ -121,7 +149,8 @@ def _build_prompt(req: ReviewRequest) -> str:
         "## Diff\n"
         "~~~UNTRUSTED DATA\n"
         f"{hunks}\n"
-        "~~~\n"
+        "~~~\n\n"
+        f"{build_known_issues_block(issues, max_n)}"
         f"{INSTRUCTION_REASSERTION}"
     )
 
