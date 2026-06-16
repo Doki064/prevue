@@ -8,18 +8,46 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pydantic import ValidationError
 
-from prevue.config import SkillsConfig
+from prevue.config import NO_CONSUMER_CONFIG_SENTINEL, SkillsConfig, load_config
 from prevue.engines.errors import EngineFailure
 from prevue.engines.registry import UnknownEngineError
+from prevue.fingerprint import fingerprint
 from prevue.github.client import PrContext
 from prevue.models import ChangedFile, DiffBundle, Finding, ReviewRequest, ReviewResult
-from prevue.review import BASELINE_INSTRUCTIONS, ForkPrUnsupported, run_review
+from prevue.review import BASELINE_INSTRUCTIONS, ForkPrUnsupported, _open_set_findings, run_review
 
 REPO_FULL = "owner/prevue"
 PR_NUMBER = 42
 BASE_SHA = "base000def456789012345678901234567890abcd"
 HEAD_SHA = "abc123def456789012345678901234567890abcd"
 STICKY_URL = "https://github.com/o/r/pull/1#issuecomment-99"
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_review_config():
+    """Framework defaults — ignore repo .github/prevue.yml in unit tests."""
+
+    def _load_config(_path=None):
+        return load_config(str(NO_CONSUMER_CONFIG_SENTINEL))
+
+    with patch("prevue.review.load_config", side_effect=_load_config):
+        yield
+
+
+@pytest.fixture(autouse=True)
+def _default_incremental_mocks(monkeypatch: pytest.MonkeyPatch):
+    """Baseline incremental lifecycle mocks so legacy run_review tests stay hermetic."""
+    monkeypatch.setenv("GITHUB_TOKEN", "ghp_test")
+    with (
+        patch("prevue.review.decide_scope", return_value=("full", None, None)),
+        # run_review calls _derive_prior_findings_with_threads; _finish_noop_review
+        # still calls derive_prior_findings — mock both so all paths stay hermetic.
+        patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
+        patch("prevue.review.derive_prior_findings", return_value=[]),
+        patch("prevue.review.resolve_outdated_prior_findings", return_value=set()),
+        patch("prevue.review._read_sticky_body", return_value=None),
+    ):
+        yield
 
 
 def _sample_ctx() -> PrContext:
@@ -164,7 +192,7 @@ def test_run_review_happy_path_calls_upsert_once(fake_engine) -> None:
     assert any("(security)" in entry or "(backend)" in entry for entry in loaded)
 
 
-def test_run_review_with_findings_posts_inline_then_sticky_then_check() -> None:
+def test_run_review_with_findings_posts_sticky_then_inline_then_check() -> None:
     mock_pr = MagicMock()
     mock_repo = _mock_repo()
     mock_sticky = _mock_sticky()
@@ -200,7 +228,7 @@ def test_run_review_with_findings_posts_inline_then_sticky_then_check() -> None:
     assert gate.conclusion == "neutral"
     assert len(gate.inline) == 1
     assert mock_check.call_args[0][2] is gate
-    assert call_order == ["inline", "sticky", "check"]
+    assert call_order == ["sticky", "inline", "check"]
 
 
 def test_run_review_inline_post_failure_downgrades_sticky_placements() -> None:
@@ -223,7 +251,7 @@ def test_run_review_inline_post_failure_downgrades_sticky_placements() -> None:
         run_review(adapter=FindingsEngine())
 
     mock_inline.assert_called_once()
-    mock_upsert.assert_called_once()
+    assert mock_upsert.call_count == 2
     mock_check.assert_called_once()
     sticky_gate = mock_upsert.call_args.kwargs["gate"]
     assert sticky_gate.inline == []
@@ -326,7 +354,9 @@ def test_run_review_degraded_neutral_check_no_inline() -> None:
     assert gate.degraded is True
     assert gate.conclusion == "neutral"
     assert gate.inline == []
-    mock_inline.assert_called_once_with(mock_pr, gate)
+    mock_inline.assert_called_once()
+    assert mock_inline.call_args[0][0] is mock_pr
+    assert mock_inline.call_args[0][1] is gate
     assert mock_check.call_args[0][2].conclusion == "neutral"
 
 
@@ -1067,6 +1097,7 @@ def test_engine_selection_via_prevue_engine(monkeypatch: pytest.MonkeyPatch) -> 
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
     ):
         with pytest.raises(UnknownEngineError, match="nope"):
             run_review()
@@ -1074,11 +1105,13 @@ def test_engine_selection_via_prevue_engine(monkeypatch: pytest.MonkeyPatch) -> 
 
 def test_engine_failure_propagates_without_upsert() -> None:
     mock_pr = MagicMock()
+    mock_repo = _mock_repo()
 
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
         patch("prevue.review.post_inline_review") as mock_inline,
         patch("prevue.review.upsert_sticky") as mock_upsert,
         patch("prevue.review.conclude_review_check") as mock_check,
@@ -1348,3 +1381,656 @@ def test_run_review_invalid_yaml_frontmatter_fail_closed(
     )
     mock_sticky.assert_not_called()
     mock_check.assert_not_called()
+
+
+# --- Phase 8 incremental lifecycle (08-06) ---
+
+LAST_SHA = "deadbeef123456789012345678901234567890ab"
+
+
+def _sticky_with_marker(*, sha: str | None = None) -> MagicMock:
+    from prevue.github.comments import MARKER, render_marker
+
+    comment = MagicMock()
+    comment.user.login = "github-actions[bot]"
+    comment.user.type = "Bot"
+    if sha:
+        comment.body = f"{render_marker(sha)}\n## Prevue Review\n\nPrior run."
+    else:
+        comment.body = f"{MARKER}\n## Prevue Review\n\nLegacy run."
+    return comment
+
+
+def _scoped_diff() -> DiffBundle:
+    return DiffBundle(
+        pr_number=PR_NUMBER,
+        base_sha=BASE_SHA,
+        head_sha=HEAD_SHA,
+        files=[
+            ChangedFile(
+                path="src/example.py",
+                status="modified",
+                additions=3,
+                deletions=1,
+                patch="@@ -1 +1 @@\n-old\n+new",
+            ),
+        ],
+    )
+
+
+def test_full_first_run_writes_head_marker(fake_engine) -> None:
+    mock_pr = MagicMock()
+    mock_pr.head.sha = HEAD_SHA
+    mock_pr.get_issue_comments.return_value = []
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+    captured_body: dict[str, str] = {}
+
+    def capture_upsert(*_args, **kwargs) -> MagicMock:
+        captured_body["head_sha"] = kwargs.get("head_sha")
+        return mock_sticky
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.decide_scope", return_value=("full", None, None)),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", side_effect=capture_upsert) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        run_review(adapter=fake_engine)
+
+    mock_upsert.assert_called_once()
+    assert captured_body["head_sha"] == HEAD_SHA
+
+
+def test_incremental_scope_reviews_only_in_scope_files() -> None:
+    mock_pr = MagicMock()
+    mock_pr.head.sha = HEAD_SHA
+    mock_pr.get_issue_comments.return_value = [_sticky_with_marker(sha=LAST_SHA)]
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+    in_scope = {"src/example.py"}
+    captured: dict[str, object] = {}
+
+    class CaptureEngine:
+        name = "capture"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            captured["paths"] = [f.path for f in req.diff.files]
+            return ReviewResult(
+                summary_markdown="ok",
+                findings=[],
+                engine_meta={"model": "fake", "duration_s": 0.1},
+            )
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.decide_scope", return_value=("incremental", in_scope, None)),
+        patch("prevue.review.fetch_diff_in_scope", return_value=_scoped_diff()) as mock_inc,
+        patch("prevue.review.fetch_diff") as mock_full,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        run_review(adapter=CaptureEngine())
+
+    mock_inc.assert_called_once_with(in_scope)
+    mock_full.assert_not_called()
+    assert captured["paths"] == ["src/example.py"]
+
+
+def test_identical_rerun_noop_skips_engine() -> None:
+    mock_pr = MagicMock()
+    mock_pr.head.sha = HEAD_SHA
+    mock_pr.get_issue_comments.return_value = [_sticky_with_marker(sha=HEAD_SHA)]
+    mock_repo = _mock_repo()
+
+    class SpyEngine:
+        name = "spy"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            raise AssertionError("engine must not run on identical noop")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.decide_scope", return_value=("noop", None, None)),
+        patch("prevue.review.fetch_diff") as mock_fetch,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.derive_prior_findings", return_value=[]),
+        patch("prevue.review._upsert_marker_comment") as mock_upsert_marker,
+        patch("prevue.review.conclude_review_check", return_value=True) as mock_check,
+        patch("prevue.review.post_inline_review") as mock_inline,
+        patch("prevue.review.resolve_outdated_prior_findings") as mock_resolve,
+    ):
+        # noop scope → _finish_noop_review, not the full priors path
+        run_review(adapter=SpyEngine())
+
+    mock_fetch.assert_not_called()
+    mock_inline.assert_not_called()
+    mock_resolve.assert_not_called()
+    mock_upsert_marker.assert_called_once()
+    body = mock_upsert_marker.call_args[0][1]
+    from prevue.github.comments import parse_marker_sha
+
+    assert parse_marker_sha(body) == HEAD_SHA
+    mock_check.assert_called_once()
+
+
+def test_incremental_empty_after_filter_refreshes_marker() -> None:
+    """Incremental delta with no reviewable files still advances marker."""
+    from prevue.models import DiffBundle
+
+    mock_pr = MagicMock()
+    mock_pr.head.sha = HEAD_SHA
+    mock_pr.get_issue_comments.return_value = [_sticky_with_marker(sha=LAST_SHA)]
+    mock_repo = _mock_repo()
+    empty_diff = DiffBundle(
+        pr_number=1,
+        base_sha="base",
+        head_sha=HEAD_SHA,
+        files=[],
+    )
+
+    class SpyEngine:
+        name = "spy"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            raise AssertionError("engine must not run when incremental diff filters empty")
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch(
+            "prevue.review.decide_scope",
+            return_value=("incremental", {"vendor/ignored.py"}, MagicMock()),
+        ),
+        patch("prevue.review.fetch_diff_in_scope", return_value=empty_diff),
+        patch("prevue.review.fetch_diff") as mock_full,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.derive_prior_findings", return_value=[]),
+        patch("prevue.review._upsert_marker_comment") as mock_upsert_marker,
+        patch("prevue.review.conclude_review_check", return_value=True),
+        patch("prevue.review.post_inline_review") as mock_inline,
+    ):
+        run_review(adapter=SpyEngine())
+
+    mock_full.assert_not_called()
+    mock_inline.assert_not_called()
+    mock_upsert_marker.assert_called_once()
+    from prevue.github.comments import parse_marker_sha
+
+    assert parse_marker_sha(mock_upsert_marker.call_args[0][1]) == HEAD_SHA
+
+
+def test_incremental_false_forces_full_despite_marker() -> None:
+    from prevue.classify.models import RuleSet
+    from prevue.config import FallbackConfig, PrevueConfig, SkillsConfig, SkipConfig
+    from prevue.gate import ReviewConfig
+
+    mock_pr = MagicMock()
+    mock_pr.head.sha = HEAD_SHA
+    mock_pr.get_issue_comments.return_value = [_sticky_with_marker(sha=LAST_SHA)]
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+    config = PrevueConfig(
+        ruleset=RuleSet(ignore_globs=[], label_rules={"backend": ["**/*.py"]}, routing_map={}),
+        review=ReviewConfig(incremental=False),
+        skip=SkipConfig(),
+        fallback=FallbackConfig(enabled=False),
+        skills=SkillsConfig(),
+        engine="fake",
+    )
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.load_config", return_value=config),
+        patch("prevue.review.decide_scope", return_value=("full", None, None)) as mock_scope,
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()) as mock_full,
+        patch("prevue.review.fetch_diff_in_scope") as mock_inc,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        run_review(adapter=FindingsEngine())
+
+    mock_scope.assert_called_once()
+    assert mock_scope.call_args[0][1] is None
+    mock_full.assert_called_once()
+    mock_inc.assert_not_called()
+
+
+def test_open_set_false_green_blocks_success_on_carried_error() -> None:
+    from prevue.github.comments import PriorFinding
+
+    mock_pr = MagicMock()
+    mock_pr.head.sha = HEAD_SHA
+    mock_pr.get_issue_comments.return_value = [_sticky_with_marker(sha=LAST_SHA)]
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+    carried = PriorFinding(
+        path="src/other.py",
+        line=5,
+        side="RIGHT",
+        title="Prior security bug",
+        fingerprint="abc123prior00001",
+        severity="error",
+        thread_id=None,
+    )
+
+    class CleanEngine:
+        name = "clean"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            return ReviewResult(
+                summary_markdown="Clean incremental push.",
+                findings=[],
+                engine_meta={"model": "fake", "duration_s": 0.1},
+            )
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.decide_scope", return_value=("incremental", {"src/example.py"}, None)),
+        patch("prevue.review.fetch_diff_in_scope", return_value=_scoped_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review._derive_prior_findings_with_threads", return_value=([carried], [])),
+        patch("prevue.review.resolve_outdated_prior_findings", return_value=set()),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True) as mock_check,
+    ):
+        run_review(adapter=CleanEngine())
+
+    gate = mock_upsert.call_args.kwargs["gate"]
+    assert gate.conclusion != "success"
+    assert gate.severity_counts["error"] == 1
+    check_gate = mock_check.call_args[0][2]
+    assert check_gate.conclusion != "success"
+
+
+def test_fingerprints_outdated_by_region_excludes_from_known_items() -> None:
+    from prevue.github.comments import PriorFinding
+    from prevue.review import _build_known_issues_items, _fingerprints_outdated_by_region
+
+    priors = [
+        PriorFinding(
+            path="src/a.py",
+            line=10,
+            side="RIGHT",
+            title="Stale issue",
+            fingerprint=fingerprint("src/a.py", "Stale issue"),
+            severity="warning",
+            thread_id=None,
+        ),
+        PriorFinding(
+            path="src/b.py",
+            line=5,
+            side="RIGHT",
+            title="Still valid",
+            fingerprint=fingerprint("src/b.py", "Still valid"),
+            severity="warning",
+            thread_id=None,
+        ),
+    ]
+    regions = {"src/a.py": [(8, 12)]}
+    in_scope = {"src/a.py", "src/b.py"}
+    outdated = _fingerprints_outdated_by_region(priors, in_scope, regions)
+    assert outdated == {priors[0].fingerprint}
+    items = _build_known_issues_items(priors, in_scope, 10, exclude_fingerprints=outdated)
+    assert items == [("src/b.py", 5, "Still valid")]
+
+
+def test_open_set_dedupes_carried_prior_at_same_line_as_current() -> None:
+    """Rephrase-at-same-line: when current has a DIFFERENT fingerprint at the same
+    (path,line,side), the open-set must keep the CARRIED prior title (which matches
+    the live inline thread that D-06 left unchanged) — not the new engine title."""
+    from prevue.github.comments import PriorFinding
+
+    current = [
+        Finding(
+            path="src/test1.js",
+            line=4,
+            severity="error",
+            title="Console.log uses wrong identifier casing",
+            body="",
+        )
+    ]
+    carried = PriorFinding(
+        path="src/test1.js",
+        line=4,
+        side="RIGHT",
+        title="Invalid Console.log — use console.log",
+        fingerprint=fingerprint("src/test1.js", "Invalid Console.log — use console.log"),
+        severity="error",
+        thread_id=None,
+    )
+
+    open_findings = _open_set_findings(current, [carried], set())
+
+    assert len(open_findings) == 1
+    assert open_findings[0].title == "Invalid Console.log — use console.log"
+
+
+def test_open_set_keeps_current_on_severity_escalation_at_same_line() -> None:
+    """Rephrase + escalation: current error wins over carried warning at same loc."""
+    from prevue.github.comments import PriorFinding
+
+    current = [
+        Finding(
+            path="src/test1.js",
+            line=4,
+            severity="error",
+            title="Console.log uses wrong identifier casing",
+            body="",
+        )
+    ]
+    carried = PriorFinding(
+        path="src/test1.js",
+        line=4,
+        side="RIGHT",
+        title="Invalid Console.log — use console.log",
+        fingerprint=fingerprint("src/test1.js", "Invalid Console.log — use console.log"),
+        severity="warning",
+        thread_id=None,
+    )
+
+    open_findings = _open_set_findings(current, [carried], set())
+
+    assert len(open_findings) == 1
+    assert open_findings[0].severity == "error"
+    assert open_findings[0].title == "Console.log uses wrong identifier casing"
+
+
+def test_open_set_drops_true_duplicate_at_same_line() -> None:
+    """True duplicate (current fingerprint == carried fingerprint): one entry, current chosen."""
+    from prevue.github.comments import PriorFinding
+
+    # Both titles normalize to the same fingerprint — genuine duplicate, current wins.
+    carried_title = "Console.log uses wrong identifier casing"
+    current = [
+        Finding(
+            path="src/test1.js",
+            line=4,
+            severity="error",
+            title=carried_title,
+            body="Fixed body",
+        )
+    ]
+    carried = PriorFinding(
+        path="src/test1.js",
+        line=4,
+        side="RIGHT",
+        title=carried_title,
+        fingerprint=fingerprint("src/test1.js", carried_title),
+        severity="error",
+        thread_id=None,
+    )
+
+    open_findings = _open_set_findings(current, [carried], set())
+
+    assert len(open_findings) == 1
+    assert open_findings[0].title == carried_title
+
+
+def test_open_set_dedupes_multiple_current_at_same_line() -> None:
+    current = [
+        Finding(
+            path="src/test1.js",
+            line=8,
+            severity="info",
+            title="Undeclared identifier World",
+            body="",
+        ),
+        Finding(
+            path="src/test1.js",
+            line=8,
+            severity="error",
+            title="Undefined variable World",
+            body="",
+        ),
+    ]
+
+    open_findings = _open_set_findings(current, [], set())
+
+    assert len(open_findings) == 1
+    assert open_findings[0].title == "Undefined variable World"
+
+
+def test_open_set_keeps_carried_prior_at_different_line() -> None:
+    from prevue.github.comments import PriorFinding
+
+    current = [
+        Finding(
+            path="src/test2.js",
+            line=1,
+            severity="error",
+            title="Undefined identifier console2",
+            body="",
+        )
+    ]
+    carried = PriorFinding(
+        path="src/test1.js",
+        line=4,
+        side="RIGHT",
+        title="Invalid Console.log — use console.log",
+        fingerprint=fingerprint("src/test1.js", "Invalid Console.log — use console.log"),
+        severity="error",
+        thread_id=None,
+    )
+
+    open_findings = _open_set_findings(current, [carried], set())
+
+    assert len(open_findings) == 2
+    assert {(f.path, f.line) for f in open_findings} == {("src/test2.js", 1), ("src/test1.js", 4)}
+
+
+def test_known_issues_in_prompt_capped_on_incremental() -> None:
+    from prevue.github.comments import PriorFinding
+
+    mock_pr = MagicMock()
+    mock_pr.head.sha = HEAD_SHA
+    mock_pr.get_issue_comments.return_value = [_sticky_with_marker(sha=LAST_SHA)]
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+    priors = [
+        PriorFinding(
+            path="src/example.py",
+            line=i,
+            side="RIGHT",
+            title=f"Issue {i}",
+            fingerprint=f"fp{i:02d}",
+            severity="warning",
+            thread_id=None,
+        )
+        for i in range(1, 6)
+    ]
+    captured_prompts: list[str] = []
+
+    class PromptCaptureEngine:
+        name = "capture"
+
+        def review(self, req: ReviewRequest) -> ReviewResult:
+            from prevue.engines.prompt import build_prompt
+
+            # Capture the prompt as flow.review_with_retry builds it — with
+            # known_issues/max_known_issues from req (WR-05: no monkey-patching).
+            captured_prompts.append(
+                build_prompt(
+                    req, known_issues=req.known_issues, max_known_issues=req.max_known_issues
+                )
+            )
+            return ReviewResult(
+                summary_markdown="ok",
+                findings=[],
+                engine_meta={"model": "fake", "duration_s": 0.1},
+            )
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.decide_scope", return_value=("incremental", {"src/example.py"}, None)),
+        patch("prevue.review.fetch_diff_in_scope", return_value=_scoped_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review._derive_prior_findings_with_threads", return_value=(priors, [])),
+        patch("prevue.review.resolve_outdated_prior_findings", return_value=set()),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        from prevue.classify.models import RuleSet
+        from prevue.config import FallbackConfig, PrevueConfig, SkillsConfig, SkipConfig
+        from prevue.gate import ReviewConfig
+
+        tight = PrevueConfig(
+            ruleset=RuleSet(ignore_globs=[], label_rules={"backend": ["**/*.py"]}, routing_map={}),
+            review=ReviewConfig(max_known_issues=3),
+            skip=SkipConfig(),
+            fallback=FallbackConfig(enabled=False),
+            skills=SkillsConfig(),
+            engine="fake",
+        )
+        with patch("prevue.review.load_config", return_value=tight):
+            run_review(adapter=PromptCaptureEngine())
+
+    assert captured_prompts
+    prompt = captured_prompts[-1]
+    assert "Already reported" in prompt
+    assert prompt.count("title=") == 3
+
+
+def test_resolve_opt_out_never_calls_graphql_resolve() -> None:
+    from prevue.classify.models import RuleSet
+    from prevue.config import FallbackConfig, PrevueConfig, SkillsConfig, SkipConfig
+    from prevue.gate import ReviewConfig
+
+    mock_pr = MagicMock()
+    mock_pr.head.sha = HEAD_SHA
+    mock_pr.get_issue_comments.return_value = []
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+    config = PrevueConfig(
+        ruleset=RuleSet(ignore_globs=[], label_rules={"backend": ["**/*.py"]}, routing_map={}),
+        review=ReviewConfig(resolve_outdated=False),
+        skip=SkipConfig(),
+        fallback=FallbackConfig(enabled=False),
+        skills=SkillsConfig(),
+        engine="fake",
+    )
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.load_config", return_value=config),
+        patch("prevue.review.decide_scope", return_value=("full", None, None)),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
+        patch("prevue.review.resolve_outdated_prior_findings") as mock_resolve,
+        patch("prevue.review.post_inline_review", return_value=set()) as mock_inline,
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        run_review(adapter=FindingsEngine())
+
+    mock_resolve.assert_not_called()
+    mock_inline.assert_called_once()
+    assert mock_inline.call_args.kwargs.get("resolve_outdated") is False
+
+
+def test_marker_write_after_run_parseable(fake_engine) -> None:
+    mock_pr = MagicMock()
+    mock_pr.head.sha = HEAD_SHA
+    mock_pr.get_issue_comments.return_value = []
+    mock_repo = _mock_repo()
+    rendered: dict[str, str] = {}
+
+    def fake_upsert(pr, result, **kwargs):
+        from prevue.github.comments import render_body
+
+        rendered["body"] = render_body(
+            result,
+            gate=kwargs.get("gate"),
+            head_sha=kwargs.get("head_sha"),
+        )
+        sticky = MagicMock()
+        sticky.html_url = STICKY_URL
+        return sticky
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.decide_scope", return_value=("full", None, None)),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", side_effect=fake_upsert),
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        run_review(adapter=fake_engine)
+
+    from prevue.github.comments import parse_marker_sha
+
+    assert parse_marker_sha(rendered["body"]) == HEAD_SHA
+
+
+def _incremental_two_file_diff() -> DiffBundle:
+    return DiffBundle(
+        pr_number=PR_NUMBER,
+        base_sha=BASE_SHA,
+        head_sha=HEAD_SHA,
+        files=[
+            ChangedFile(
+                path="src/example.py",
+                status="modified",
+                additions=3,
+                deletions=1,
+                patch="@@ -1 +1 @@\n-old\n+new",
+            ),
+            ChangedFile(
+                path="src/untouched.py",
+                status="modified",
+                additions=1,
+                deletions=0,
+                patch="@@ -1 +1 @@\n+noop",
+            ),
+        ],
+    )
+
+
+def test_force_push_resets_to_full_review() -> None:
+    mock_pr = MagicMock()
+    mock_pr.head.sha = HEAD_SHA
+    mock_pr.get_issue_comments.return_value = [_sticky_with_marker(sha=LAST_SHA)]
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.decide_scope", return_value=("full", None, None)) as mock_scope,
+        patch("prevue.review.fetch_diff", return_value=_incremental_two_file_diff()) as mock_full,
+        patch("prevue.review.fetch_diff_in_scope") as mock_inc,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky) as mock_upsert,
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        run_review(adapter=FindingsEngine())
+
+    mock_scope.assert_called_once()
+    mock_full.assert_called_once()
+    mock_inc.assert_not_called()
+    assert mock_upsert.call_args.kwargs.get("head_sha") == HEAD_SHA
