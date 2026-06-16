@@ -81,6 +81,16 @@ def test_wait_ci_maps_terminal_conclusions_without_poll_loop() -> None:
     assert wait_run.count("ci_ok=false") >= 2
 
 
+def test_wait_ci_selects_latest_run_and_fails_on_timeout() -> None:
+    wait_run = _load_review_workflow()["jobs"]["wait-ci"]["steps"][0]["run"]
+    assert "createdAt" in wait_run
+    assert "sort_by(.createdAt)" in wait_run
+    assert "Timed out waiting for pull_request CI" in wait_run
+    timeout_tail = wait_run.split("Timed out waiting for pull_request CI", 1)[1]
+    assert "ci_ok=false" in timeout_tail
+    assert "exit 1" in timeout_tail
+
+
 def test_dogfood_passes_pr_shas_via_pull_request_inputs() -> None:
     wf = _load_review_workflow()
     with_block = wf.get("jobs", {}).get("review", {}).get("with", {})
@@ -125,8 +135,14 @@ def test_review_yml_named_secrets_no_inherit() -> None:
     assert "secrets:inherit" not in text.replace(" ", "")
     wf = _load_review_workflow()
     secrets = wf.get("jobs", {}).get("review", {}).get("secrets", {})
-    assert "copilot-github-token" in secrets
+    reusable = _load_reusable_workflow()
+    on = reusable.get("on") or reusable.get(True) or {}
+    workflow_call_secrets = on["workflow_call"]["secrets"]
+    for name in workflow_call_secrets:
+        assert name in secrets, f"missing workflow_call secret {name!r} on review job"
     assert "${{ secrets.COPILOT_GITHUB_TOKEN }}" in str(secrets["copilot-github-token"])
+    assert "${{ secrets.ANTHROPIC_API_KEY }}" in str(secrets["anthropic-api-key"])
+    assert "${{ secrets.CURSOR_API_KEY }}" in str(secrets["cursor-api-key"])
 
 
 def test_dogfood_caller_engine_from_repo_variable() -> None:

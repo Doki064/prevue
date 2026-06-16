@@ -39,16 +39,16 @@ jobs:
               --workflow ci.yml \
               --commit "$HEAD_SHA" \
               --event pull_request \
-              --limit 1 \
-              --json status,conclusion,event)
+              --limit 20 \
+              --json status,conclusion,event,createdAt)
             count=$(printf '%s' "$run" | jq 'length')
             if [ "$count" -eq 0 ]; then
               echo "No pull_request CI workflow run yet; waiting..."
               sleep 15
               continue
             fi
-            status=$(printf '%s' "$run" | jq -r '.[0].status')
-            conclusion=$(printf '%s' "$run" | jq -r '.[0].conclusion')
+            status=$(printf '%s' "$run" | jq -r 'sort_by(.createdAt) | reverse | .[0].status')
+            conclusion=$(printf '%s' "$run" | jq -r 'sort_by(.createdAt) | reverse | .[0].conclusion')
             echo "CI (pull_request): status=${status} conclusion=${conclusion}"
             if [ "$status" = "completed" ]; then
               case "$conclusion" in
@@ -73,6 +73,7 @@ jobs:
           done
           echo "Timed out waiting for pull_request CI; skipping Prevue review." >&2
           echo "ci_ok=false" >> "$GITHUB_OUTPUT"
+          exit 1
 
   review:
     needs: wait-ci
