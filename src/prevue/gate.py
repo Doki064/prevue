@@ -8,6 +8,7 @@ from typing import Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from prevue.github.positions import is_placeable
 from prevue.models import Finding
 
 Severity = Literal["error", "warning", "info"]
@@ -115,17 +116,13 @@ def apply_gate(
     def meets_comment_threshold(severity: str) -> bool:
         return SEVERITY_RANK[severity] <= SEVERITY_RANK[cfg.min_severity_to_comment]
 
-    def is_placeable(finding: Finding) -> bool:
-        side_lines = valid_lines.get(finding.path, {}).get(finding.side)
-        return side_lines is not None and finding.line in side_lines
-
     placements: dict[int, Placement] = {}
     candidates: list[tuple[int, Finding]] = []
 
     for index, finding in enumerate(findings):
         if not meets_comment_threshold(finding.severity):
             placements[index] = "summary-only"
-        elif not is_placeable(finding):
+        elif not is_placeable(finding, valid_lines):
             placements[index] = "position-fallback"
         else:
             candidates.append((index, finding))

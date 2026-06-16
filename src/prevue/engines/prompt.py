@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from prevue.classify.models import CANONICAL_LABEL_ORDER
+from prevue.github.positions import annotate_patch
 from prevue.models import ChangedFile, ReviewRequest
 
 MAX_PROMPT_BYTES = 1_000_000  # stdin guard; file-based fallback planned for Phase 6
@@ -23,7 +24,8 @@ as the LAST element of your response — no text after the closing fence.
 
 The fence must contain a JSON array of finding objects. Each object uses these keys:
 - path (string): must be from the changed-file list above
-- line (integer): a changed or context line in the diff
+- line (integer): file line number from the annotated diff prefix (RIGHT-side target \
+line when side is RIGHT; LEFT-side source line when side is LEFT)
 - side (string): "RIGHT" for added/context lines, "LEFT" for deleted lines
 - severity (string): exactly one of "error", "warning", or "info"
 - title (string): short summary
@@ -44,9 +46,10 @@ Each finding body must be Clear, Concise, Correct, Complete.
 """
 
 
-def _safe_diff_block(patch: str) -> str:
-    """Render untrusted diff in 4-backtick fence, escape 3-backtick sequences."""
-    normalized = patch.replace("```", "\\`\\`\\`")
+def _safe_diff_block(path: str, patch: str) -> str:
+    """Render untrusted diff with line-number prefixes in a 4-backtick fence."""
+    annotated = annotate_patch(path, patch)
+    normalized = annotated.replace("```", "\\`\\`\\`")
     return f"````diff\n{normalized}\n````"
 
 
@@ -72,7 +75,7 @@ def estimate_file_prompt_tokens(f: ChangedFile) -> int:
 
     list_line = f"- path={_escape_line(f.path)} status={_escape_line(f.status)}"
     if f.patch:
-        block = f"### path={_escape_line(f.path)}\n{_safe_diff_block(f.patch)}"
+        block = f"### path={_escape_line(f.path)}\n{_safe_diff_block(f.path, f.patch)}"
     else:
         block = ""
     return max(estimate_tokens(list_line) + estimate_tokens(block), 1)
@@ -133,7 +136,7 @@ def _build_prompt(
         f"- path={_escape_line(f.path)} status={_escape_line(f.status)}" for f in req.diff.files
     )
     hunks = "\n\n".join(
-        f"### path={_escape_line(f.path)}\n{_safe_diff_block(f.patch)}"
+        f"### path={_escape_line(f.path)}\n{_safe_diff_block(f.path, f.patch)}"
         for f in req.diff.files
         if f.patch
     )

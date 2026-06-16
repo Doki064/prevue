@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from prevue.github.positions import (
+    annotate_patch,
     build_valid_lines,
     commentable_lines,
     finding_region_changed,
+    is_placeable,
+    reconcile_finding_locations,
     regions_changed,
 )
 from prevue.models import ChangedFile, Finding
@@ -144,3 +147,75 @@ class TestFindingRegionChanged:
         regions = regions_changed("src/foo.py", "not a valid patch at all")
         assert regions == []
         assert finding_region_changed(self._finding(10), regions) is False
+
+
+class TestAnnotatePatch:
+    def test_prefixes_right_and_left_line_numbers(self) -> None:
+        annotated = annotate_patch("src/foo.py", MODIFIED_PATCH)
+        assert "   11 | -old line" in annotated
+        assert "   11 | +added line" in annotated
+        assert "   10 |  context line" in annotated
+
+    def test_malformed_patch_returns_raw(self) -> None:
+        raw = "@@ -1,1 +1,1 @@\n+broken"
+        assert annotate_patch("src/foo.py", raw) == raw
+
+    def test_unparseable_body_without_hunk_returns_raw(self) -> None:
+        raw = "+" * 40
+        assert annotate_patch("src/foo.py", raw) == raw
+
+
+class TestReconcileFindingLocations:
+    def test_keeps_placeable_finding(self) -> None:
+        finding = Finding(
+            path="src/a.py",
+            line=10,
+            severity="warning",
+            title="x",
+            body="y",
+        )
+        valid = {"src/a.py": {"RIGHT": {10}, "LEFT": set()}}
+        assert reconcile_finding_locations([finding], valid) == [finding]
+
+    def test_fixes_wrong_path_when_line_unique(self) -> None:
+        finding = Finding(
+            path="src/wrong.py",
+            line=10,
+            side="RIGHT",
+            severity="warning",
+            title="x",
+            body="y",
+        )
+        valid = {"src/a.py": {"RIGHT": {10}, "LEFT": set()}}
+        fixed = reconcile_finding_locations([finding], valid)[0]
+        assert fixed.path == "src/a.py"
+        assert fixed.line == 10
+
+    def test_leaves_ambiguous_line_unchanged(self) -> None:
+        finding = Finding(
+            path="src/wrong.py",
+            line=10,
+            side="RIGHT",
+            severity="warning",
+            title="x",
+            body="y",
+        )
+        valid = {
+            "src/a.py": {"RIGHT": {10}, "LEFT": set()},
+            "src/b.py": {"RIGHT": {10}, "LEFT": set()},
+        }
+        assert reconcile_finding_locations([finding], valid)[0] == finding
+
+
+class TestIsPlaceable:
+    def test_matches_gate_expectations(self) -> None:
+        finding = Finding(
+            path="src/a.py",
+            line=10,
+            severity="warning",
+            title="x",
+            body="y",
+        )
+        valid = {"src/a.py": {"RIGHT": {10}, "LEFT": set()}}
+        assert is_placeable(finding, valid) is True
+        assert is_placeable(finding.model_copy(update={"line": 999}), valid) is False

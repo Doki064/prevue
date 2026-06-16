@@ -29,9 +29,14 @@ class TestBuildPrompt:
 
     def test_includes_patch_hunks_in_fenced_diff_blocks(self) -> None:
         prompt = _build_prompt(make_sample_request())
-        assert "```diff" in prompt
+        assert "````diff" in prompt
         assert "def main():" in prompt
         assert "# Prevue" in prompt
+
+    def test_diff_lines_include_file_line_number_prefixes(self) -> None:
+        prompt = _build_prompt(make_sample_request())
+        assert "| +" in prompt or "|  " in prompt
+        assert " | " in prompt
 
     def test_labels_content_as_untrusted_data(self) -> None:
         prompt = _build_prompt(make_sample_request())

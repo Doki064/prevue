@@ -333,6 +333,13 @@ def _escape_table_cell(value: str) -> str:
     return escaped.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
 
 
+def _format_finding_location(finding: Finding, placement: str) -> str:
+    """Location column/summary — omit bogus line numbers for position-fallback."""
+    if placement == "position-fallback":
+        return _escape_path_code(finding.path)
+    return _escape_location(finding.path, finding.line)
+
+
 def _escape_location(path: str, line: int) -> str:
     """Escape untrusted location values for markdown code span."""
     safe_path = _escape_table_cell(path).replace("`", "\\`")
@@ -397,7 +404,7 @@ def render_findings_table(gate: GateResult) -> str:
         rows.append(
             "| "
             f"{badge} {finding.severity} | "
-            f"{_escape_location(finding.path, finding.line)} | "
+            f"{_format_finding_location(finding, placed.placement)} | "
             f"{_escape_table_cell(_neutralize_html(finding.title))} | "
             f"{PLACEMENT_BADGES[placed.placement]} |"
         )
@@ -411,7 +418,10 @@ def render_finding_details(gate: GateResult) -> str:
         if placed.placement == "inline":
             continue
         finding = placed.finding
-        summary = escape_html(f"{finding.path}:{finding.line} — {finding.title}")
+        if placed.placement == "position-fallback":
+            summary = escape_html(f"{finding.path} — {finding.title}")
+        else:
+            summary = escape_html(f"{finding.path}:{finding.line} — {finding.title}")
         # Encode any HTML tag sequences in LLM output so they can't escape the <details> wrapper.
         content = _neutralize_html(render_inline_comment(finding))
         blocks.append(f"<details><summary>{summary}</summary>\n\n{content}\n</details>")
