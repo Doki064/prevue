@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import yaml
@@ -32,6 +33,12 @@ def _load_reusable_workflow() -> dict:
 
 def test_review_workflow_exists() -> None:
     assert REVIEW_WORKFLOW.is_file()
+
+
+def test_ci_local_script_exists_and_is_executable() -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "ci-local.sh"
+    assert script.is_file()
+    assert os.access(script, os.X_OK)
 
 
 def test_dogfood_triggers_after_ci_success() -> None:
