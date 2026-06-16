@@ -10,6 +10,7 @@ import pytest
 import responses
 
 from prevue.github.graphql import (
+    MAX_REVIEW_THREAD_PAGES,
     REVIEW_THREADS_QUERY,
     fetch_review_threads,
     resolve_review_thread,
@@ -214,3 +215,38 @@ def test_fetch_idempotent_surfaces_already_resolved_threads(github_env: None) ->
     assert resolved["isResolved"] is True
     assert resolved["isOutdated"] is True
     assert resolved["path"] == "src/prevue/github/diff.py"
+
+
+@responses.activate
+def test_fetch_review_threads_stops_at_max_pages(capsys, github_env: None) -> None:
+    """Pagination guard logs when thread count exceeds MAX_REVIEW_THREAD_PAGES."""
+    page = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "pageInfo": {"hasNextPage": True, "endCursor": "cursor1"},
+                        "nodes": [
+                            {
+                                "id": f"RT_page_{i}",
+                                "isResolved": False,
+                                "isOutdated": False,
+                                "path": "a.py",
+                                "line": i,
+                                "diffSide": "RIGHT",
+                                "comments": {"nodes": [{"body": "x", "author": {"login": "bot"}}]},
+                            }
+                            for i in range(100)
+                        ],
+                    }
+                }
+            }
+        }
+    }
+    for _ in range(MAX_REVIEW_THREAD_PAGES):
+        _register_graphql(responses.mock, page)
+
+    threads = fetch_review_threads(OWNER, REPO, PR_NUMBER)
+
+    assert len(threads) == MAX_REVIEW_THREAD_PAGES * 100
+    assert "pagination capped" in capsys.readouterr().err

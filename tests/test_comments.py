@@ -11,6 +11,7 @@ import pytest
 import responses
 
 from prevue.classify.models import ClassificationResult
+from prevue.dismiss import DismissEntry, parse_dismiss_block
 from prevue.fingerprint import fingerprint
 from prevue.gate import (
     GateResult,
@@ -64,9 +65,33 @@ def test_render_body_contains_marker_and_sections() -> None:
     assert "no verdict in v1" in body.lower()
     assert "### Review" in body
     assert "## Canned review" in body
-    assert "### Metadata" in body
+    assert "<details><summary>Metadata</summary>" in body
     assert "fake" in body
     assert "0.1" in body
+
+
+def test_render_body_dismiss_audit_section_round_trip() -> None:
+    entry = DismissEntry(
+        fingerprint="0123456789abcdef",
+        path="src/example.py",
+        region=(10, 20),
+        side="RIGHT",
+        severity="warning",
+        actor="alice",
+        timestamp="2026-06-16T00:00:00Z",
+        reason="false positive",
+    )
+    body = render_body(_sample_result(), dismissals=[entry])
+
+    assert "### Dismissed findings" in body
+    assert "<!-- prevue:dismiss -->" in body
+    assert entry.fingerprint in body
+    assert parse_dismiss_block(body) == [entry]
+
+
+def test_render_body_dismiss_none_no_regression() -> None:
+    baseline = render_body(_sample_result())
+    assert render_body(_sample_result(), dismissals=None) == baseline
 
 
 def test_render_body_metadata_shows_labels_and_matched_globs() -> None:
@@ -76,7 +101,7 @@ def test_render_body_metadata_shows_labels_and_matched_globs() -> None:
     )
     body = render_body(_sample_result(), classification=classification)
 
-    assert "### Metadata" in body
+    assert "<details><summary>Metadata</summary>" in body
     assert "frontend" in body
     assert "**/*.tsx" in body
     assert "Bundles:" in body
@@ -678,6 +703,24 @@ class TestPostInlineReview:
         existing.edit.assert_called_once_with(render_inline_comment(finding))
         pr.create_review.assert_not_called()
 
+    def test_deescalation_error_to_warning_calls_edit(self) -> None:
+        """Severity de-escalation refreshes badge so stale emoji does not linger."""
+        finding = self._finding(path="a.py", line=1, severity="warning", title="Lint")
+        gate = self._gate([finding])
+        existing = MagicMock()
+        existing.path = "a.py"
+        existing.line = 1
+        existing.side = "RIGHT"
+        existing.body = render_inline_comment(self._finding(severity="error", title="Lint"))
+        existing.user.login = "github-actions[bot]"
+        pr = MagicMock()
+        pr.get_review_comments.return_value = [existing]
+
+        assert post_inline_review(pr, gate) == set()
+
+        existing.edit.assert_called_once_with(render_inline_comment(finding))
+        pr.create_review.assert_not_called()
+
     def test_scoped_duplicate_at_key_still_deleted(self) -> None:
         """Own same-run duplicate extras are hard-deleted (existing path)."""
         finding = self._finding(path="a.py", line=1, title="A", severity="warning")
@@ -788,7 +831,7 @@ class TestStickyWithGate:
         verdict_idx = body.index("### Verdict")
         review_idx = body.index("### Review")
         findings_idx = body.index("### Findings")
-        metadata_idx = body.index("### Metadata")
+        metadata_idx = body.index("<details><summary>Metadata</summary>")
         assert verdict_idx < review_idx < findings_idx < metadata_idx
         assert body.index("<details>") > findings_idx
 
@@ -815,7 +858,7 @@ class TestStickyWithGate:
     def test_details_only_for_non_inline(self) -> None:
         body = render_body(_sample_result(), gate=self._gate())
 
-        assert body.count("<details>") == 2
+        assert body.count("<details>") == 3  # 2 non-inline findings + collapsible metadata
         assert "c.py:3 — I1" in body
         assert "d.py:4 — W2" in body
 
@@ -894,7 +937,7 @@ class TestStickyWithGate:
         assert "<details>" in body
         assert "`docs/readme.md`" in body
         assert "`assets/logo.png`" in body
-        assert body.index("### Coverage") < body.index("### Metadata")
+        assert body.index("### Coverage") < body.index("<details><summary>Metadata</summary>")
 
     def test_skipped_reason_html_escaped_in_summary(self) -> None:
         """A skipped_reason containing HTML cannot break out of the <summary> wrapper."""
@@ -1045,6 +1088,17 @@ class TestInlineTemplate:
         assert "<script>" not in rendered
         assert "&lt;img" in rendered
         assert "&lt;script>" in rendered
+
+    def test_parse_title_handles_legacy_badge_without_bold(self) -> None:
+        """Legacy inline comments with a badge but no **bold** title still carry forward."""
+        from prevue.github.comments import _parse_title_from_inline_body
+
+        assert (
+            _parse_title_from_inline_body("🔴 Legacy plain title\n\nbody here")
+            == "Legacy plain title"
+        )
+        # Bold form still takes precedence and is unwrapped.
+        assert _parse_title_from_inline_body("🟡 **Bold title**\n\nbody") == "Bold title"
 
 
 class TestInlineMarkerDetection:
@@ -1244,6 +1298,28 @@ class TestPriorFindings:
         assert prior.fingerprint == fingerprint("src/prevue/review.py", "Missing error handling")
         assert prior.thread_id == "RT_kwDOExampleOpen0001"
 
+    @responses.activate
+    def test_derive_prior_findings_skips_resolved_thread(self, github_env: None) -> None:
+        """A resolved thread is a closed finding (D-11) — must not be carried as a prior."""
+        finding = Finding(
+            path="src/prevue/github/diff.py",
+            line=18,
+            severity="error",
+            title="SQL injection risk",
+            body="Use parameterized queries.",
+        )
+        pr = MagicMock()
+        pr.number = 42
+        pr.get_review_comments.return_value = [
+            self._prevue_inline("src/prevue/github/diff.py", 18, finding)
+        ]
+        # Fixture marks the diff.py:18 thread (RT_kwDOExampleResolved01) isResolved=true.
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+
+        priors = derive_prior_findings(pr, owner="owner", repo="prevue")
+
+        assert priors == []
+
     def test_derive_prior_findings_skips_outdated_line_null(self, github_env: None) -> None:
         """GitHub REST returns line=None on outdated threads — must not crash Finding validation."""
         finding = Finding(
@@ -1261,7 +1337,7 @@ class TestPriorFindings:
         pr.number = 42
         pr.get_review_comments.return_value = [outdated]
 
-        priors = derive_prior_findings(pr, owner="owner", repo="prevue")
+        priors = derive_prior_findings(pr)
 
         assert priors == []
 
@@ -1342,6 +1418,58 @@ class TestOutdatedResolve:
         assert len(responses.mock.calls) == 1
 
     @responses.activate
+    def test_authoritative_resolve_when_region_unchanged(self, github_env: None) -> None:
+        """D-13: full-run authoritative resolve skips the region gate."""
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+        _register_graphql(responses.mock, _load_fixture("graphql_resolve_ok.json"))
+
+        resolve_outdated_prior_findings(
+            self._pr(),
+            in_scope_paths={self.PATH},
+            regions_by_path={self.PATH: [(100, 110)]},
+            current_fingerprints=set(),
+            owner=self.OWNER,
+            repo=self.REPO,
+            authoritative=True,
+        )
+
+        assert len(responses.mock.calls) == 2
+
+    @responses.activate
+    def test_authoritative_resolve_keeps_present_fingerprint(self, github_env: None) -> None:
+        """D-13: engine still emits same fingerprint — never resolve."""
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+
+        prior_fp = fingerprint(self.PATH, self.TITLE)
+        resolve_outdated_prior_findings(
+            self._pr(),
+            in_scope_paths={self.PATH},
+            regions_by_path={self.PATH: [(100, 110)]},
+            current_fingerprints={prior_fp},
+            owner=self.OWNER,
+            repo=self.REPO,
+            authoritative=True,
+        )
+
+        assert len(responses.mock.calls) == 1
+
+    @responses.activate
+    def test_authoritative_skips_out_of_scope_prior(self, github_env: None) -> None:
+        _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
+
+        resolve_outdated_prior_findings(
+            self._pr(),
+            in_scope_paths={"other.py"},
+            regions_by_path={self.PATH: [(140, 145)]},
+            current_fingerprints=set(),
+            owner=self.OWNER,
+            repo=self.REPO,
+            authoritative=True,
+        )
+
+        assert len(responses.mock.calls) == 1
+
+    @responses.activate
     def test_outdated_skips_when_fingerprint_in_current(self, github_env: None) -> None:
         _register_graphql(responses.mock, _load_fixture("graphql_review_threads.json"))
 
@@ -1407,6 +1535,7 @@ class TestOutdatedResolve:
         err = capsys.readouterr().err
         assert "prevue: review thread resolve failed" in err
         assert "FORBIDDEN" in err
+        assert len(responses.mock.calls) == 2
 
     @responses.activate
     def test_post_inline_resolve_outdated_integration(self, github_env: None) -> None:

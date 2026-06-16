@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import yaml
@@ -41,12 +42,22 @@ def test_two_checkouts() -> None:
 
 
 def test_minimal_permissions() -> None:
+    """WKFL-04: contents:write required for LIFE-04 resolveReviewThread (live-verified)."""
     wf = _load_reusable_workflow()
     assert wf["permissions"] == {
-        "contents": "read",
+        "contents": "write",
         "pull-requests": "write",
         "checks": "write",
     }
+
+
+def test_contents_write_documented_for_life04() -> None:
+    """contents:write must be documented — not silent scope broadening."""
+    text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
+    assert "LIFE-04" in text or "resolveReviewThread" in text
+    match = re.search(r"^permissions:\n((?:  .+\n)+)", text, re.MULTILINE)
+    assert match is not None, "permissions block missing"
+    assert "contents: write" in match.group(0)
 
 
 def test_draft_if_guard() -> None:
@@ -110,7 +121,6 @@ def test_cursor_install_downloads_then_execs_not_pipe_to_bash() -> None:
     """Hardening guard: fetch installer to a file then exec, never curl | bash."""
     text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
     assert "cursor.com/install -o" in text or "-o " in text.split("cursor.com/install", 1)[1]
-    # No pipe-to-bash of the install endpoint.
     assert "cursor.com/install -fsS | bash" not in text
     assert "cursor.com/install | bash" not in text
 
@@ -131,3 +141,10 @@ def test_self_checkout_ref_not_main() -> None:
                 prevue_refs.append(ref)
     assert prevue_refs
     assert all(ref not in ("main", "master", "HEAD") for ref in prevue_refs)
+
+
+def test_preflight_sticky_lookup_uses_pagination() -> None:
+    """Preflight sticky lookup must scan all issue-comment pages, not only first page."""
+    text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
+    assert "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" in text
+    assert "--paginate" in text

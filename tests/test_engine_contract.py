@@ -184,6 +184,42 @@ def test_cursor_model_mapping_and_prompt_file(monkeypatch: pytest.MonkeyPatch) -
     assert "src/main.py" in captured["prompt"]
 
 
+def test_cursor_invoked_with_consumer_cwd_when_env_set(
+    tmp_path: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """cursor-agent subprocess.run receives cwd=consumer root when PREVUE_CONSUMER_ROOT is set."""
+    monkeypatch.setenv("CURSOR_API_KEY", "cur_test_key")
+    monkeypatch.setenv("PREVUE_CONSUMER_ROOT", str(tmp_path))
+    captured: dict = {}
+
+    def _capture(cmd, input=None, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["cwd"] = kwargs.get("cwd")
+        return SimpleNamespace(returncode=0, stdout=stdout_with_fence(), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _capture)
+    get_adapter("cursor-cli").review(make_sample_request())
+    assert captured["cwd"] == str(tmp_path)
+
+
+def test_cursor_invoked_with_none_cwd_when_env_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """cursor-agent subprocess.run receives cwd=None when PREVUE_CONSUMER_ROOT is unset."""
+    monkeypatch.setenv("CURSOR_API_KEY", "cur_test_key")
+    monkeypatch.delenv("PREVUE_CONSUMER_ROOT", raising=False)
+    captured: dict = {}
+
+    def _capture(cmd, input=None, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["cwd"] = kwargs.get("cwd")
+        return SimpleNamespace(returncode=0, stdout=stdout_with_fence(), stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _capture)
+    get_adapter("cursor-cli").review(make_sample_request())
+    assert captured["cwd"] is None
+
+
 def test_classify_valid_json_returns_label_map(
     engine_name: str, adapter, authed_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:

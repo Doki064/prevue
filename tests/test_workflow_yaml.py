@@ -10,6 +10,9 @@ REVIEW_WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" 
 REUSABLE_WORKFLOW = (
     Path(__file__).resolve().parents[1] / ".github" / "workflows" / "prevue-review.yml"
 )
+COMMAND_WORKFLOW = (
+    Path(__file__).resolve().parents[1] / ".github" / "workflows" / "prevue-command.yml"
+)
 
 SETUP_UV_SHA = "fac544c07dec837d0ccb6301d7b5580bf5edae39"
 CHECKOUT_SHA = "df4cb1c069e1874edd31b4311f1884172cec0e10"
@@ -53,9 +56,10 @@ def test_pull_request_types() -> None:
 
 
 def test_minimal_permissions() -> None:
+    """WKFL-04: contents:write on dogfood caller for LIFE-04 resolveReviewThread."""
     wf = _load_review_workflow()
     assert wf["permissions"] == {
-        "contents": "read",
+        "contents": "write",
         "pull-requests": "write",
         "checks": "write",
     }
@@ -88,7 +92,7 @@ def test_review_yml_named_secrets_no_inherit() -> None:
     assert "${{ secrets.COPILOT_GITHUB_TOKEN }}" in str(secrets["copilot-github-token"])
 
 
-def test_prevue_engine_from_repo_variable_in_caller() -> None:
+def test_dogfood_caller_engine_from_repo_variable() -> None:
     text = REVIEW_WORKFLOW.read_text(encoding="utf-8")
     assert "vars.PREVUE_ENGINE" in text
 
@@ -220,3 +224,85 @@ def test_consumer_checkout_uses_base_sha_in_reusable() -> None:
             if path == "consumer":
                 consumer_refs.append(str(with_block.get("ref", "")))
     assert consumer_refs == ["${{ github.event.pull_request.base.sha }}"]
+
+
+def _get_reusable_steps() -> list[dict]:
+    """Return the ordered list of steps from the reusable workflow's review job."""
+    wf = _load_reusable_workflow()
+    for job in wf.get("jobs", {}).values():
+        steps = job.get("steps", [])
+        if steps:
+            return steps
+    return []
+
+
+def test_preflight_noop_step_precedes_engine_install_in_reusable() -> None:
+    """A step with id 'preflight' exists and appears before 'Install engine CLI'."""
+    steps = _get_reusable_steps()
+    step_ids = [s.get("id", "") for s in steps]
+    step_names = [s.get("name", "") for s in steps]
+
+    assert "preflight" in step_ids, "No step with id='preflight' found in reusable workflow"
+
+    preflight_idx = step_ids.index("preflight")
+    install_idx = next(
+        (i for i, n in enumerate(step_names) if "Install engine CLI" in n),
+        None,
+    )
+    assert install_idx is not None, "'Install engine CLI' step not found"
+    assert preflight_idx < install_idx, (
+        f"preflight (idx={preflight_idx}) must precede Install engine CLI (idx={install_idx})"
+    )
+
+
+def test_engine_install_gated_on_preflight_noop_in_reusable() -> None:
+    """Install engine CLI step gates on steps.preflight.outputs.noop."""
+    steps = _get_reusable_steps()
+    install_step = next(
+        (s for s in steps if "Install engine CLI" in s.get("name", "")),
+        None,
+    )
+    assert install_step is not None, "'Install engine CLI' step not found"
+    if_expr = install_step.get("if", "")
+    assert "steps.preflight.outputs.noop" in str(if_expr), (
+        f"'Install engine CLI' step must gate on steps.preflight.outputs.noop; got: {if_expr!r}"
+    )
+
+
+def test_preflight_sticky_lookup_requires_marker_at_body_start() -> None:
+    """Preflight must match Python _is_prevue_sticky: marker anchored at body start."""
+    steps = _get_reusable_steps()
+    preflight = next(s for s in steps if s.get("id") == "preflight")
+    run_script = preflight.get("run", "")
+    assert "select(.body | test" in run_script
+    assert "prevue:sticky" in run_script
+    assert "| last |" in run_script
+
+
+def test_preflight_invokes_prevue_preflight_cli() -> None:
+    """Preflight noop decision delegates to prevue preflight (Python parity)."""
+    steps = _get_reusable_steps()
+    preflight = next(s for s in steps if s.get("id") == "preflight")
+    run_script = preflight.get("run", "")
+    assert "uv run prevue preflight" in run_script
+    assert preflight.get("working-directory") == ".prevue"
+
+
+def test_reusable_workflow_no_secrets_inherit() -> None:
+    """Reusable workflow must not use secrets: inherit (WKFL-04 trust boundary)."""
+    text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
+    assert "secrets: inherit" not in text, "Reusable workflow must not use secrets: inherit"
+    # contents:write may be present for documented LIFE-04 resolveReviewThread scope.
+    if "contents: write" in text:
+        assert "LIFE-04" in text or "resolveReviewThread" in text
+
+
+def test_command_workflow_fork_guard_and_auth_filter() -> None:
+    text = COMMAND_WORKFLOW.read_text(encoding="utf-8")
+    assert "Fork PR guard" in text
+    assert "COLLABORATOR" in text
+    assert "OWNER" in text
+    assert CHECKOUT_SHA in text
+    assert SETUP_UV_SHA in text
+    assert "secrets: inherit" not in text
+    assert "contents: write" in text
