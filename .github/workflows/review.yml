@@ -1,6 +1,6 @@
 name: Prevue Review
 
-# Dogfood: pull_request attaches to PR; wait-ci gates on pull_request CI workflow.
+# Dogfood: pull_request attaches to PR; wait-ci gates on pull_request CI workflow (ci.yml).
 # LIFE-04 resolveReviewThread requires contents:write — see prevue-review.yml / consumer-setup.md.
 on:
   pull_request:
@@ -54,12 +54,16 @@ jobs:
                   echo "ci_ok=true" >> "$GITHUB_OUTPUT"
                   exit 0
                   ;;
-                failure|cancelled|timed_out|action_required|startup_failure|stale)
+                failure|cancelled|timed_out|action_required|startup_failure|stale|skipped|neutral)
                   echo "pull_request CI did not pass; skipping Prevue review."
                   echo "ci_ok=false" >> "$GITHUB_OUTPUT"
                   exit 0
                   ;;
-                *) sleep 15 ;;
+                *)
+                  echo "Unknown CI conclusion '${conclusion}'; skipping Prevue review."
+                  echo "ci_ok=false" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
               esac
             else
               sleep 15

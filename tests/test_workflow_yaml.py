@@ -47,7 +47,8 @@ def test_dogfood_triggers_on_pull_request_and_waits_for_ci() -> None:
     assert isinstance(on, dict)
     pr_on = on.get("pull_request", {})
     assert pr_on.get("branches") == ["main"]
-    assert "synchronize" in pr_on.get("types", [])
+    for event_type in ("opened", "synchronize", "reopened", "ready_for_review"):
+        assert event_type in pr_on.get("types", [])
 
     jobs = wf.get("jobs", {})
     assert "wait-ci" in jobs
@@ -64,6 +65,14 @@ def test_dogfood_triggers_on_pull_request_and_waits_for_ci() -> None:
     assert "pull_request.head.repo.full_name == github.repository" in review_if
     assert "needs.wait-ci.outputs.ci_ok == 'true'" in review_if
     assert "pull_request.draft != true" in review_if
+
+
+def test_wait_ci_maps_terminal_conclusions_without_poll_loop() -> None:
+    wait_run = _load_review_workflow()["jobs"]["wait-ci"]["steps"][0]["run"]
+    assert "skipped|neutral" in wait_run
+    assert "Unknown CI conclusion" in wait_run
+    assert "*) sleep 15" not in wait_run
+    assert wait_run.count("ci_ok=false") >= 2
 
 
 def test_dogfood_passes_pr_shas_via_pull_request_inputs() -> None:
