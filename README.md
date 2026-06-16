@@ -77,4 +77,12 @@ uv run pytest
 uv run prevue review --help
 ```
 
+Run the same checks as CI before opening a PR:
+
+```bash
+./scripts/ci-local.sh
+```
+
+Requires `go` (actionlint) and `zizmor` or Docker (workflow security scan). Python steps use `uv` only.
+
 Live Copilot runs require `COPILOT_GITHUB_TOKEN` and a PR event context (`GITHUB_EVENT_PATH`, `GITHUB_REPOSITORY`); unit tests mock those boundaries.
