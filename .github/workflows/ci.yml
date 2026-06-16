@@ -44,7 +44,8 @@ jobs:
             .github/workflows/ci.yml \
             .github/workflows/review.yml \
             .github/workflows/prevue-review.yml \
-            .github/workflows/prevue-command.yml
+            .github/workflows/prevue-command.yml \
+            .github/workflows/prevue-command-run.yml
 
       - name: Scan workflows with zizmor
         uses: zizmorcore/zizmor-action@5f14fd08f7cf1cb1609c1e344975f152c7ee938d # v0.5.6

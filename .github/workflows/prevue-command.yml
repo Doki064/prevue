@@ -4,16 +4,14 @@ on:
   issue_comment:
     types: [created]
 
-# LIFE-04 resolveReviewThread requires contents:write — verified live 2026-06 (08-07).
+# Gate-only: validate /prevue, dispatch prevue-command-run with pinned SHAs.
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
-  checks: write
+  actions: write
 
 jobs:
-  command:
-    # Pre-filter: /prevue on a PR issue only. OWNER/MEMBER/COLLABORATOR — write
-    # check is in Python (read-only users denied without engine spend).
+  gate:
     if: >-
       ${{ github.event.issue.pull_request
           && startsWith(github.event.comment.body, '/prevue')
@@ -36,93 +34,145 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Detect command verb
-        id: verb
+      - name: Write access check
+        id: write_check
         if: steps.fork_guard.outputs.skip != 'true'
         env:
-          COMMENT_BODY: ${{ github.event.comment.body }}
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPOSITORY: ${{ github.repository }}
         run: |
-          VERB=$(printf '%s\n' "$COMMENT_BODY" | grep -m1 '^/prevue ' | awk '{print $2}' || true)
-          echo "verb=${VERB:-}" >> "$GITHUB_OUTPUT"
-          if [ "$VERB" = "review" ]; then
-            echo "needs_engine=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "needs_engine=false" >> "$GITHUB_OUTPUT"
-          fi
+          PERM=$(gh api "repos/${REPOSITORY}/collaborators/${COMMENT_AUTHOR}/permission" \
+            -q .permission 2>/dev/null || echo "none")
+          case "$PERM" in
+            write|maintain|admin)
+              echo "allowed=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "allowed=false" >> "$GITHUB_OUTPUT"
+              gh api "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+                -f body="🔒 /prevue requires write access"
+              ;;
+          esac
 
       - name: Checkout Prevue framework
-        if: steps.fork_guard.outputs.skip != 'true'
+        id: framework_checkout
+        if: >-
+          steps.fork_guard.outputs.skip != 'true'
+          && steps.write_check.outputs.allowed == 'true'
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: Doki064/prevue
-          ref: ${{ vars.PREVUE_REF || 'v0.6.0' }}
+          ref: ${{ vars.PREVUE_REF || 'main' }}
           path: .prevue
           persist-credentials: false
 
-      - name: Checkout consumer default branch
-        if: steps.fork_guard.outputs.skip != 'true'
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-        with:
-          path: consumer
-          persist-credentials: false
-
       - name: Set up uv
-        if: steps.fork_guard.outputs.skip != 'true'
+        if: >-
+          steps.fork_guard.outputs.skip != 'true'
+          && steps.write_check.outputs.allowed == 'true'
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
           enable-cache: true
           version: "0.11.21"
 
-      - name: Install dependencies
-        if: steps.fork_guard.outputs.skip != 'true'
+      - name: Install Prevue dependencies
+        if: >-
+          steps.fork_guard.outputs.skip != 'true'
+          && steps.write_check.outputs.allowed == 'true'
         working-directory: .prevue
         run: uv sync --locked
 
-      - name: Install engine CLI
+      - name: Detect command verb
+        id: verb
         if: >-
           steps.fork_guard.outputs.skip != 'true'
-          && steps.verb.outputs.needs_engine == 'true'
-        env:
-          PREVUE_ENGINE: ${{ vars.PREVUE_ENGINE || 'copilot-cli' }}
-        run: |
-          case "$PREVUE_ENGINE" in
-            copilot-cli)
-              npm install -g @github/copilot@1.0.61
-              command -v copilot
-              ;;
-            claude-code-cli)
-              npm install -g @anthropic-ai/claude-code@2.1.177
-              command -v claude
-              ;;
-            cursor-cli)
-              curl -fsS https://cursor.com/install -o "$RUNNER_TEMP/cursor-install.sh"
-              bash "$RUNNER_TEMP/cursor-install.sh"
-              command -v cursor-agent
-              ;;
-            *)
-              echo "Unsupported engine: $PREVUE_ENGINE" >&2
-              exit 1
-              ;;
-          esac
-
-      - name: Prevue command
-        if: steps.fork_guard.outputs.skip != 'true'
+          && steps.write_check.outputs.allowed == 'true'
         working-directory: .prevue
-        run: uv run prevue command
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          PREVUE_COMMENT_BODY: ${{ github.event.comment.body }}
-          PREVUE_COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
-          PREVUE_ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PREVUE_COMMENT_BODY_PATH: ${{ runner.temp }}/prevue-comment-body.txt
+        run: |
+          jq -r '.comment.body' "$GITHUB_EVENT_PATH" > "$PREVUE_COMMENT_BODY_PATH"
+          NEEDS=$(uv run python -c "from prevue.commands import needs_engine_for_body; from prevue.github.client import read_comment_body; print('true' if needs_engine_for_body(read_comment_body()) else 'false')")
+          echo "needs_engine=${NEEDS}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve pinned refs
+        id: pinned_refs
+        if: >-
+          steps.fork_guard.outputs.skip != 'true'
+          && steps.write_check.outputs.allowed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          REPOSITORY: ${{ github.repository }}
+          PREVUE_REF: ${{ vars.PREVUE_REF || 'main' }}
+        run: |
+          BASE_SHA=$(gh api "repos/${REPOSITORY}/pulls/${ISSUE_NUMBER}" --jq '.base.sha')
+          HEAD_SHA=$(gh api "repos/${REPOSITORY}/pulls/${ISSUE_NUMBER}" --jq '.head.sha')
+          FRAMEWORK_SHA=$(gh api "repos/Doki064/prevue/commits/${PREVUE_REF}" --jq .sha)
+          echo "base_sha=${BASE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "head_sha=${HEAD_SHA}" >> "$GITHUB_OUTPUT"
+          echo "framework_sha=${FRAMEWORK_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch privileged command run
+        if: >-
+          steps.fork_guard.outputs.skip != 'true'
+          && steps.write_check.outputs.allowed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login }}
+          COMMENT_AUTHOR_ASSOCIATION: ${{ github.event.comment.author_association }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          HEAD_SHA: ${{ steps.pinned_refs.outputs.head_sha }}
+          BASE_SHA: ${{ steps.pinned_refs.outputs.base_sha }}
+          FRAMEWORK_SHA: ${{ steps.pinned_refs.outputs.framework_sha }}
+          NEEDS_ENGINE: ${{ steps.verb.outputs.needs_engine }}
           PREVUE_ENGINE: ${{ vars.PREVUE_ENGINE || 'copilot-cli' }}
-          PREVUE_CONSUMER_ROOT: ${{ github.workspace }}/consumer
-          PREVUE_CONFIG_PATH: .github/prevue.yml
-          COPILOT_GITHUB_TOKEN: >-
-            ${{ (vars.PREVUE_ENGINE || 'copilot-cli') == 'copilot-cli'
-                && secrets.COPILOT_GITHUB_TOKEN || '' }}
-          ANTHROPIC_API_KEY: >-
-            ${{ vars.PREVUE_ENGINE == 'claude-code-cli'
-                && secrets.ANTHROPIC_API_KEY || '' }}
-          CURSOR_API_KEY: >-
-            ${{ vars.PREVUE_ENGINE == 'cursor-cli'
-                && secrets.CURSOR_API_KEY || '' }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          BODY_FILE=$(mktemp)
+          PAYLOAD_FILE=$(mktemp)
+          trap 'rm -f "${BODY_FILE}" "${PAYLOAD_FILE}"' EXIT
+          jq -r '.comment.body' "$GITHUB_EVENT_PATH" > "${BODY_FILE}"
+          jq -n \
+            --arg issue_number "${ISSUE_NUMBER}" \
+            --arg head_sha "${HEAD_SHA}" \
+            --arg base_sha "${BASE_SHA}" \
+            --arg framework_sha "${FRAMEWORK_SHA}" \
+            --rawfile comment_body "${BODY_FILE}" \
+            --arg comment_author "${COMMENT_AUTHOR}" \
+            --arg comment_author_association "${COMMENT_AUTHOR_ASSOCIATION}" \
+            --arg comment_id "${COMMENT_ID}" \
+            --argjson needs_engine "$([ "${NEEDS_ENGINE}" = "true" ] && echo true || echo false)" \
+            --arg engine "${PREVUE_ENGINE}" \
+            '{
+              event_type: "prevue-command",
+              client_payload: {
+                issue_number: $issue_number,
+                head_sha: $head_sha,
+                base_sha: $base_sha,
+                framework_sha: $framework_sha,
+                comment_body: $comment_body,
+                comment_author: $comment_author,
+                comment_author_association: $comment_author_association,
+                comment_id: $comment_id,
+                needs_engine: $needs_engine,
+                engine: $engine
+              }
+            }' > "${PAYLOAD_FILE}"
+          gh api "repos/${REPOSITORY}/dispatches" --input "${PAYLOAD_FILE}"
+          DISPATCHED_AFTER=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          sleep 5
+          RUN_URL=$(gh run list \
+            --repo "${REPOSITORY}" \
+            --event repository_dispatch \
+            --workflow prevue-command-run.yml \
+            --limit 5 \
+            --json url,createdAt \
+            --jq "map(select(.createdAt >= \"${DISPATCHED_AFTER}\")) | .[0].url // empty" 2>/dev/null || true)
+          if [ -n "${RUN_URL}" ]; then
+            gh api "repos/${REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+              -f body="🚀 Prevue command dispatched: ${RUN_URL}"
+          fi

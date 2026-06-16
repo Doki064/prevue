@@ -1,15 +1,12 @@
 name: Prevue Review
 
-# Dogfood: pull_request attaches to PR; wait-ci gates on pull_request CI workflow (ci.yml).
-# ci.yml must run on pull_request for the PR branch (no path-only skip); poll uses head SHA.
-# LIFE-04 resolveReviewThread requires contents:write — see prevue-review.yml / consumer-setup.md.
+# Dogfood on pull_request after ci.yml passes (head SHA poll).
+# LIFE-04 resolveReviewThread requires contents:write — see consumer-setup.md.
 on:
   pull_request:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
 
-# Per-PR concurrency: cancel in-flight wait-ci/review on synchronize so only the
-# latest head SHA is reviewed (intentional; not per-commit overlapping runs).
 concurrency:
   group: prevue-${{ github.event.pull_request.number }}
   cancel-in-progress: true
