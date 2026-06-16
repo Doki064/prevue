@@ -49,7 +49,12 @@ from prevue.github.diff import (
     fetch_diff_in_scope,
     regions_from_comparison,
 )
-from prevue.github.positions import build_valid_lines, finding_region_changed, reconcile_finding_locations, regions_changed
+from prevue.github.positions import (
+    build_valid_lines,
+    finding_region_changed,
+    reconcile_finding_locations,
+    regions_changed,
+)
 from prevue.models import Finding, ReviewRequest, ReviewResult
 from prevue.pack import make_file_weight, pack_files, readmit_files, trim_packed_files
 from prevue.preflight import resolve_marker_for_scope
