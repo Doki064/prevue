@@ -1,77 +1,134 @@
+<!-- generated-by: gsd-doc-writer -->
 # Prevue
 
-Token-efficient AI PR review framework for GitHub Actions.
+Token-efficient AI PR review for GitHub Actions — classify the diff, load only matching review skills, run your chosen engine, and post a sticky summary, inline comments, and an optional merge gate.
 
-Phase 1 is a walking skeleton: on a pull request event, Prevue fetches the diff via the GitHub API (no PR-head checkout), runs a Copilot CLI review, and posts or updates one sticky summary comment on the PR.
+[![CI](https://github.com/Doki064/prevue/actions/workflows/ci.yml/badge.svg)](https://github.com/Doki064/prevue/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+## What it does
+
+On each pull request, Prevue:
+
+1. **Fetches the diff** via the GitHub API (no PR-head checkout for review content)
+2. **Classifies changed files** with deterministic glob rules and an optional LLM fallback
+3. **Routes to review skills** — built-in and consumer-defined `SKILL.md` bundles loaded only for matching labels
+4. **Packs the diff** under a token budget, prioritizing high-risk paths
+5. **Runs an AI engine** — `copilot-cli`, `claude-code-cli`, or `cursor-cli`
+6. **Posts results** — sticky summary comment, inline review comments, and a `prevue/review` check run
+
+**Incremental review** (default) re-reviews only files changed since the last sticky marker SHA, carries forward open findings, and skips engine CLI install on same-SHA no-op re-runs.
+
+## Quick start
+
+Add a caller workflow that invokes the reusable workflow. Pin to a [release tag](https://github.com/Doki064/prevue/releases) — do not use `@main`.
+
+```yaml
+name: Prevue Review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: prevue-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  prevue:
+    uses: Doki064/prevue/.github/workflows/prevue-review.yml@v0.6.0
+    with:
+      engine: copilot-cli
+    secrets:
+      copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+```
+
+Full setup — engine secrets, optional `/prevue` commands, CI gating — is in [docs/consumer-setup.md](docs/consumer-setup.md).
 
 ## How it runs
 
-`pull_request` event → fetch diff via API → Copilot CLI review → sticky comment upsert.
+```
+pull_request → classify → route skills → pack diff → engine review → sticky + inline + check
+```
 
-The workflow (`.github/workflows/review.yml`) only sets up the runner and invokes `uv run prevue review`; all logic lives in Python.
+The reusable workflow (`.github/workflows/prevue-review.yml`) checks out the framework and consumer base ref, then runs `uv run prevue review`. All review logic lives in Python.
+
+## Features
+
+| Capability | Description |
+|------------|-------------|
+| **Classification** | Gitignore-style glob rules map files to labels (`security`, `frontend`, `backend`, …); LLM fallback for unmatched paths in the packed set |
+| **Skill routing** | Loads only skills whose `applies-to` labels match the PR; consumer overrides under `.github/prevue/skills/` |
+| **Inline comments** | Findings placed on changed lines via unified-diff positions; capped by `review.max_inline_comments` |
+| **Merge gate** | `prevue/review` check run — pass/fail from `review.min_severity_to_fail` (independent of inline comment threshold) |
+| **Multi-engine** | Pluggable adapters: Copilot CLI, Claude Code CLI, Cursor CLI |
+| **Incremental review** | Diff scoped to changes since last reviewed SHA; outdated threads resolved when enabled |
+| **`/prevue` commands** | Optional issue-comment workflow for force re-review, dismiss findings, resolve threads |
+
+Configure thresholds, skills, and classification in `.github/prevue.yml` on your default branch. See [docs/configuration.md](docs/configuration.md) and [docs/skills.md](docs/skills.md).
 
 ## Supported triggers
 
 | Trigger | Same-repo PR | Fork PR |
 |---------|--------------|---------|
-| `pull_request` (`opened`, `synchronize`, `reopened`) | **Supported** | **Unsupported in v1** |
+| `pull_request` (`opened`, `synchronize`, `reopened`, `ready_for_review`) | **Supported** | **Unsupported in v1** |
 
-**Same-repo PRs** run the full loop: diff fetch, Copilot review, sticky comment create/update.
+**Same-repo PRs** run the full pipeline: diff fetch, classify, engine review, sticky comment, inline comments, and check run.
 
-**Fork PRs** are unsupported in v1. GitHub gives fork `pull_request` runs a read-only `GITHUB_TOKEN` and does not expose repository secrets, so comment writes would 403 and `COPILOT_GITHUB_TOKEN` is absent. Prevue detects `head.repo != base.repo` at startup, prints `Fork PRs are unsupported in v1; skipping review.`, and exits 0 without fetching the diff, calling Copilot, or posting a comment.
+**Fork PRs** are unsupported in v1. GitHub gives fork `pull_request` runs a read-only `GITHUB_TOKEN` and does not expose repository secrets, so comment writes would 403 and engine tokens are absent. Prevue detects `head.repo != base.repo` at startup, prints `Fork PRs are unsupported in v1; skipping review.`, and exits 0 without engine spend.
 
 Prevue uses `pull_request` only — never `pull_request_target`.
 
 ## Required permissions
 
-The workflow needs exactly:
+Consumer workflows need:
 
 ```yaml
 permissions:
-  contents: read
-  pull-requests: write
+  contents: write      # resolve outdated review threads (GraphQL)
+  pull-requests: write # fetch PR metadata, post sticky and inline comments
+  checks: write        # prevue/review merge gate
 ```
 
-- `contents: read` — checkout Prevue's own code on the runner
-- `pull-requests: write` — fetch PR metadata and post/update the sticky comment
+Diff content is fetched via the REST API; the workflow does not check out the PR head ref for review.
 
-Diff content is fetched via the REST API as data; the workflow does not check out the PR head ref.
+## Engine authentication
 
-## `COPILOT_GITHUB_TOKEN` setup
+Each engine requires its own secret passed through the reusable workflow — never `secrets: inherit`.
 
-Copilot CLI auth requires a **fine-grained, user-owned** personal access token — not a classic `ghp_` PAT and not the Actions `GITHUB_TOKEN` (which lacks Copilot entitlement and would shadow the Copilot token if used).
+| Engine | Workflow secret | Env var |
+|--------|-----------------|---------|
+| `copilot-cli` | `copilot-github-token` | `COPILOT_GITHUB_TOKEN` |
+| `claude-code-cli` | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
+| `cursor-cli` | `cursor-api-key` | `CURSOR_API_KEY` |
 
-1. **Copilot seat** — the PAT owner must have an active GitHub Copilot subscription.
-2. **Create a fine-grained PAT** (Settings → Developer settings → Fine-grained tokens):
-   - Resource owner: your personal account (not an organization token)
-   - Repository access: the repo(s) where Prevue runs
-   - Permissions: enable **Copilot Requests**
-3. **Confirm prefix** — the token must start with `github_pat_` (confirmed by the Phase 1 spike). Classic `ghp_` tokens are rejected.
-4. **Add as a repository secret** — name it exactly `COPILOT_GITHUB_TOKEN` (Settings → Secrets and variables → Actions).
+Copilot CLI needs a **fine-grained, user-owned** PAT with **Copilot Requests** permission (prefix `github_pat_`), not the Actions `GITHUB_TOKEN`. Details in [docs/consumer-setup.md](docs/consumer-setup.md).
 
-The review step sets `GITHUB_TOKEN: ${{ github.token }}` (GitHub API) and `COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}` (Copilot CLI) as separate environment variables so the Actions token never shadows the Copilot token.
+## Documentation
 
-**Important:** If `GITHUB_TOKEN` is set in the environment, the Copilot CLI attempts to use it first (before `COPILOT_GITHUB_TOKEN`). The workflow passes both separately to avoid shadowing. Never set both to the same value, and do not export `GITHUB_TOKEN` in a step that also runs Copilot unless you intend the Actions token for API calls only.
-
-## Phase 1 scope
-
-What works today:
-
-- Sticky summary comment with Verdict / Review / Metadata sections
-- Copilot CLI adapter (zero-tool, diff inlined in prompt)
-- Fork guard and fail-closed engine errors (failed run, comment untouched)
-
-Not in Phase 1:
-
-- Classification or skill routing
-- Inline review comments
-- Pass/fail checks or merge gate
-- Fork PR support
-- Consumer reusable-workflow packaging
+| Doc | Purpose |
+|-----|---------|
+| [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) | Prerequisites, install, first run |
+| [docs/consumer-setup.md](docs/consumer-setup.md) | Adopt Prevue, engine secrets, `/prevue` commands |
+| [docs/configuration.md](docs/configuration.md) | `prevue.yml` reference — budgets, gate, skills |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Pipeline, components, data flow |
+| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | Local dev workflow, project layout |
+| [docs/TESTING.md](docs/TESTING.md) | pytest, fixtures, CI expectations |
+| [docs/skills.md](docs/skills.md) | Custom and override skills |
+| [docs/security.md](docs/security.md) | Threat model and trust boundaries |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
 
 ## Local development
 
 ```bash
+git clone https://github.com/Doki064/prevue.git
+cd prevue
 uv sync --locked
 uv run pytest
 uv run prevue review --help
@@ -83,6 +140,8 @@ Run the same checks as CI before opening a PR:
 ./scripts/ci-local.sh
 ```
 
-Requires `go` (actionlint, or install actionlint directly). Python and zizmor use `uv` / `uvx` only.
+See [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for prerequisites and environment setup. Live engine runs need the appropriate API token and a PR event context (`GITHUB_EVENT_PATH`, `GITHUB_REPOSITORY`); unit tests mock those boundaries.
 
-Live Copilot runs require `COPILOT_GITHUB_TOKEN` and a PR event context (`GITHUB_EVENT_PATH`, `GITHUB_REPOSITORY`); unit tests mock those boundaries.
+## License
+
+MIT — see [LICENSE](LICENSE).

@@ -14,7 +14,7 @@ Skills under `.github/prevue/skills/` load from the base ref checkout only — n
 
 - `pull_request` trigger (not `pull_request_target`)
 - Fork PRs skipped in v1
-- Minimal token scopes: `contents: read`, `pull-requests: write`, `checks: write`
+- Minimal token scopes: `contents: write` (GraphQL thread resolve), `pull-requests: write`, `checks: write`
 
 ## Engine tools
 

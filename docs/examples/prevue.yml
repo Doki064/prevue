@@ -8,6 +8,10 @@ review:
   min_severity_to_comment: warning
   min_severity_to_fail: null
   max_inline_comments: 10
+  incremental: true
+  resolve_outdated: true
+  max_known_issues: 20
+  max_dismissals: 50
 
 skills:
   exclude:
