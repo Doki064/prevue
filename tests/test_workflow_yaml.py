@@ -71,13 +71,17 @@ def test_dogfood_passes_pr_shas_via_pull_request_inputs() -> None:
 
 
 def test_minimal_permissions() -> None:
-    """WKFL-04: contents:write on dogfood caller for LIFE-04 resolveReviewThread."""
+    """WKFL-04: review job grants contents:write for LIFE-04 resolveReviewThread."""
     wf = _load_review_workflow()
-    assert wf["permissions"] == {
+    assert "permissions" not in wf
+    review_perms = wf.get("jobs", {}).get("review", {}).get("permissions", {})
+    assert review_perms == {
         "contents": "write",
         "pull-requests": "write",
         "checks": "write",
     }
+    wait_perms = wf.get("jobs", {}).get("wait-ci", {}).get("permissions", {})
+    assert wait_perms == {"checks": "read"}
 
 
 def test_no_pull_request_target_in_source() -> None:
