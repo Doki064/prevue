@@ -128,16 +128,6 @@ def _find_prior_by_ident(priors, ident: str):
     return None
 
 
-def _read_sticky_body(pr) -> str | None:
-    from prevue.github.comments import _is_prevue_sticky
-
-    newest: str | None = None
-    for comment in pr.get_issue_comments():
-        if _is_prevue_sticky(comment):
-            newest = comment.body or ""
-    return newest
-
-
 def _merge_dismiss_into_sticky_body(
     body: str | None,
     entries: list[DismissEntry],
@@ -151,9 +141,9 @@ def _merge_dismiss_into_sticky_body(
     if not without:
         marker = render_marker(head_sha) if head_sha else MARKER
         return f"{marker}\n## Prevue Review\n\n{new_block}"
-    from prevue.github.comments import LEGACY_METADATA_HEADING, METADATA_SUMMARY
+    from prevue.github.comments import LEGACY_METADATA_DETAILS, METADATA_HEADING
 
-    for metadata_marker in (METADATA_SUMMARY, LEGACY_METADATA_HEADING):
+    for metadata_marker in (f"{METADATA_HEADING}\n", METADATA_HEADING, LEGACY_METADATA_DETAILS):
         if metadata_marker in without:
             prefix, suffix = without.split(metadata_marker, 1)
             return f"{prefix.rstrip()}\n{new_block}{metadata_marker}{suffix}"
@@ -194,7 +184,9 @@ def create_dismiss_entry(
         reason=reason or "",
     )
 
-    sticky_body = _read_sticky_body(pr)
+    from prevue.github.comments import read_newest_trusted_sticky_body
+
+    sticky_body = read_newest_trusted_sticky_body(pr)
     existing = parse_dismiss_block(sticky_body)
     by_fp = {item.fingerprint: item for item in existing}
     by_fp[entry.fingerprint] = entry

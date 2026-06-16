@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
+from pathlib import Path
 
 from github import Auth, Github
 from github.PullRequest import PullRequest
@@ -30,6 +31,14 @@ class CommentContext:
     base_repo_full: str
     head_sha: str
     base_sha: str
+
+
+def read_comment_body() -> str:
+    """Read /prevue comment body from PREVUE_COMMENT_BODY_PATH or PREVUE_COMMENT_BODY."""
+    path = os.environ.get("PREVUE_COMMENT_BODY_PATH")
+    if path:
+        return Path(path).read_text(encoding="utf-8")
+    return os.environ["PREVUE_COMMENT_BODY"]
 
 
 def load_pr_context() -> PrContext:
@@ -62,7 +71,7 @@ def load_comment_context() -> CommentContext:
     """Read issue_comment event + env vars; resolve PR SHAs via get_pull (§L1)."""
     repo_full = os.environ["GITHUB_REPOSITORY"]
     issue_number = int(os.environ["PREVUE_ISSUE_NUMBER"])
-    comment_body = os.environ["PREVUE_COMMENT_BODY"]
+    comment_body = read_comment_body()
     comment_author = os.environ["PREVUE_COMMENT_AUTHOR"]
 
     with open(os.environ["GITHUB_EVENT_PATH"]) as f:
@@ -80,6 +89,12 @@ def load_comment_context() -> CommentContext:
 
     gh = Github(auth=Auth.Token(os.environ["GITHUB_TOKEN"]))
     pull = gh.get_repo(repo_full).get_pull(issue_number)
+
+    head_sha = pull.head.sha
+    pinned_head_sha = os.environ.get("PREVUE_PR_HEAD_SHA")
+    if pinned_head_sha and pinned_head_sha != head_sha:
+        msg = f"PR head moved after authorization (pinned {pinned_head_sha}, live {head_sha})"
+        raise ValueError(msg)
 
     return CommentContext(
         repo_full=repo_full,
