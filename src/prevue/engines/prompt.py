@@ -19,8 +19,9 @@ INSTRUCTION_REASSERTION = (
 OUTPUT_CONTRACT = """\
 ## Output format
 
-Write your review as prose first. After the prose, output EXACTLY ONE ```json fence \
-as the LAST element of your response — no text after the closing fence.
+Write a brief prose summary first (at most five sentences). After the prose, output \
+EXACTLY ONE ```json fence as the LAST element of your response — no text after the \
+closing fence.
 
 The fence must contain a JSON array of finding objects. Each object uses these keys:
 - path (string): must be from the changed-file list above
@@ -28,21 +29,25 @@ The fence must contain a JSON array of finding objects. Each object uses these k
 line when side is RIGHT; LEFT-side source line when side is LEFT)
 - side (string): "RIGHT" for added/context lines, "LEFT" for deleted lines
 - severity (string): exactly one of "error", "warning", or "info"
-- title (string): short summary
-- body (string): explanation following the 4C bar below
-- suggestion (string, optional): concrete fix
+- title (string): at most 80 characters; no trailing period
+- body (string): one to three sentences — problem and impact only; do not paste fix code here
+- suggestion (string, optional): when a localized fix is possible, example corrected \
+source code as plain text (minimal surrounding lines for context). No markdown fences \
+inside the JSON string — Prevue renders this as a **Suggested change** code block. \
+Omit when the fix is architectural, unclear, or needs design discussion.
 
-Use an empty array [] when you have no findings.
+Use an empty array [] when you have no material findings.
 
 ## Severity rubric
 
 - error: correctness or security defect that should block merge
 - warning: likely problem or risky pattern worth addressing
-- info: style improvement or non-blocking suggestion
+- info: style improvement or non-blocking suggestion — omit trivial nits
 
 ## Finding quality (4C)
 
-Each finding body must be Clear, Concise, Correct, Complete.
+Each finding must be Clear, Concise, Correct, Complete. Prefer fewer high-signal \
+findings over many low-value notes; never drop a material defect to stay brief.
 """
 
 
