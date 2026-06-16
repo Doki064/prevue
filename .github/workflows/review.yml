@@ -1,37 +1,84 @@
 name: Prevue Review
 
-# Dogfood: run only after CI completes successfully on the PR (not on every push event).
-on:
-  workflow_run:
-    # zizmor: ignore[dangerous-triggers] - gated: CI success, pull_request only, same-repo, non-draft
-    workflows: [CI]
-    types: [completed]
-
+# Dogfood: pull_request attaches to PR; wait-ci gates on test-and-lint check_run.
 # LIFE-04 resolveReviewThread requires contents:write — see prevue-review.yml / consumer-setup.md.
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
 permissions:
   contents: write
   pull-requests: write
   checks: write
 
 concurrency:
-  # push + pull_request CI both finish per commit; separate groups so push workflow_run
-  # cannot cancel an in-progress pull_request review (push run skips on job if).
-  group: prevue-${{ github.event.workflow_run.event }}-${{ github.event.workflow_run.head_sha }}
+  group: prevue-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  review:
+  wait-ci:
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.pull_requests[0].draft != true
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    outputs:
+      ci_ok: ${{ steps.wait.outputs.ci_ok }}
+    steps:
+      - name: Wait for CI test-and-lint
+        id: wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          deadline=$((SECONDS + 1800))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            runs=$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/check-runs?per_page=100" \
+              --jq '[.check_runs[] | select(.name=="test-and-lint")]')
+            count=$(printf '%s' "$runs" | jq 'length')
+            if [ "$count" -eq 0 ]; then
+              echo "No test-and-lint check run yet; waiting..."
+              sleep 15
+              continue
+            fi
+            latest=$(printf '%s' "$runs" | jq 'sort_by(.started_at) | last')
+            status=$(printf '%s' "$latest" | jq -r .status)
+            conclusion=$(printf '%s' "$latest" | jq -r .conclusion)
+            echo "test-and-lint: status=${status} conclusion=${conclusion}"
+            if [ "$status" = "completed" ]; then
+              case "$conclusion" in
+                success)
+                  echo "ci_ok=true" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+                failure|cancelled|timed_out|action_required)
+                  echo "CI test-and-lint did not pass; skipping Prevue review."
+                  echo "ci_ok=false" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+                *) sleep 15 ;;
+              esac
+            else
+              sleep 15
+            fi
+          done
+          echo "Timed out waiting for test-and-lint; skipping Prevue review." >&2
+          echo "ci_ok=false" >> "$GITHUB_OUTPUT"
+
+  review:
+    needs: wait-ci
+    if: >-
+      needs.wait-ci.outputs.ci_ok == 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft != true
     uses: ./.github/workflows/prevue-review.yml
     with:
       engine: ${{ vars.PREVUE_ENGINE || 'copilot-cli' }}
-      prevue-ref: ${{ github.event.workflow_run.head_sha }}
-      pr-head-sha: ${{ github.event.workflow_run.head_sha }}
-      consumer-base-sha: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
+      prevue-ref: ${{ github.event.pull_request.head.sha }}
+      pr-head-sha: ${{ github.event.pull_request.head.sha }}
+      consumer-base-sha: ${{ github.event.pull_request.base.sha }}
       seed-consumer-config: true
     secrets:
       copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
