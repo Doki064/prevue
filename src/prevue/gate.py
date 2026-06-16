@@ -24,6 +24,9 @@ class ReviewConfig(BaseModel):
     # Independent of min_severity_to_fail — fail evaluates ALL findings (D-14).
     min_severity_to_fail: Severity | None = None
     max_inline_comments: int = Field(default=10, ge=0)
+    incremental: bool = True
+    resolve_outdated: bool = True
+    max_known_issues: int = Field(default=20, ge=0)
     # Default 120k tokens (~480k bytes at bytes/4) stays under MAX_PROMPT_BYTES (~250k tokens).
     # Upper bound matches MAX_PROMPT_BYTES // 4 so packing success implies invoke success.
     max_input_tokens: int = Field(default=120000, ge=1, le=250_000)
