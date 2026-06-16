@@ -63,7 +63,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           repository: Doki064/prevue
-          ref: ${{ inputs.prevue-ref != '' && inputs.prevue-ref || 'v0.6.0' }}
+          ref: ${{ inputs.prevue-ref != '' && inputs.prevue-ref || 'main' }}
           path: .prevue
           persist-credentials: false
 
@@ -98,64 +98,28 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PR_HEAD_SHA: ${{ inputs.pr-head-sha != '' && inputs.pr-head-sha || github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
+          PREVUE_STICKY_OWNER_LOGINS: ${{ vars.PREVUE_STICKY_OWNER_LOGINS }}
         run: |
-          # Fetch existing Prevue sticky comment and extract head SHA.
-          STICKY_SHA=""
-          COMMENT_BODY=$(gh api \
-            --paginate \
-            "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" \
-            --jq '[.[] | select(.user.login | test("^github-actions(\\[bot\\])?$")) | select(.body | test("^\\s*<!--\\s*prevue:sticky"))] | last | .body // empty' \
-            2>/dev/null || true)
-          if [ -n "$COMMENT_BODY" ]; then
-            STICKY_SHA=$(printf '%s' "$COMMENT_BODY" | \
-              sed -nE 's/.*<!--[[:space:]]*prevue:sticky[[:space:]]+head=([0-9a-f]{7,40})[[:space:]]*-->.*/\1/p' \
-              | head -1 || true)
-          fi
-          export STICKY_SHA
           NOOP=$(uv run prevue preflight)
           echo "noop=$NOOP" >> "$GITHUB_OUTPUT"
           if [ "$NOOP" = "true" ]; then
             echo "Pre-flight: same-SHA noop (prevue preflight) — skipping engine CLI install"
           else
-            echo "Pre-flight: head changed or no marker (sticky=$STICKY_SHA pr=$PR_HEAD_SHA) — full install"
+            echo "Pre-flight: head changed or no marker — full install"
           fi
 
       - name: Install engine CLI
         if: steps.preflight.outputs.noop != 'true'
         env:
           PREVUE_ENGINE: ${{ inputs.engine }}
-        run: |
-          case "$PREVUE_ENGINE" in
-            copilot-cli)
-              npm install -g @github/copilot@1.0.61
-              command -v copilot
-              ;;
-            claude-code-cli)
-              npm install -g @anthropic-ai/claude-code@2.1.177
-              command -v claude
-              ;;
-            cursor-cli)
-              # Official Cursor CLI installer (https://cursor.com/docs/cli/overview).
-              # No versioned npm package — npm `cursor-agent` is an unrelated impostor;
-              # supply-chain guard: test_cursor_install_uses_official_curl_installer_in_reusable.
-              # Residual risk (no upstream pin/checksum): docs/consumer-setup.md.
-              curl -fsS https://cursor.com/install -o "$RUNNER_TEMP/cursor-install.sh"
-              bash "$RUNNER_TEMP/cursor-install.sh"
-              command -v cursor-agent
-              ;;
-            *)
-              echo "Unsupported engine: $PREVUE_ENGINE" >&2
-              exit 1
-              ;;
-          esac
+        run: bash .prevue/.github/scripts/install-engine-cli.sh
 
       - name: Run review
         working-directory: .prevue
         run: uv run prevue review
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          PREVUE_STICKY_OWNER_LOGINS: ${{ vars.PREVUE_STICKY_OWNER_LOGINS }}
           PREVUE_ENGINE: ${{ inputs.engine }}
           PREVUE_CONSUMER_ROOT: ${{ github.workspace }}/consumer
           PREVUE_CONFIG_PATH: ${{ inputs.config-path }}

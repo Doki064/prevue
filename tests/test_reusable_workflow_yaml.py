@@ -10,6 +10,9 @@ import yaml
 REUSABLE_WORKFLOW = (
     Path(__file__).resolve().parents[1] / ".github" / "workflows" / "prevue-review.yml"
 )
+INSTALL_SCRIPT = (
+    Path(__file__).resolve().parents[1] / ".github" / "scripts" / "install-engine-cli.sh"
+)
 
 SETUP_UV_SHA = "fac544c07dec837d0ccb6301d7b5580bf5edae39"
 CHECKOUT_SHA = "df4cb1c069e1874edd31b4311f1884172cec0e10"
@@ -113,17 +116,19 @@ def test_no_secrets_inherit() -> None:
 
 
 def test_cursor_install_uses_official_curl_not_npm_impostor() -> None:
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert "cursor.com/install" in script
+    assert "npm install -g cursor-agent" not in script
     text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
-    assert "cursor.com/install" in text
-    assert "npm install -g cursor-agent" not in text
+    assert "install-engine-cli.sh" in text
 
 
 def test_cursor_install_downloads_then_execs_not_pipe_to_bash() -> None:
     """Hardening guard: fetch installer to a file then exec, never curl | bash."""
-    text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
-    assert "cursor.com/install -o" in text or "-o " in text.split("cursor.com/install", 1)[1]
-    assert "cursor.com/install -fsS | bash" not in text
-    assert "cursor.com/install | bash" not in text
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert "cursor.com/install -o" in script
+    assert "cursor.com/install -fsS | bash" not in script
+    assert "cursor.com/install | bash" not in script
 
 
 def test_self_checkout_ref_not_main() -> None:
@@ -144,8 +149,9 @@ def test_self_checkout_ref_not_main() -> None:
     assert all(ref not in ("main", "master", "HEAD") for ref in prevue_refs)
 
 
-def test_preflight_sticky_lookup_uses_pagination() -> None:
-    """Preflight sticky lookup must scan all issue-comment pages, not only first page."""
-    text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
-    assert "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" in text
-    assert "--paginate" in text
+def test_cursor_install_supports_optional_sha256_pin() -> None:
+    script = (
+        Path(__file__).resolve().parents[1] / ".github/scripts/install-engine-cli.sh"
+    ).read_text(encoding="utf-8")
+    assert "PREVUE_CURSOR_INSTALL_SHA256" in script
+    assert "sha256sum -c" in script
