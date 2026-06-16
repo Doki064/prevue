@@ -39,7 +39,12 @@ jobs:
       - name: Lint workflow files
         run: |
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
-          "$(go env GOPATH)/bin/actionlint" -color -shellcheck= -pyflakes=
+          ACTIONLINT="$(go env GOPATH)/bin/actionlint"
+          "$ACTIONLINT" -color -shellcheck= -pyflakes= \
+            .github/workflows/ci.yml \
+            .github/workflows/review.yml \
+            .github/workflows/prevue-review.yml \
+            .github/workflows/prevue-command.yml
 
       - name: Scan workflows with zizmor
         uses: zizmorcore/zizmor-action@b1d7e1fb5de872772f31590499237e7cce841e8e # v0.5.3

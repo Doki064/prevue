@@ -1,0 +1,10 @@
+# Prevue dogfood config — read from PR base ref on consumer repos.
+# Same-repo dogfood seeds this from the PR head when base lacks the file
+# (see prevue-review.yml "Seed consumer config" step).
+
+ignore:
+  - ".planning/**"
+
+review:
+  incremental: false   # one-shot full review to clear carried incremental warnings (PR #16)
+  min_severity_to_fail: error

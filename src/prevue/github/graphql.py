@@ -8,6 +8,7 @@ import sys
 import requests
 
 GRAPHQL_URL = "https://api.github.com/graphql"
+MAX_REVIEW_THREAD_PAGES = 20
 
 REVIEW_THREADS_QUERY = """
 query($owner: String!, $repo: String!, $number: Int!, $cursor: String) {
@@ -86,7 +87,9 @@ def fetch_review_threads(owner: str, repo: str, number: int) -> list[dict]:
     """
     threads: list[dict] = []
     cursor: str | None = None
+    page_count = 0
     while True:
+        page_count += 1
         variables: dict = {"owner": owner, "repo": repo, "number": number}
         if cursor is not None:
             variables["cursor"] = cursor
@@ -128,7 +131,16 @@ def fetch_review_threads(owner: str, repo: str, number: int) -> list[dict]:
                 }
             )
         page_info = review_threads.get("pageInfo") or {}
-        if not page_info.get("hasNextPage"):
+        if page_info.get("hasNextPage"):
+            if page_count >= MAX_REVIEW_THREAD_PAGES:
+                print(
+                    f"prevue: reviewThreads pagination capped at "
+                    f"{MAX_REVIEW_THREAD_PAGES} pages ({len(threads)} threads); "
+                    "remaining threads not fetched",
+                    file=sys.stderr,
+                )
+                break
+        else:
             break
         cursor = page_info.get("endCursor")
         if not cursor:

@@ -22,6 +22,7 @@ from prevue.classify.llm_fallback import (
 from prevue.classify.models import CANONICAL_LABEL_ORDER, GENERAL_LABEL
 from prevue.classify.router import route
 from prevue.config import load_config, resolve_consumer_config_path
+from prevue.dismiss import active_suppressed_fingerprints, parse_dismiss_block
 from prevue.engines.base import EngineAdapter
 from prevue.engines.prompt import MAX_PROMPT_BYTES, build_prompt, estimate_prompt_overhead_tokens
 from prevue.engines.registry import get_adapter
@@ -29,18 +30,15 @@ from prevue.engines.tokens import estimate_tokens
 from prevue.fingerprint import fingerprint
 from prevue.gate import SEVERITY_RANK, GateResult, PlacedFinding, apply_gate
 from prevue.github.checks import conclude_review_check, conclude_skip_check
-from prevue.github.client import get_authenticated_pull, get_repo, load_pr_context
+from prevue.github.client import PrContext, get_authenticated_pull, get_repo, load_pr_context
 from prevue.github.comments import (
-    _MARKER_RE,
     PriorFinding,
     _derive_prior_findings_with_threads,
     _is_prevue_sticky,
-    _upsert_marker_comment,
     derive_prior_findings,
     inline_location_key,
     parse_marker_sha,
     post_inline_review,
-    render_marker,
     resolve_outdated_prior_findings,
     upsert_skip_note,
     upsert_sticky,
@@ -52,8 +50,9 @@ from prevue.github.diff import (
     regions_from_comparison,
 )
 from prevue.github.positions import build_valid_lines, finding_region_changed, regions_changed
-from prevue.models import Finding, ReviewRequest
+from prevue.models import Finding, ReviewRequest, ReviewResult
 from prevue.pack import make_file_weight, pack_files, readmit_files, trim_packed_files
+from prevue.preflight import resolve_marker_for_scope
 from prevue.skills.loader import assemble_instructions, load_skills, select_skills
 from prevue.skip import should_skip
 
@@ -108,19 +107,18 @@ def _inline_key(finding) -> tuple[str, int, str]:
 
 
 def _read_sticky_body(pr) -> str | None:
-    """Return the trusted Prevue sticky comment body, if any."""
+    """Return the newest trusted Prevue sticky comment body, if any.
+
+    Selecting the LAST match (not the first) aligns with the workflow preflight,
+    which reads the last bot sticky. If duplicate stickies exist (failed cleanup or
+    manual duplication), Python scope/noop decisions then target the same comment
+    the preflight inspected, avoiding install-skip vs review-scope divergence.
+    """
+    newest: str | None = None
     for comment in pr.get_issue_comments():
         if _is_prevue_sticky(comment):
-            return comment.body or ""
-    return None
-
-
-def _refresh_marker_body(body: str, head_sha: str) -> str:
-    """Replace sticky marker prefix with head=<sha> (D-01)."""
-    new_marker = render_marker(head_sha)
-    if _MARKER_RE.search(body):
-        return _MARKER_RE.sub(new_marker, body, count=1)
-    return f"{new_marker}\n{body}"
+            newest = comment.body or ""
+    return newest
 
 
 def _prior_to_finding(prior: PriorFinding) -> Finding:
@@ -167,7 +165,16 @@ def _open_set_findings(
     the current finding so the gate and inline refresh path can flag the upgrade.
     """
     current_fps = {fingerprint(f.path, f.title) for f in current}
-    current_by_loc = {(f.path, f.line, f.side): f for f in current}
+    # Keep the MOST-severe current finding per location (lower SEVERITY_RANK = more
+    # severe). A plain dict comprehension is last-write-wins, which could hide a real
+    # escalation (e.g. an error after a warning at the same line) behind a less-severe
+    # sibling and let the carried prior win instead of the upgrade.
+    current_by_loc: dict[tuple[str, int, str], Finding] = {}
+    for f in current:
+        loc = (f.path, f.line, f.side)
+        existing = current_by_loc.get(loc)
+        if existing is None or SEVERITY_RANK[f.severity] < SEVERITY_RANK[existing.severity]:
+            current_by_loc[loc] = f
     current_locs = set(current_by_loc)
     # Locations (path, line, side) where a carried prior takes precedence over the
     # current engine output (rephrase-at-same-line: live inline unchanged, same
@@ -181,7 +188,13 @@ def _open_set_findings(
         loc = (prior.path, prior.line, prior.side)
         if loc in current_locs:
             current_f = current_by_loc[loc]
-            prior_rank = SEVERITY_RANK.get(prior.severity or "info", 2)
+            # Unparseable prior severity (None): post_inline_review's _inline_severity_changed
+            # declines to refresh the live inline comment, so we must NOT let the current
+            # finding win an escalation here either — otherwise the sticky/check would show
+            # the upgrade while the PR thread stays on the old comment. Rank it most-severe
+            # so `current_rank < prior_rank` is False and the prior is carried (rephrase
+            # path), keeping sticky and inline consistent.
+            prior_rank = SEVERITY_RANK[prior.severity] if prior.severity is not None else -1
             current_rank = SEVERITY_RANK[current_f.severity]
             if current_rank < prior_rank:
                 # Escalation at same line: current wins; inline refresh path applies.
@@ -243,30 +256,79 @@ def _finish_noop_review(
     review_cfg,
     owner: str,
     repo_name: str,
+    dismiss_entries,
+    scope_label: str | None,
 ) -> None:
-    """Identical re-run: refresh marker/check without engine or resolve (Pitfall 3)."""
+    """Identical re-run: refresh marker/check without engine or resolve (Pitfall 3).
+
+    Re-renders the sticky from the freshly recomputed gate (not just the marker
+    prefix) so the visible Verdict/Findings always match the check-run conclusion.
+    Skipping the re-render let the two diverge when carried-prior state changed
+    between same-SHA runs (e.g. a thread resolved out-of-band drops a finding from
+    the recomputed gate while the frozen sticky still showed it).
+
+    Preserves active dismiss suppress-list entries so noop refreshes do not wipe
+    maintainer dismiss state or re-open suppressed findings in the gate.
+    """
     priors = derive_prior_findings(pr, owner=owner, repo=repo_name)
-    # Placement is unused in the noop path — gate is verdict-only (conclusion +
-    # severity counts).  Passing empty valid_lines is intentional: gate.inline
-    # and gate.placed are never rendered here, so all carried priors landing on
-    # position-fallback is harmless.  If this path is ever extended to render a
-    # fresh sticky from gate.placed, build valid_lines from the diff first.
+    open_findings = _open_set_findings([], priors, set())
+    suppressed = active_suppressed_fingerprints(dismiss_entries, [], {})
+    if suppressed:
+        open_findings = [
+            finding
+            for finding in open_findings
+            if fingerprint(finding.path, finding.title) not in suppressed
+        ]
+    active_dismissals = [entry for entry in dismiss_entries if entry.fingerprint in suppressed]
+    # Verdict-only gate: no current diff, so valid_lines is empty and carried priors
+    # render as position-fallback in the sticky — correct, they are not on a live hunk.
     gate = apply_gate(
-        _open_set_findings([], priors, set()),
+        open_findings,
         review_cfg,
         {},
     )
-    sticky_body = _read_sticky_body(pr)
-    if sticky_body:
-        body = _refresh_marker_body(sticky_body, head_sha)
-    else:
-        body = f"{render_marker(head_sha)}\n## Prevue Review\n\n_Review up to date._"
-    sticky = _upsert_marker_comment(pr, body)
+    noop_result = ReviewResult(
+        summary_markdown=(
+            "_No changes since the last reviewed commit; carried findings shown below._"
+        )
+    )
+    # One retry on transient GithubException — mirrors the full-review _publish_sticky
+    # path so a flaky API call does not leave the marker stale on an otherwise no-op run.
+    try:
+        sticky = upsert_sticky(
+            pr,
+            noop_result,
+            head_sha=head_sha,
+            gate=gate,
+            scope=scope_label,
+            dismissals=active_dismissals or None,
+        )
+    except GithubException as exc:
+        print(
+            f"prevue: noop sticky upsert failed (HTTP {getattr(exc, 'status', '?')}), retrying",
+            file=sys.stderr,
+        )
+        try:
+            sticky = upsert_sticky(
+                pr,
+                noop_result,
+                head_sha=head_sha,
+                gate=gate,
+                scope=scope_label,
+                dismissals=active_dismissals or None,
+            )
+        except GithubException as retry_exc:
+            print(
+                f"prevue: noop sticky retry failed (HTTP {getattr(retry_exc, 'status', '?')})",
+                file=sys.stderr,
+            )
+            sticky = None
     check_published = conclude_review_check(
         repo,
         head_sha,
         gate,
         sticky_url=getattr(sticky, "html_url", None),
+        sticky_failed=sticky is None,
     )
     if not check_published:
         raise RuntimeError("Failed to publish review check run")
@@ -279,9 +341,14 @@ class ForkPrUnsupported(Exception):
         super().__init__(FORK_UNSUPPORTED_MSG)
 
 
-def run_review(*, adapter: EngineAdapter | None = None) -> None:
+def run_review(
+    *,
+    adapter: EngineAdapter | None = None,
+    force_full: bool = False,
+    pr_ctx: PrContext | None = None,
+) -> None:
     """Fetch diff, run engine adapter, post findings, sticky, and check run."""
-    ctx = load_pr_context()
+    ctx = pr_ctx or load_pr_context()
 
     if ctx.head_repo_full != ctx.base_repo_full:
         raise ForkPrUnsupported()
@@ -315,7 +382,13 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     owner, repo_name = ctx.repo_full.split("/", 1)
     sticky_body = _read_sticky_body(pr)
     last_sha = parse_marker_sha(sticky_body) if sticky_body else None
-    marker_for_scope = last_sha if review_cfg.incremental else None
+    dismiss_entries = parse_dismiss_block(sticky_body)
+    marker_for_scope = resolve_marker_for_scope(
+        last_sha,
+        head_sha,
+        incremental=review_cfg.incremental,
+        force_full=force_full,
+    )
     scope, in_scope_paths, comparison = decide_scope(repo, marker_for_scope, head_sha)
 
     if scope == "noop":
@@ -326,6 +399,8 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
             review_cfg=review_cfg,
             owner=owner,
             repo_name=repo_name,
+            dismiss_entries=dismiss_entries,
+            scope_label="incremental" if review_cfg.incremental else None,
         )
         return
 
@@ -344,6 +419,8 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
                 review_cfg=review_cfg,
                 owner=owner,
                 repo_name=repo_name,
+                dismiss_entries=dismiss_entries,
+                scope_label="incremental",
             )
             return
         upsert_skip_note(pr, dropped_count=len(dropped))
@@ -522,10 +599,14 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         if scope == "incremental"
         else set()
     )
+    # Build known-issues from delta_paths (the incremental scope), matching the scope
+    # used for exclude_from_known. Using the post-pack reviewed_paths instead would drop
+    # priors on in-scope files that packing trimmed, so the same fingerprint could be
+    # excluded from outdated-resolution (delta scope) yet absent from dedup guidance.
     known_items = (
         _build_known_issues_items(
             priors,
-            reviewed_paths,
+            delta_paths,
             review_cfg.max_known_issues,
             exclude_fingerprints=exclude_from_known,
         )
@@ -640,11 +721,22 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
             owner=owner,
             repo=repo_name,
             threads=fetched_threads,  # reuse already-fetched threads (WR-03)
+            authoritative=(scope == "full"),
         )
+
+    open_findings = _open_set_findings(result.findings, priors, resolved_fps)
+    suppressed = active_suppressed_fingerprints(dismiss_entries, result.findings, regions_by_path)
+    if suppressed:
+        open_findings = [
+            finding
+            for finding in open_findings
+            if fingerprint(finding.path, finding.title) not in suppressed
+        ]
+    active_dismissals = [entry for entry in dismiss_entries if entry.fingerprint in suppressed]
 
     valid_lines = build_valid_lines(packed_files)
     gate = apply_gate(
-        _open_set_findings(result.findings, priors, resolved_fps),
+        open_findings,
         review_cfg,
         valid_lines,
         degraded=result.degraded,
@@ -684,6 +776,7 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
         "cap_skipped": cap_skipped,
         "scope": scope if scope in ("incremental", "full") else None,
         "carried_open_count": carried_open_count,
+        "dismissals": active_dismissals,
     }
 
     def _publish_sticky(gate_for_sticky: GateResult) -> tuple[object | None, bool]:
@@ -718,7 +811,6 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
             return sticky_comment, False
         return sticky_comment, False
 
-    sticky, sticky_failed = _publish_sticky(gate)
     failed_inline_keys = post_inline_review(
         pr,
         gate,
@@ -751,7 +843,7 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
             dropped_findings=gate.dropped_findings,
             partial=gate.partial,
         )
-        sticky, sticky_failed = _publish_sticky(gate)
+    sticky, sticky_failed = _publish_sticky(gate)
     check_published = conclude_review_check(
         get_repo(ctx),
         diff.head_sha,

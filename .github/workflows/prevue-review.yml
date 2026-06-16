@@ -15,6 +15,10 @@ on:
         type: string
         required: false
         default: ""
+      seed-consumer-config:
+        type: boolean
+        required: false
+        default: false
     secrets:
       copilot-github-token:
         required: false
@@ -23,8 +27,11 @@ on:
       cursor-api-key:
         required: false
 
+# LIFE-04 (resolveReviewThread) requires contents:write — verified live 2026-06 (08-07).
+# pull-requests:write alone returns GraphQL 403 Forbidden on resolveReviewThread.
+# Prevue uses write scope for GraphQL lifecycle only, not for repo commits.
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   checks: write
 
@@ -51,6 +58,14 @@ jobs:
           path: consumer
           persist-credentials: false
 
+      - name: Seed consumer config from framework (dogfood)
+        if: inputs.seed-consumer-config
+        run: |
+          if [ ! -f consumer/.github/prevue.yml ] && [ -f .prevue/.github/prevue.yml ]; then
+            mkdir -p consumer/.github
+            cp .prevue/.github/prevue.yml consumer/.github/prevue.yml
+          fi
+
       - name: Set up uv
         uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
@@ -61,7 +76,38 @@ jobs:
         working-directory: .prevue
         run: uv sync --locked
 
+      - name: Pre-flight noop check
+        id: preflight
+        working-directory: .prevue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Fetch existing Prevue sticky comment and extract head SHA.
+          STICKY_SHA=""
+          COMMENT_BODY=$(gh api \
+            --paginate \
+            "repos/$REPO/issues/$PR_NUMBER/comments?per_page=100" \
+            --jq '[.[] | select(.user.login | test("^github-actions(\\[bot\\])?$")) | select(.body | test("^\\s*<!--\\s*prevue:sticky"))] | last | .body // empty' \
+            2>/dev/null || true)
+          if [ -n "$COMMENT_BODY" ]; then
+            STICKY_SHA=$(printf '%s' "$COMMENT_BODY" | \
+              sed -nE 's/.*<!--[[:space:]]*prevue:sticky[[:space:]]+head=([0-9a-f]{7,40})[[:space:]]*-->.*/\1/p' \
+              | head -1 || true)
+          fi
+          export STICKY_SHA
+          NOOP=$(uv run prevue preflight)
+          echo "noop=$NOOP" >> "$GITHUB_OUTPUT"
+          if [ "$NOOP" = "true" ]; then
+            echo "Pre-flight: same-SHA noop (prevue preflight) — skipping engine CLI install"
+          else
+            echo "Pre-flight: head changed or no marker (sticky=$STICKY_SHA pr=$PR_HEAD_SHA) — full install"
+          fi
+
       - name: Install engine CLI
+        if: steps.preflight.outputs.noop != 'true'
         env:
           PREVUE_ENGINE: ${{ inputs.engine }}
         run: |
@@ -78,10 +124,7 @@ jobs:
               # Official Cursor CLI installer (https://cursor.com/docs/cli/overview).
               # No versioned npm package — npm `cursor-agent` is an unrelated impostor;
               # supply-chain guard: test_cursor_install_uses_official_curl_installer_in_reusable.
-              # Download then exec (not curl | bash): avoids executing a truncated
-              # script and leaves a fetched artifact a checksum step can guard once
-              # Cursor publishes one. Residual risk (no upstream pin/checksum) is
-              # documented in docs/consumer-setup.md.
+              # Residual risk (no upstream pin/checksum): docs/consumer-setup.md.
               curl -fsS https://cursor.com/install -o "$RUNNER_TEMP/cursor-install.sh"
               bash "$RUNNER_TEMP/cursor-install.sh"
               command -v cursor-agent

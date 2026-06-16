@@ -27,6 +27,7 @@ class ReviewConfig(BaseModel):
     incremental: bool = True
     resolve_outdated: bool = True
     max_known_issues: int = Field(default=20, ge=0)
+    max_dismissals: int = Field(default=50, ge=0)
     # Default 120k tokens (~480k bytes at bytes/4) stays under MAX_PROMPT_BYTES (~250k tokens).
     # Upper bound matches MAX_PROMPT_BYTES // 4 so packing success implies invoke success.
     max_input_tokens: int = Field(default=120000, ge=1, le=250_000)
