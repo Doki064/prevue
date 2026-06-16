@@ -76,7 +76,7 @@ uv run pytest -v
 tests/
 ├── conftest.py              # Shared pytest fixtures
 ├── engine_helpers.py        # Engine adapter test builders
-├── test_*.py                  # One module per source area (41 files)
+├── test_*.py                  # One module per source area
 └── fixtures/
     ├── *.json                 # GitHub API / event payloads
     └── skills/                # Skill trees for loader tests

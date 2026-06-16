@@ -1,7 +1,7 @@
 <!-- generated-by: gsd-doc-writer -->
 # Prevue
 
-Token-efficient AI PR review for GitHub Actions — classify the diff, load only matching review skills, run your chosen engine, and post a sticky summary, inline comments, and an optional merge gate.
+Token-efficient AI PR review for GitHub Actions — pack the diff under budget, load skills whose `applies-to` globs match changed paths, classify for metadata, run your chosen engine, and post a sticky summary, inline comments, and an optional merge gate.
 
 [![CI](https://github.com/Doki064/prevue/actions/workflows/ci.yml/badge.svg)](https://github.com/Doki064/prevue/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -11,11 +11,12 @@ Token-efficient AI PR review for GitHub Actions — classify the diff, load only
 On each pull request, Prevue:
 
 1. **Fetches the diff** via the GitHub API (no PR-head checkout for review content)
-2. **Classifies changed files** with deterministic glob rules and an optional LLM fallback
-3. **Routes to review skills** — built-in and consumer-defined `SKILL.md` bundles loaded only for matching labels
-4. **Packs the diff** under a token budget, prioritizing high-risk paths
-5. **Runs an AI engine** — `copilot-cli`, `claude-code-cli`, or `cursor-cli`
-6. **Posts results** — sticky summary comment, inline review comments, and a `prevue/review` check run
+2. **Loads skills** from built-in and consumer bundles (base ref only)
+3. **Packs the diff** under a token budget, prioritizing paths matched by `labels` rules and skill `applies-to` globs
+4. **Selects skills** whose `applies-to` path globs match packed files, then assembles review instructions
+5. **Classifies packed files** with deterministic glob rules and an optional LLM fallback (metadata / sticky disclosure)
+6. **Runs an AI engine** — `copilot-cli`, `claude-code-cli`, or `cursor-cli`
+7. **Posts results** — sticky summary comment, inline review comments, and a `prevue/review` check run
 
 **Incremental review** (default) re-reviews only files changed since the last sticky marker SHA, carries forward open findings, and skips engine CLI install on same-SHA no-op re-runs.
 
@@ -54,7 +55,7 @@ Full setup — engine secrets, optional `/prevue` commands, CI gating — is in 
 ## How it runs
 
 ```
-pull_request → classify → route skills → pack diff → engine review → sticky + inline + check
+pull_request → load skills → pack diff → select skills → classify → engine review → sticky + inline + check
 ```
 
 The reusable workflow (`.github/workflows/prevue-review.yml`) checks out the framework and consumer base ref, then runs `uv run prevue review`. All review logic lives in Python.
@@ -64,7 +65,7 @@ The reusable workflow (`.github/workflows/prevue-review.yml`) checks out the fra
 | Capability | Description |
 |------------|-------------|
 | **Classification** | Gitignore-style glob rules map files to labels (`security`, `frontend`, `backend`, …); LLM fallback for unmatched paths in the packed set |
-| **Skill routing** | Loads only skills whose `applies-to` labels match the PR; consumer overrides under `.github/prevue/skills/` |
+| **Skill selection** | Loads only skills whose `applies-to` **path globs** match packed files; consumer overrides under `.github/prevue/skills/` |
 | **Inline comments** | Findings placed on changed lines via unified-diff positions; capped by `review.max_inline_comments` |
 | **Merge gate** | `prevue/review` check run — pass/fail from `review.min_severity_to_fail` (independent of inline comment threshold) |
 | **Multi-engine** | Pluggable adapters: Copilot CLI, Claude Code CLI, Cursor CLI |

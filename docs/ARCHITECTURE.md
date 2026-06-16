@@ -4,9 +4,9 @@
 
 ## System overview
 
-Prevue is a token-efficient AI pull-request review framework delivered as a GitHub Actions reusable workflow. On each eligible `pull_request` event, it fetches the PR diff via the GitHub REST API (no PR-head checkout), classifies changed files with deterministic glob rules (with an optional LLM fallback), loads only the review skills that match the change, packs files into a token budget, invokes a pluggable AI engine adapter, and posts results back to the PR as a sticky summary comment, inline review comments, and a pass/fail check run.
+Prevue is a token-efficient AI pull-request review framework delivered as a GitHub Actions reusable workflow. On each eligible `pull_request` event, it fetches the PR diff via the GitHub REST API (no PR-head checkout), loads built-in and consumer skills from the trusted base ref, packs changed files into a token budget (using `labels` rules and skill `applies-to` globs for priority), selects matching skills by path glob, classifies the packed set for metadata disclosure, invokes a pluggable AI engine adapter, and posts results back to the PR as a sticky summary comment, inline review comments, and a pass/fail check run.
 
-The architecture is a layered pipeline: **workflow shell → CLI → orchestration → classify/skills/pack → engine adapter → gate → GitHub publisher**. Python owns all review logic; the workflow only sets up the runner, checks out trusted refs, installs dependencies and the engine CLI, and invokes `uv run prevue review`.
+The architecture is a layered pipeline: **workflow shell → CLI → orchestration → skills/pack → classify → engine adapter → gate → GitHub publisher**. Python owns all review logic; the workflow only sets up the runner, checks out trusted refs, installs dependencies and the engine CLI, and invokes `uv run prevue review`.
 
 ## Component diagram
 
@@ -16,14 +16,17 @@ graph TD
     CLI --> REV[review.py orchestration]
     REV --> CFG[config.py]
     REV --> GH[github/ client, diff, comments, checks]
-    REV --> CLS[classify/ classifier + router]
     REV --> SKL[skills/ loader]
     REV --> PKG[pack.py]
+    REV --> CLS[classify/ classifier + router]
     REV --> ENG[engines/ adapters]
     ENG --> FLOW[engines/flow.py]
     REV --> GATE[gate.py]
     GATE --> GH
-    CLS --> SKL
+    SKL --> PKG
+    PKG --> SKL
+    PKG --> CLS
+    CFG --> PKG
     CFG --> CLS
     CFG --> GATE
 ```
@@ -34,9 +37,9 @@ ASCII equivalent:
 .github/workflows/  →  prevue CLI  →  review.py
                                         ├─ config.py (prevue.yml)
                                         ├─ github/ (fetch diff, post comments/checks)
-                                        ├─ classify/ (labels → bundles)
-                                        ├─ skills/ (load + assemble instructions)
+                                        ├─ skills/ (load → select by applies-to → assemble)
                                         ├─ pack.py (token budget)
+                                        ├─ classify/ (labels on packed set → route for metadata)
                                         ├─ engines/ (Copilot, Claude, Cursor, …)
                                         └─ gate.py (thresholds, placement)
 ```
@@ -52,12 +55,14 @@ A typical same-repo PR review follows this path:
 5. **Config + skip** — `load_config()` reads `.github/prevue.yml` (rules, review thresholds, skills caps, engine name, skip policy). `should_skip()` may exit early (labels, title patterns, bot authors).
 6. **Scope decision** — `decide_scope()` chooses full, incremental, or noop based on the sticky marker SHA and `review.incremental`. Incremental runs fetch only files changed since the last review.
 7. **Diff fetch + filter** — `fetch_diff()` or `fetch_diff_in_scope()` returns a `DiffBundle`. `filter_diff()` drops ignored paths per consumer `ignore_globs`.
-8. **Skills + packing** — Built-in and consumer skills load from `prevue/skills/` and `.github/prevue/skills/`. `pack_files()` ranks files by classification risk and skill coverage, fitting the diff into `review.max_input_tokens` minus output reserve and instruction overhead.
-9. **Classification** — `classify()` applies gitignore-style glob rules (`pathspec`) per file. Unmatched paths optionally go through `llm_classify()` via the selected engine. `route()` maps labels to skill bundle IDs.
-10. **Engine review** — `ReviewRequest` (diff + assembled instructions + known issues) is passed to the selected `EngineAdapter.review()`. Adapters shell out to vendor CLIs; `flow.review_with_retry()` handles parse failures with one retry then degrades gracefully.
-11. **Lifecycle merge** — Prior findings from sticky/inline threads merge into an open set (`_open_set_findings`). Outdated threads may resolve via GraphQL. Dismissals suppress fingerprints in changed regions.
-12. **Gate** — `apply_gate()` applies severity thresholds, inline placement limits, and conclusion ladder (`success` / `neutral` / `failure`).
-13. **Publish** — `post_inline_review()` batches inline comments; `upsert_sticky()` updates the marker comment; `conclude_review_check()` writes the `prevue/review` check run.
+8. **Load skills** — Built-in skills load from packaged `prevue/skills/`; consumer overrides merge from `.github/prevue/skills/` on the base ref (SKIL-04).
+9. **Pack** — `pack_files()` ranks files by `labels` rules and skill `applies-to` coverage, fitting the diff into `review.max_input_tokens` minus output reserve and instruction overhead.
+10. **Select skills + assemble** — `select_skills()` keeps skills whose `applies-to` path globs match packed file paths; `assemble_instructions()` builds the engine prompt preamble. Trim/readmit loops may repeat selection.
+11. **Classification** — `classify()` applies gitignore-style glob rules (`pathspec`) to **packed** files. Unmatched paths optionally go through `llm_classify()`. `route()` maps labels to bundle ids for sticky **metadata only** (not skill gating).
+12. **Engine review** — `ReviewRequest` (diff + assembled instructions + known issues) is passed to the selected `EngineAdapter.review()`. Adapters shell out to vendor CLIs; `flow.review_with_retry()` handles parse failures with one retry then degrades gracefully.
+13. **Lifecycle merge** — Prior findings from sticky/inline threads merge into an open set (`_open_set_findings`). Outdated threads may resolve via GraphQL. Dismissals suppress fingerprints in changed regions.
+14. **Gate** — `apply_gate()` applies severity thresholds, inline placement limits, and conclusion ladder (`success` / `neutral` / `failure`).
+15. **Publish** — `post_inline_review()` batches inline comments; `upsert_sticky()` updates the marker comment; `conclude_review_check()` writes the `prevue/review` check run.
 
 Command-driven reviews (`/prevue review`, `/prevue dismiss`, `/prevue resolve`) follow a parallel path through `commands.py`, reusing `run_review()` and GraphQL thread resolution.
 
@@ -108,7 +113,7 @@ prevue/
 **Why this layout:**
 
 - **`src/prevue/`** — All framework logic in one installable Python package (`pyproject.toml` → `prevue` CLI). Keeps the reusable workflow thin and auditable.
-- **`classify/` vs `skills/`** — Classification decides *what kind of change* this is; skills provide *how to review* that kind. Routing connects the two via `routing_map` in `prevue.yml`.
+- **`classify/` vs `skills/`** — `select_skills()` gates which skill bodies reach the prompt via each skill's `applies-to` path globs. `classify()` + `route()` run **after** packing on the reviewed file set; `route()` maps labels to bundle ids for sticky metadata disclosure only — it does not load skills.
 - **`engines/`** — Vendor-neutral adapter boundary. New engines add a class + registry entry without touching orchestration.
 - **`github/`** — Isolates PyGithub/GraphQL concerns (diff fetch, sticky upsert, inline positions, check runs) from review policy.
 - **`.github/workflows/prevue-review.yml`** — `workflow_call` interface for consumers: explicit `permissions`, named secret pass-through, dual checkout (framework + consumer base ref).

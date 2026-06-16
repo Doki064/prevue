@@ -223,8 +223,8 @@ Validated by `Skill` in `src/prevue/skills/models.py` — `name`, `description`,
 ### Bundle ↔ classification routing
 
 - Bundle directory name (e.g. `security`) is the skill bundle id.
-- `classify/router.py` maps classification **labels** to bundle ids via `routing` in consumer `prevue.yml` (defaults in `default_rules.yml`).
-- `skills/loader.py` loads all `.md` files under each bundle directory; `select_skills()` matches `applies-to` globs against changed paths.
+- `select_skills()` matches each skill's `applies-to` path globs against packed file paths — this gates which skill bodies reach the prompt.
+- `classify/router.py` maps classification **labels** to bundle ids via `routing` in `prevue.yml` for sticky metadata only (`route()` does not load skills).
 
 ### Tests
 

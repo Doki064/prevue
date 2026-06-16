@@ -12,8 +12,8 @@ If the file is missing, framework defaults apply (including `classification.fall
 | Section | Purpose |
 |---------|---------|
 | `ignore` | Drop paths from the diff before classification |
-| `labels` | Map file globs → classification labels (pack priority + skill routing input) |
-| `routing` | Map labels → skill bundle ids |
+| `labels` | Map file globs → classification labels (pack priority input) |
+| `routing` | Map labels → bundle ids for sticky metadata (not skill loading) |
 | `review` | Token budget, severity thresholds, inline cap, incremental lifecycle |
 | `skip` | Skip review for bots, labels, or title regexes |
 | `skills` | Consumer skill caps and exclusions |
@@ -40,7 +40,7 @@ Matched files are dropped entirely — they are not classified, packed, or sent 
 
 ## `labels`
 
-Per-label glob lists. Consumer entries **replace** that label's built-in globs (not merged). Used for deterministic classification, pack priority, and (indirectly) skill bundle selection.
+Per-label glob lists. Consumer entries **replace** that label's built-in globs (not merged). Used for deterministic classification and pack priority.
 
 Built-in labels (from packaged rules): `security`, `frontend`, `backend`, `data`, `infra`. Unmatched paths become `general`.
 
@@ -65,11 +65,13 @@ labels:
 
 ## `routing`
 
-Maps classification labels to skill **bundle** directory names. Default: each label routes to a bundle of the same name (`routing: {}`).
+Maps classification labels to skill **bundle** directory names for sticky metadata disclosure (`Bundles:` line in the review summary). Default: each label maps to a bundle of the same name (`routing: {}`).
+
+**Does not gate skill loading.** Skills are selected by each skill's `applies-to` path globs via `select_skills()` before classification runs.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `routing.<label>` | string (bundle id) | `<label>` | Bundle loaded from `.github/prevue/skills/<bundle>/` (plus built-ins) |
+| `routing.<label>` | string (bundle id) | `<label>` | Bundle id shown in metadata when label is present |
 
 ```yaml
 routing:
@@ -100,7 +102,7 @@ review:
   max_input_tokens: 120000
   output_reserve_tokens: 12000
   min_severity_to_comment: warning
-  min_severity_to_fail: error
+  min_severity_to_fail: null
   max_inline_comments: 10
   incremental: true
   resolve_outdated: true
