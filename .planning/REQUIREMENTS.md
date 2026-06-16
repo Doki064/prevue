@@ -41,7 +41,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **ENGN-01**: Engine adapters implement a pluggable interface: review context in → structured findings (file, line, severity, message, suggestion) out
 - [x] **ENGN-02**: GitHub Copilot CLI adapter runs headless on Actions runners (`copilot -p ... -s --no-ask-user`, auth via `COPILOT_GITHUB_TOKEN`, minimal `--allow-tool` set)
 - [x] **ENGN-03**: Engine output is schema-validated with retry-then-degrade handling; a parse failure produces a neutral check, never a crash or false block
-- [ ] **ENGN-04**: Additional engine adapters (Claude Code CLI, Cursor CLI, Gemini CLI) implement the same pluggable interface and are selectable via config, validating the engine abstraction beyond Copilot (promoted from CUST-03, 2026-06-13)
+- [x] **ENGN-04**: Additional engine adapters (Claude Code CLI, Cursor CLI, Gemini CLI) implement the same pluggable interface and are selectable via config, validating the engine abstraction beyond Copilot (promoted from CUST-03, 2026-06-13)
 
 ### Output
 
@@ -61,17 +61,24 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **SECR-01**: Workflow uses the `pull_request` trigger only (no `pull_request_target`); fork PRs are documented as unsupported in v1
 - [x] **SECR-02**: Untrusted PR text (titles, bodies, comments) is never interpolated into engine prompts as instructions; prompt-injection mitigations documented and tested
 
+### Review Lifecycle
+
+- [x] **LIFE-01**: Incremental review on new pushes (diff since last-reviewed SHA, stored in sticky-comment marker)
+  - *Note (added 2026-06-14, Phase 7 discussion):* today a new push re-classifies AND re-reviews the entire PR even when the new commit doesn't touch earlier files — redundant token spend. Scope **both** classification and review to the incremental diff since the last-reviewed SHA. The "unless the new change addresses a prior finding" case is covered by LIFE-02 (dedupe) + LIFE-04 (resolve outdated threads). Cross-file call-graph impact ("a change here references a prior finding's function over there") stays out of scope — see "Full codebase graph/indexing" under Out of Scope.
+  - *Promoted v2 → v1 on 2026-06-15: covered by Phase 8 (Incremental & Stateful Review Lifecycle).*
+- [x] **LIFE-02**: Comment dedupe using existing PR comments as engine context plus deterministic fingerprint backstop
+- [x] **LIFE-04**: Auto-resolve outdated inline threads when the underlying lines change
+  - *Phase 8 shipped conservative resolve (region overlap + incremental scope only). v2 gaps below.*
+
 ## v2 Requirements
 
 Deferred to future release. Tracked but not in current roadmap.
 
 ### Review Lifecycle
 
-- **LIFE-01**: Incremental review on new pushes (diff since last-reviewed SHA, stored in sticky-comment marker)
-  - *Note (added 2026-06-14, Phase 7 discussion):* today a new push re-classifies AND re-reviews the entire PR even when the new commit doesn't touch earlier files — redundant token spend. Scope **both** classification and review to the incremental diff since the last-reviewed SHA. The "unless the new change addresses a prior finding" case is covered by LIFE-02 (dedupe) + LIFE-04 (resolve outdated threads). Cross-file call-graph impact ("a change here references a prior finding's function over there") stays out of scope — see "Full codebase graph/indexing" under Out of Scope.
-- **LIFE-02**: Comment dedupe using existing PR comments as engine context plus deterministic fingerprint backstop
-- **LIFE-03**: Manual `/review` comment trigger for re-runs
-- **LIFE-04**: Auto-resolve outdated inline threads when the underlying lines change
+- ~~**LIFE-03**: Manual `/review` comment trigger for re-runs~~ → **promoted to v1 (Phase 8)** 2026-06-16. Manual `/prevue review` / `/prevue dismiss` / `/prevue resolve` via `issue_comment`, write-assoc gated (CONTEXT D-16/D-17). Its base-context-execution + write-gating security review is now an in-phase requirement.
+- ~~**LIFE-05**: Smarter inline thread lifecycle beyond conservative auto-resolve~~ → **promoted to v1 (Phase 8)** 2026-06-16. Full-review-authoritative auto-resolve + hybrid audited dismiss for persistent false positives (CONTEXT D-13/D-14/D-15).
+  - *Dogfood on Phase 8 (PR #16) exposed gaps: fixing code does not dismiss stale inline threads; resolve/delete only runs when (a) file is in incremental `delta_paths`, (b) hunk region changed this push, and (c) engine did not re-report same fingerprint — carried open-set priors keep threads alive. Persistent false positives (engine re-emits same fingerprint each run) never auto-clear. Closed by D-13 (full-review engine-silence resolve) + D-14/D-15 (gated, auto-expiring, PR-scoped dismiss).*
 
 ### Customization & Scale
 
@@ -79,6 +86,27 @@ Deferred to future release. Tracked but not in current roadmap.
 - **CUST-02**: GitHub native `suggestion` blocks in findings for one-click apply
 - ~~**CUST-03**: Second engine adapter (e.g. Claude Code, Gemini CLI) to validate the abstraction~~ → **promoted to ENGN-04 (v1, Phase 5)** 2026-06-13
 - **CUST-04**: Chunked map-reduce review for PRs exceeding the token budget
+- **CUST-05**: Surface classification labels as native GitHub PR labels (opt-in) — cheap reuse of the existing zero-token classifier output
+  - *Source (added 2026-06-15): Qodo PR-Agent `/generate_labels`.*
+
+### Review Quality
+
+- **QUAL-01**: Per-finding confidence/impact scoring with intra-review dedup — score each finding, suppress low-confidence ones below a configurable threshold, and collapse overlapping findings on the same lines so a single review never emits near-duplicate comments (noise control; distinct from LIFE-02, which dedupes *across* pushes)
+  - *Source (added 2026-06-15): Qodo PR-Agent `/improve` scores and self-filters suggestions.*
+- **QUAL-02**: Ticket/issue compliance check — when a PR links an issue, verify the diff plausibly satisfies the issue's acceptance criteria and flag gaps (reads linked issue text only; no extra write scope)
+  - *Source (added 2026-06-15): Qodo PR-Agent ticket-compliance tool.*
+
+### Token Optimization
+
+- **PERF-01**: Deterministic-tool-assisted prioritization — run cheap linters/SAST first and feed the engine only their hits plus surrounding context, shrinking review input and cutting false positives (extends the hybrid deterministic-first thesis from classification into the review step itself)
+  - *Source (added 2026-06-15): CodeRabbit linter integration; GitHub "token efficiency in agentic workflows" — the cheapest LLM call is the one you don't make.*
+- **PERF-02**: Diff packing/compression optimization — language-aware file prioritization, drop deleted-file bodies, and hunk-level compression before the engine call (complements CUST-04: compress first, split via map-reduce only if still over budget)
+  - *Source (added 2026-06-15): Qodo PR-Agent PR-compression strategy.*
+
+### PR Authoring (opt-in)
+
+- **DESC-01**: PR description assist — optionally generate a title/summary/walkthrough into the PR body, reusing the existing classification labels (opt-in; uses the `pull-requests: write` scope Prevue already holds, no new permissions)
+  - *Source (added 2026-06-15): Qodo PR-Agent `/describe`; CodeRabbit walkthroughs.*
 
 ## Out of Scope
 
@@ -95,6 +123,10 @@ Explicitly excluded. Documented to prevent scope creep.
 | Non-GitHub platforms (GitLab, Bitbucket) | Contradicts "GitHub reusable workflow" identity; engine adapter is the portability layer that matters |
 | Remote/central skill registry at runtime | Network/auth complexity; built-in + consumer-local skills cover v1 |
 | IDE / local pre-push review mode | CI-first; may come later |
+| Auto-approve / bot-submitted approving reviews | Escalates Prevue from an advisory pass/fail check (OUTP-03) to approving authority; a bot approval can satisfy branch protection and bypass human review intent — trust/safety regression (considered from PR-Agent self-review/auto-approve) |
+| Suggestion-application analytics / acceptance tracking | Needs a persistent backend to store which suggestions were applied across runs — same stateless-workflow objection as 👍/👎 learning (considered from PR-Agent suggestion analytics) |
+| Auto-commit of changelog/docstrings (`/update_changelog`, `/add_docs`) | Requires `contents: write`; same minimal-permissions objection as auto-fix (considered from PR-Agent authoring tools) |
+| Conversational per-line `/ask_line` chat | Same unbounded-token + prompt-injection objection as `/ask` above (considered from PR-Agent) |
 
 ## Traceability
 
@@ -119,7 +151,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | OUTP-03 | Phase 4 | Complete (04-05) |
 | NOIS-02 | Phase 4 | Complete (04-03) |
 | NOIS-03 | Phase 4 | Complete (04-03/04-05) |
-| ENGN-04 | Phase 5 | Pending |
+| ENGN-04 | Phase 5 | Complete |
 | WKFL-01 | Phase 6 | Complete |
 | WKFL-02 | Phase 6 | Complete |
 | WKFL-03 | Phase 6 | Complete |
@@ -130,13 +162,18 @@ Which phases cover which requirements. Updated during roadmap creation.
 | SECR-02 | Phase 7 | Complete |
 | OUTP-04 | Phase 7 | Complete |
 | DIFF-03 | Phase 7 | Complete |
+| LIFE-01 | Phase 8 | Complete |
+| LIFE-02 | Phase 8 | Complete |
+| LIFE-04 | Phase 8 | Complete |
+| LIFE-03 | Phase 8 | Complete (08-15) |
+| LIFE-05 | Phase 8 | Complete (08-15) |
 
 **Coverage:**
 
-- v1 requirements: 27 total
-- Mapped to phases: 27
+- v1 requirements: 30 total
+- Mapped to phases: 30
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-12*
-*Last updated: 2026-06-12 after roadmap creation*
+*Last updated: 2026-06-16 — LIFE-03 + LIFE-05 promoted to v1 (Phase 8 gap closure) to counter the false-positive carry-forward treadmill from the PR #16 dogfood*

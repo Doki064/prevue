@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: "Phase 07 shipped — PR #15"
-stopped_at: Completed 07-02-PLAN.md
-last_updated: "2026-06-14T23:26:57.102Z"
-last_activity: 2026-06-14
+status: executing
+stopped_at: Completed 08-15-PLAN.md
+last_updated: "2026-06-16T12:00:00.000Z"
+last_activity: 2026-06-16 -- Completed 08-15 /prevue command surface
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 7
-  total_plans: 33
-  completed_plans: 33
-  percent: 100
+  total_plans: 49
+  completed_plans: 45
+  percent: 90
 ---
 
 # Project State
@@ -21,62 +21,98 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-12)
 
 **Core value:** Optimal memory context and token usage when integrating with AI — load only the review skills the PR actually needs — while keeping review quality on par with a full-context review.
-**Current focus:** Phase 07 — customization-hardening
+**Current focus:** Phase 08 — incremental-stateful-review-lifecycle
 
 ## Current Position
 
-Phase: 07
-Plan: Not started
-Status: Phase 07 shipped — PR #15
-Last activity: 2026-06-14
+Phase: 08 (incremental-stateful-review-lifecycle) — EXECUTING
+Plan: 15 of 16 complete
+Status: Ready for 08-16
+Last activity: 2026-06-16 -- Completed 08-15 /prevue command surface
 
-Progress: [██████████████] 90% (6/7 phases)
+Progress: [██████████] 11/16 plans complete (Phase 08)
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 36
-- Average duration: 9 min
-- Total execution time: 1.28 hours
+- Total plans completed: 43
+- Average duration: 16 min (30 plans with recorded duration)
+- Total execution time: 8.0 hours (30 plans with recorded duration)
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 01-walking-skeleton | 6 | 44 min | 7 min |
-| 01 | 7 | - | - |
-| 02 | 3 | - | - |
-| 03 | 3 | - | - |
-| 3 | 3 | - | - |
-| 06 | 4 | - | - |
-| 07 | 7 | - | - |
+| 01 | 7 | 123 min | 18 min |
+| 02 | 3 | 22 min | 7 min |
+| 03 | 4 | 38 min | 10 min |
+| 04 | 5 | 107 min | 21 min |
+| 05 | 3 | 90 min | 30 min |
+| 06 | 4 | 48 min | 12 min |
+| 07 | 7 | 53 min | 8 min |
+| 08 | 10 | 133 min | 13 min |
 
 **Recent Trend:**
 
-- Last 5 plans: 04-03 (15 min), 04-04 (25 min), 04-05 (20 min)
-- Trend: steady
+- Last 5 plans: 07-03 (-), 07-04 (-), 07-05 (-), 07-06 (8 min), 07-07 (5 min)
 
-| Phase 02-zero-token-classification-routing P01 | 12min | 3 tasks | 18 files |
-| Phase 02-zero-token-classification-routing P02 | 8min | 2 tasks | 7 files |
-| Phase 02-zero-token-classification-routing P03 | 2min | 2 tasks | 6 files |
+**By Plan:**
 
-| Phase 04-structured-findings-merge-gate P02 | 35min | 3 tasks | 6 files |
-| Phase 04-structured-findings-merge-gate P03 | 15min | 3 tasks | 3 files |
-| Phase 04-structured-findings-merge-gate P04 | 25min | 3 tasks | 2 files |
-| Phase 04-structured-findings-merge-gate P05 | 20min | 3 tasks | 7 files |
-
-| Phase 07-customization-hardening P01 | 15min | 3 tasks | 12 files |
-| Phase 07-customization-hardening P02 | 25min | 3 tasks | 9 files |
+| Phase | Plan | Duration | Tasks | Files |
+|-------|------|----------|-------|-------|
+| 01-walking-skeleton-review-loop | P01 | 20min | 2 tasks | - |
+| 01-walking-skeleton-review-loop | P02 | 14min | 3 tasks | - |
+| 01-walking-skeleton-review-loop | P03 | 5min | 2 tasks | - |
+| 01-walking-skeleton-review-loop | P04 | 12min | 2 tasks | - |
+| 01-walking-skeleton-review-loop | P05 | 15min | 2 tasks | - |
+| 01-walking-skeleton-review-loop | P06 | 12min | 2 tasks | - |
+| 01-walking-skeleton-review-loop | P07 | 45min | 3 tasks | - |
+| 02-zero-token-classification-routing | P01 | 12min | 3 tasks | - |
+| 02-zero-token-classification-routing | P02 | 8min | 2 tasks | - |
+| 02-zero-token-classification-routing | P03 | 2min | 2 tasks | - |
+| 03-selective-skill-loading | P01 | 8min | 3 tasks | - |
+| 03-selective-skill-loading | P02 | 12min | - | - |
+| 03-selective-skill-loading | P03 | 10min | - | - |
+| 03-selective-skill-loading | P04 | 8min | 2 tasks | - |
+| 04-structured-findings-merge-gate | P01 | 12min | 2 tasks | - |
+| 04-structured-findings-merge-gate | P02 | 35min | 3 tasks | - |
+| 04-structured-findings-merge-gate | P03 | 15min | 3 tasks | - |
+| 04-structured-findings-merge-gate | P04 | 25min | 3 tasks | - |
+| 04-structured-findings-merge-gate | P05 | 20min | 3 tasks | - |
+| 05-multi-engine-adapter-support | P01 | 45min | - | - |
+| 05-multi-engine-adapter-support | P02 | 20min | - | - |
+| 05-multi-engine-adapter-support | P03 | 25min | - | - |
+| 06-reusable-workflow-hybrid-classification | P01 | 12min | 3 tasks | - |
+| 06-reusable-workflow-hybrid-classification | P02 | 1min | 2 tasks | - |
+| 06-reusable-workflow-hybrid-classification | P03 | 15min | 3 tasks | - |
+| 06-reusable-workflow-hybrid-classification | P04 | 20min | 2 tasks | - |
+| 07-customization-hardening | P01 | 15min | 3 tasks | - |
+| 07-customization-hardening | P02 | 25min | 3 tasks | - |
+| 07-customization-hardening | P03 | - | - | - |
+| 07-customization-hardening | P04 | - | - | - |
+| 07-customization-hardening | P05 | - | - | - |
+| 07-customization-hardening | P06 | 8min | 2 tasks | - |
+| 07-customization-hardening | P07 | 5min | 2 tasks | - |
 
 *Updated after each plan completion*
-| Phase 01-walking-skeleton-review-loop P05 | 15min | 2 tasks | 3 files |
-| Phase 01-walking-skeleton-review-loop P06 | 12min | 2 tasks | 5 files |
-| Phase 06-reusable-workflow-hybrid-classification P01 | 12min | 3 tasks | 9 files |
-| Phase 06-reusable-workflow-hybrid-classification P02 | 1min | 2 tasks | 5 files |
-| Phase 06-reusable-workflow-hybrid-classification P03 | 15min | 3 tasks | 10 files |
+| Phase 08-incremental-stateful-review-lifecycle P01 | 5 | 3 tasks | 8 files |
+| Phase 08-incremental-stateful-review-lifecycle P02 | 2 | 2 tasks | 4 files |
+| Phase 08-incremental-stateful-review-lifecycle P03 | 18 | 3 tasks | 6 files |
+| Phase 08-incremental-stateful-review-lifecycle P04 | 2 | 2 tasks | 4 files |
+| Phase 08-incremental-stateful-review-lifecycle P05 | 8 | 2 tasks | 2 files |
+| Phase 08-incremental-stateful-review-lifecycle P06 | 35 | 2 tasks | 3 files |
+| Phase 08-incremental-stateful-review-lifecycle P07 | 45 | 2 tasks | 5 files |
+| Phase 08-incremental-stateful-review-lifecycle P08 | 7 | 3 tasks | 3 files |
+| Phase 08-incremental-stateful-review-lifecycle P10 | 6 | 2 tasks | 4 files |
+| Phase 08-incremental-stateful-review-lifecycle P09 | 5 | 2 tasks | 2 files |
 
 ## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 8 added: Incremental & Stateful Review Lifecycle (LIFE-01/02/04)
+- Phase 8 edited: shortened title; LIFE-01/02/04 detail moved into Goal; dir slug → 08-incremental-stateful-review-lifecycle
 
 ### Decisions
 
@@ -130,6 +166,22 @@ Recent decisions affecting current work:
 - [07-02]: make_file_weight re-runs GitIgnoreSpec per file for pack priority (A4)
 - [07-02]: partial=True degrades would-be success to neutral (D-23)
 - [07-02]: No-fit PR reuses neutral skip path with budget disclosure (D-24)
+- [Phase 08-incremental-stateful-review-lifecycle]: LAST_SHA fixture deadbeef... equals compare_ahead merge_base for incremental scope tests — Downstream compare mocks need consistent last-reviewed SHA convention (08-01)
+- [Phase 08-incremental-stateful-review-lifecycle]: D-04 fingerprint: NFKC+casefold normalize, sha256(path|title)[:16], stdlib only — LIFE-02 deterministic dedupe backstop without new dependencies (08-01)
+- [Phase 08-incremental-stateful-review-lifecycle]: D-12 parse_severity_from_body: first-line badge anchor only, None fail-safe — no eval; inverse of SEVERITY_BADGES for gate-over-open-set (08-02)
+- [Phase 08-incremental-stateful-review-lifecycle]: D-09 finding_region_changed: C=3 conservative hunk overlap via unidiff PatchSet — fail-safe empty regions on bad/None patch (08-02)
+- [Phase 08-incremental-stateful-review-lifecycle]: D-01 marker SHA: hex-bound _MARKER_RE; legacy head-less → None; _is_prevue_sticky regex-anchored at body start (08-03)
+- [Phase 08-incremental-stateful-review-lifecycle]: D-03 decide_scope: repo.compare status + merge_base==last_sha for incremental; diverged/behind/mismatch → full (08-03)
+- [Phase 08-incremental-stateful-review-lifecycle]: D-11 open-set gate: caller union via fingerprint(path,title); apply_gate policy unchanged (08-03)
+- [Phase 08-incremental-stateful-review-lifecycle]: D-08/D-10 GraphQL: raw requests transport; resolve best-effort 403-skip; isResolved for caller idempotency (08-04)
+- [Phase 08-incremental-stateful-review-lifecycle]: D-07 known-issues: build_known_issues_block UNTRUSTED DATA fence, max_known_issues cap kwarg (08-04)
+- [Phase 08-incremental-stateful-review-lifecycle]: D-05/D-06 reconciliation: in_scope_paths stale scope; SEVERITY_RANK escalation-only .edit() (08-05)
+- [Phase 08-incremental-stateful-review-lifecycle]: D-01/D-11 orchestration: decide_scope before fetch; resolve-before-gate open set; noop skips engine; head_sha sticky marker (08-06)
+- [Phase 08-incremental-stateful-review-lifecycle]: resolveReviewThread 403 under pull-requests:write on live sandbox — best-effort skip ships LIFE-01/02; resolve_outdated opt-out documented; no contents:write (WKFL-04) (08-07)
+- [Phase 08-incremental-stateful-review-lifecycle]: Live UAT PASS incremental scoping + noop re-run on MaruDryFruits PR #21/#22 (08-07)
+- [Phase ?]: Rephrase-at-same-line open-set fix: keep carried prior when fingerprint differs at same location; post_inline_review _severity_escalated already handles quiet path — no fingerprint gating needed in comments.py (08-08)
+- [Phase ?]: Engine CLI install only (not checkout/uv sync) skipped on noop — prevue review step still runs for marker/check refresh via _finish_noop_review (08-10)
+- [Phase ?]: GFM _posted by Prevue_ replaces HTML sub INLINE_MARKER; LEGACY_INLINE_MARKER for backward-compat; deterministic incremental disclaimer in render_body (08-09)
 
 ### Pending Todos
 
@@ -154,9 +206,10 @@ Items acknowledged and carried forward from previous milestone close:
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
 | lint | Pre-existing ruff E501/I001 in test_copilot_adapter.py, test_positions.py | open | 04-05 |
+| lifecycle | LIFE-05 smarter inline thread resolve/dismiss (see REQUIREMENTS.md v2) | open | 08-ship |
 
 ## Session Continuity
 
-Last session: 2026-06-15T12:00:00.000Z
-Stopped at: Completed 07-02-PLAN.md
-Resume file: .planning/phases/07-customization-hardening/07-03-PLAN.md
+Last session: 2026-06-16T05:33:08.233Z
+Stopped at: Phase 08 LIFE-03+LIFE-05 gap-closure context gathered
+Resume file: .planning/phases/08-incremental-stateful-review-lifecycle/08-CONTEXT.md
