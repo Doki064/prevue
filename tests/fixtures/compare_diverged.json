@@ -1,0 +1,42 @@
+{
+  "url": "https://api.github.com/repos/owner/prevue/compare/deadbeef123456789012345678901234567890ab...abc123def456789012345678901234567890abcd",
+  "html_url": "https://github.com/owner/prevue/compare/deadbeef...abc123",
+  "permalink_url": "https://github.com/owner/prevue/compare/owner:deadbeef...owner:abc123",
+  "diff_url": "https://github.com/owner/prevue/compare/deadbeef...abc123.diff",
+  "patch_url": "https://github.com/owner/prevue/compare/deadbeef...abc123.patch",
+  "base_commit": {
+    "sha": "deadbeef123456789012345678901234567890ab",
+    "node_id": "C_deadbeef",
+    "commit": {
+      "message": "Stored last-reviewed SHA (no longer ancestor)",
+      "author": { "name": "Dev", "email": "dev@example.com", "date": "2026-06-14T10:00:00Z" }
+    }
+  },
+  "merge_base_commit": {
+    "sha": "base000def456789012345678901234567890abcd",
+    "node_id": "C_base000",
+    "commit": {
+      "message": "Force-pushed-away ancestor",
+      "author": { "name": "Dev", "email": "dev@example.com", "date": "2026-06-13T10:00:00Z" }
+    }
+  },
+  "status": "diverged",
+  "ahead_by": 2,
+  "behind_by": 1,
+  "total_commits": 2,
+  "commits": [],
+  "files": [
+    {
+      "sha": "bbcd538c8ea72a5e5a290ecef3ea1817ee92b564",
+      "filename": "src/prevue/github/diff.py",
+      "status": "modified",
+      "additions": 10,
+      "deletions": 3,
+      "changes": 13,
+      "blob_url": "https://api.github.com/repos/owner/prevue/git/blobs/bbcd538c8ea72a5e5a290ecef3ea1817ee92b564",
+      "raw_url": "https://github.com/owner/prevue/raw/abc123/src/prevue/github/diff.py",
+      "contents_url": "https://api.github.com/repos/owner/prevue/contents/src/prevue/github/diff.py?ref=abc123",
+      "patch": "@@ -1,5 +1,12 @@\n+# rewritten history\n"
+    }
+  ]
+}

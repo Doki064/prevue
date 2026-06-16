@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from prevue.github.positions import build_valid_lines, commentable_lines
-from prevue.models import ChangedFile
+from prevue.github.positions import (
+    build_valid_lines,
+    commentable_lines,
+    finding_region_changed,
+    regions_changed,
+)
+from prevue.models import ChangedFile, Finding
 
 MODIFIED_PATCH = """\
 @@ -10,3 +10,3 @@
@@ -92,3 +97,50 @@ class TestBuildValidLines:
         assert result["README.md"]["RIGHT"] == {1, 2, 3}
         assert result["big.bin"] == {"RIGHT": set(), "LEFT": set()}
         assert result["src/a.py"] == commentable_lines("src/a.py", MODIFIED_PATCH)
+
+
+class TestRegionsChanged:
+    def test_none_patch_returns_empty_regions(self) -> None:
+        assert regions_changed("src/foo.py", None) == []
+
+    def test_malformed_patch_returns_empty_regions(self) -> None:
+        assert regions_changed("src/foo.py", "@@ -1,1 +1,1 @@\n+broken") == []
+
+    def test_modified_patch_emits_hunk_target_range(self) -> None:
+        regions = regions_changed("src/foo.py", MODIFIED_PATCH)
+        assert regions == [(10, 12)]
+
+    def test_added_file_hunk_range(self) -> None:
+        regions = regions_changed("README.md", ADDED_PATCH)
+        assert regions == [(1, 3)]
+
+
+class TestFindingRegionChanged:
+    def _finding(self, line: int) -> Finding:
+        return Finding(
+            path="src/foo.py",
+            line=line,
+            severity="error",
+            title="Issue",
+            body="Details.",
+        )
+
+    def test_overlap_inside_hunk_returns_true(self) -> None:
+        regions = [(10, 12)]
+        assert finding_region_changed(self._finding(11), regions) is True
+
+    def test_within_context_window_of_edge_returns_true(self) -> None:
+        regions = [(10, 12)]
+        assert finding_region_changed(self._finding(7), regions, context=3) is True
+
+    def test_distant_change_returns_false(self) -> None:
+        regions = [(10, 12)]
+        assert finding_region_changed(self._finding(1), regions, context=3) is False
+
+    def test_empty_regions_returns_false(self) -> None:
+        assert finding_region_changed(self._finding(10), []) is False
+
+    def test_unparseable_patch_regions_fail_safe(self) -> None:
+        regions = regions_changed("src/foo.py", "not a valid patch at all")
+        assert regions == []
+        assert finding_region_changed(self._finding(10), regions) is False

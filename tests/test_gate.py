@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from prevue.fingerprint import fingerprint
 from prevue.gate import (
     GateResult,
     ReviewConfig,
@@ -36,6 +37,16 @@ def _finding(
         title=title,
         body="details",
     )
+
+
+def _open_set_findings(
+    current: list[Finding],
+    carried: list[Finding],
+    resolved: set[str],
+) -> list[Finding]:
+    """Mirror Plan 06 caller assembly: union minus resolved-this-run (D-11)."""
+    combined = current + carried
+    return [f for f in combined if fingerprint(f.path, f.title) not in resolved]
 
 
 def _valid_lines(*, path: str = "src/a.py", right: set[int] | None = None) -> dict:
@@ -84,6 +95,26 @@ class TestReviewConfig:
         path.write_text("review:\n  min_severity_to_fail: blocker\n")
         with pytest.raises(ValidationError):
             load_review_config(str(path))
+
+    def test_incremental_lifecycle_defaults(self) -> None:
+        cfg = ReviewConfig()
+        assert cfg.incremental is True
+        assert cfg.resolve_outdated is True
+        assert cfg.max_known_issues == 20
+
+    def test_unknown_incremental_knob_raises(self) -> None:
+        with pytest.raises(ValidationError):
+            ReviewConfig.model_validate({"incremental": True, "typo_knob": 1})
+
+    def test_load_review_config_incremental_knobs(self, tmp_path: Path) -> None:
+        path = tmp_path / "prevue.yml"
+        path.write_text(
+            "review:\n  incremental: false\n  resolve_outdated: false\n  max_known_issues: 5\n"
+        )
+        cfg = load_review_config(str(path))
+        assert cfg.incremental is False
+        assert cfg.resolve_outdated is False
+        assert cfg.max_known_issues == 5
 
 
 class TestConclude:
@@ -215,6 +246,43 @@ class TestApplyGate:
     def test_partial_coverage_neutral_via_apply_gate(self) -> None:
         gate = apply_gate([], ReviewConfig(), {}, partial=True)
         assert gate.conclusion == "neutral"
+
+
+class TestGateOpenSet:
+    def test_gate_open_set_carried_error_blocks_false_green_with_fail_threshold(self) -> None:
+        carried = _finding(severity="error", title="prior bug")
+        current: list[Finding] = []
+        open_findings = _open_set_findings(current, [carried], resolved=set())
+        cfg = ReviewConfig(min_severity_to_fail="error")
+        gate = apply_gate(open_findings, cfg, _valid_lines())
+        assert gate.conclusion == "failure"
+        assert gate.severity_counts["error"] == 1
+
+    def test_gate_open_set_carried_error_neutral_without_fail_threshold(self) -> None:
+        carried = _finding(severity="error", title="prior bug")
+        open_findings = _open_set_findings([], [carried], resolved=set())
+        gate = apply_gate(open_findings, ReviewConfig(), _valid_lines())
+        assert gate.conclusion == "neutral"
+        assert gate.conclusion != "success"
+
+    def test_gate_open_set_clean_current_with_carried_error(self) -> None:
+        current = [_finding(severity="info", title="minor note")]
+        carried = _finding(severity="error", title="prior bug")
+        open_findings = _open_set_findings(current, [carried], resolved=set())
+        cfg = ReviewConfig(min_severity_to_fail="error")
+        gate = apply_gate(open_findings, cfg, _valid_lines(right={10, 11}))
+        assert gate.conclusion == "failure"
+        assert gate.severity_counts["error"] == 1
+        assert gate.severity_counts["info"] == 1
+
+    def test_gate_open_set_excludes_resolved_carried_fingerprint(self) -> None:
+        carried = _finding(severity="error", title="fixed bug")
+        resolved = {fingerprint(carried.path, carried.title)}
+        open_findings = _open_set_findings([], [carried], resolved=resolved)
+        cfg = ReviewConfig(min_severity_to_fail="error")
+        gate = apply_gate(open_findings, cfg, _valid_lines())
+        assert gate.conclusion == "success"
+        assert gate.severity_counts["error"] == 0
 
 
 class TestVerdictStrings:
