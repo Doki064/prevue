@@ -1,0 +1,90 @@
+name: Prevue Command Run
+
+# Privileged run via repository_dispatch from prevue-command gate only.
+on:
+  repository_dispatch:
+    types: [prevue-command]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: prevue-command-${{ github.event.client_payload.issue_number }}
+  cancel-in-progress: true
+
+jobs:
+  command:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Write dispatch comment body
+        run: jq -r '.client_payload.comment_body' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/prevue-comment-body.txt"
+
+      - name: Checkout Prevue framework
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          repository: Doki064/prevue
+          ref: ${{ vars.PREVUE_REF || 'main' }}
+          path: .prevue
+          persist-credentials: false
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+          version: "0.11.21"
+
+      - name: Install dependencies
+        working-directory: .prevue
+        run: uv sync --locked
+
+      - name: Re-validate gate authorization
+        working-directory: .prevue
+        run: uv run prevue gate-revalidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVUE_REF: ${{ vars.PREVUE_REF || 'main' }}
+          PREVUE_ENGINE: ${{ vars.PREVUE_ENGINE || 'copilot-cli' }}
+
+      - name: Checkout consumer base ref
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: ${{ github.event.client_payload.base_sha }}
+          path: consumer
+          persist-credentials: false
+
+      - name: Install engine CLI
+        if: github.event.client_payload.needs_engine
+        env:
+          PREVUE_ENGINE: ${{ github.event.client_payload.engine }}
+        run: bash .prevue/.github/scripts/install-engine-cli.sh
+
+      - name: Materialize issue_comment event
+        working-directory: .prevue
+        run: uv run prevue materialize-comment-event
+        env:
+          PREVUE_ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
+          PREVUE_COMMENT_BODY_PATH: ${{ runner.temp }}/prevue-comment-body.txt
+          PREVUE_COMMENT_AUTHOR: ${{ github.event.client_payload.comment_author }}
+          PREVUE_COMMENT_AUTHOR_ASSOCIATION: ${{ github.event.client_payload.comment_author_association }}
+
+      - name: Prevue command
+        working-directory: .prevue
+        run: uv run prevue command
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PREVUE_STICKY_OWNER_LOGINS: ${{ vars.PREVUE_STICKY_OWNER_LOGINS }}
+          PREVUE_COMMENT_BODY_PATH: ${{ runner.temp }}/prevue-comment-body.txt
+          PREVUE_COMMENT_AUTHOR: ${{ github.event.client_payload.comment_author }}
+          PREVUE_ISSUE_NUMBER: ${{ github.event.client_payload.issue_number }}
+          PREVUE_PR_HEAD_SHA: ${{ github.event.client_payload.head_sha }}
+          PREVUE_ENGINE: ${{ github.event.client_payload.engine }}
+          PREVUE_CONSUMER_ROOT: ${{ github.workspace }}/consumer
+          PREVUE_CONFIG_PATH: .github/prevue.yml
+          COPILOT_GITHUB_TOKEN: >-
+            ${{ github.event.client_payload.engine == 'copilot-cli' && secrets.COPILOT_GITHUB_TOKEN || '' }}
+          ANTHROPIC_API_KEY: >-
+            ${{ github.event.client_payload.engine == 'claude-code-cli' && secrets.ANTHROPIC_API_KEY || '' }}
+          CURSOR_API_KEY: >-
+            ${{ github.event.client_payload.engine == 'cursor-cli' && secrets.CURSOR_API_KEY || '' }}

@@ -71,6 +71,11 @@ def _parse_dismiss_reason(parts: list[str], line: str, id_token: str) -> str | N
     return reason_text[:MAX_REASON_LEN]
 
 
+def needs_engine_for_body(body: str) -> bool:
+    cmd = parse_command(body)
+    return cmd is not None and cmd.verb == "review"
+
+
 def parse_command(body: str) -> Command | None:
     """Parse the first /prevue command line; return None on unknown or malformed input."""
     line = _find_command_line(body)

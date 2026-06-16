@@ -7,6 +7,7 @@ import sys
 
 from prevue.commands import run_command
 from prevue.engines.errors import AuthError, EngineFailure
+from prevue.gate_validate import run_gate_revalidate, run_materialize_comment_event
 from prevue.preflight import run_preflight_noop_check
 from prevue.review import ForkPrUnsupported, run_review
 
@@ -32,6 +33,18 @@ def main(argv: list[str] | None = None) -> int:
         help="Print true/false for workflow engine-install skip (same-SHA noop)",
     )
     preflight_parser.set_defaults(func=_cmd_preflight)
+
+    gate_revalidate_parser = subparsers.add_parser(
+        "gate-revalidate",
+        help="Revalidate repository_dispatch payload before privileged checkout",
+    )
+    gate_revalidate_parser.set_defaults(func=run_gate_revalidate)
+
+    materialize_parser = subparsers.add_parser(
+        "materialize-comment-event",
+        help="Write synthetic issue_comment event JSON for command dispatch",
+    )
+    materialize_parser.set_defaults(func=run_materialize_comment_event)
 
     args = parser.parse_args(argv)
     return args.func()

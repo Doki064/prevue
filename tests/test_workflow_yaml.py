@@ -14,6 +14,12 @@ REUSABLE_WORKFLOW = (
 COMMAND_WORKFLOW = (
     Path(__file__).resolve().parents[1] / ".github" / "workflows" / "prevue-command.yml"
 )
+COMMAND_RUN_WORKFLOW = (
+    Path(__file__).resolve().parents[1] / ".github" / "workflows" / "prevue-command-run.yml"
+)
+INSTALL_SCRIPT = (
+    Path(__file__).resolve().parents[1] / ".github" / "scripts" / "install-engine-cli.sh"
+)
 
 SETUP_UV_SHA = "fac544c07dec837d0ccb6301d7b5580bf5edae39"
 CHECKOUT_SHA = "df4cb1c069e1874edd31b4311f1884172cec0e10"
@@ -242,23 +248,23 @@ def test_setup_uv_is_sha_pinned_in_reusable() -> None:
 
 
 def test_copilot_cli_version_pinned_in_reusable() -> None:
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert f"npm install -g @github/copilot@{COPILOT_CLI_VERSION}" in script
     text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
-    assert f"npm install -g @github/copilot@{COPILOT_CLI_VERSION}" in text
-    assert "copilot-cli)" in text
+    assert "install-engine-cli.sh" in text
 
 
 def test_claude_install_uses_pinned_npm_package_in_reusable() -> None:
-    text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
-    assert f"npm install -g @anthropic-ai/claude-code@{CLAUDE_CODE_CLI_VERSION}" in text
-    assert "claude.ai/install.sh" not in text
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert f"npm install -g @anthropic-ai/claude-code@{CLAUDE_CODE_CLI_VERSION}" in script
+    assert "claude.ai/install.sh" not in script
 
 
 def test_cursor_install_uses_official_curl_installer_in_reusable() -> None:
-    text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
-    assert "cursor.com/install" in text
-    assert "npm install -g cursor-agent" not in text
-    assert "cursor.com/docs/cli" in text
-    assert "impostor" in text
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert "cursor.com/install" in script
+    assert "npm install -g cursor-agent" not in script
+    assert "PREVUE_CURSOR_INSTALL_SHA256" in script
 
 
 def test_engine_secrets_passed_directly_to_review_step_in_reusable() -> None:
@@ -281,7 +287,7 @@ def test_engine_secrets_passed_directly_to_review_step_in_reusable() -> None:
 def test_install_engine_cli_before_run_review_in_reusable() -> None:
     text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
     assert "Install engine CLI" in text
-    assert "copilot-cli)" in text
+    assert "install-engine-cli.sh" in text
     idx_install = text.index("Install engine CLI")
     idx_run = text.index("uv run prevue review")
     assert idx_install < idx_run
@@ -348,14 +354,22 @@ def test_engine_install_gated_on_preflight_noop_in_reusable() -> None:
     )
 
 
-def test_preflight_sticky_lookup_requires_marker_at_body_start() -> None:
-    """Preflight must match Python _is_prevue_sticky: marker anchored at body start."""
+def test_preflight_delegates_sticky_lookup_to_python() -> None:
+    """Preflight sticky resolution uses prevue preflight (trusted-owner parity)."""
     steps = _get_reusable_steps()
     preflight = next(s for s in steps if s.get("id") == "preflight")
     run_script = preflight.get("run", "")
-    assert "select(.body | test" in run_script
-    assert "prevue:sticky" in run_script
-    assert "| last |" in run_script
+    env = preflight.get("env") or {}
+    assert "uv run prevue preflight" in run_script
+    assert "repos/$REPO/issues/$PR_NUMBER/comments" not in run_script
+    assert env.get("PREVUE_STICKY_OWNER_LOGINS") == "${{ vars.PREVUE_STICKY_OWNER_LOGINS }}"
+
+
+def test_run_review_step_exports_sticky_owner_logins() -> None:
+    steps = _get_reusable_steps()
+    review_step = next(s for s in steps if s.get("run", "").strip() == "uv run prevue review")
+    env = review_step.get("env") or {}
+    assert env.get("PREVUE_STICKY_OWNER_LOGINS") == "${{ vars.PREVUE_STICKY_OWNER_LOGINS }}"
 
 
 def test_preflight_invokes_prevue_preflight_cli() -> None:
@@ -376,12 +390,126 @@ def test_reusable_workflow_no_secrets_inherit() -> None:
         assert "LIFE-04" in text or "resolveReviewThread" in text
 
 
+def test_command_workflow_early_write_permission_check() -> None:
+    """Read-only COLLABORATOR passes association filter but must fail before checkout."""
+    text = COMMAND_WORKFLOW.read_text(encoding="utf-8")
+    assert "Write access check" in text
+    assert "collaborators/" in text and "permission" in text
+    assert "write access" in text.lower()
+    assert "steps.write_check.outputs.allowed == 'true'" in text
+
+
+def test_install_engine_cli_uses_shared_script() -> None:
+    text = REUSABLE_WORKFLOW.read_text(encoding="utf-8")
+    assert ".github/scripts/install-engine-cli.sh" in text
+    assert "npm install -g @github/copilot@" in (
+        Path(__file__).resolve().parents[1] / ".github/scripts/install-engine-cli.sh"
+    ).read_text(encoding="utf-8")
+
+
+def test_command_workflow_consumer_checkout_uses_base_sha() -> None:
+    wf = yaml.safe_load(COMMAND_RUN_WORKFLOW.read_text(encoding="utf-8"))
+    consumer_refs: list[str] = []
+    for job in wf.get("jobs", {}).values():
+        for step in job.get("steps", []):
+            uses = step.get("uses", "")
+            if "checkout" not in uses:
+                continue
+            with_block = step.get("with") or {}
+            if str(with_block.get("path", "")) == "consumer":
+                consumer_refs.append(str(with_block.get("ref", "")))
+    assert consumer_refs == ["${{ github.event.client_payload.base_sha }}"]
+
+
+def test_command_gate_dispatches_privileged_run_after_pin() -> None:
+    text = COMMAND_WORKFLOW.read_text(encoding="utf-8")
+    write_idx = text.index("Write access check")
+    pinned_idx = text.index("Resolve pinned refs")
+    dispatch_idx = text.index("Dispatch privileged command run")
+    assert write_idx < pinned_idx < dispatch_idx
+    assert "repos/${REPOSITORY}/dispatches" in text
+    assert "prevue-command" in text
+    assert "path: .prevue" in text
+    assert "path: consumer" not in text
+
+
+def test_command_run_uses_repository_dispatch_only() -> None:
+    text = COMMAND_RUN_WORKFLOW.read_text(encoding="utf-8")
+    assert "repository_dispatch:" in text
+    assert "prevue-command" in text
+    assert "workflow_dispatch:" not in text
+
+
+def test_command_run_concurrency_cancels_superseded_runs_per_issue() -> None:
+    wf = yaml.safe_load(COMMAND_RUN_WORKFLOW.read_text(encoding="utf-8"))
+    concurrency = wf.get("concurrency", {})
+    expected_group = "prevue-command-${{ github.event.client_payload.issue_number }}"
+    assert concurrency.get("group") == expected_group
+    assert concurrency.get("cancel-in-progress") is True
+
+
+def test_command_run_checkouts_trusted_prevue_ref() -> None:
+    text = COMMAND_RUN_WORKFLOW.read_text(encoding="utf-8")
+    framework_block = text.split("Checkout Prevue framework", 1)[1].split("Set up uv", 1)[0]
+    assert "ref: ${{ vars.PREVUE_REF || 'main' }}" in framework_block
+    assert "client_payload.framework_sha" not in framework_block
+
+
+def test_command_workflow_exports_sticky_owner_logins() -> None:
+    wf = yaml.safe_load(COMMAND_RUN_WORKFLOW.read_text(encoding="utf-8"))
+    command_env = None
+    for job in wf.get("jobs", {}).values():
+        for step in job.get("steps", []):
+            if step.get("run", "").strip() == "uv run prevue command":
+                command_env = step.get("env") or {}
+    assert command_env is not None
+    assert command_env.get("PREVUE_STICKY_OWNER_LOGINS") == "${{ vars.PREVUE_STICKY_OWNER_LOGINS }}"
+
+
 def test_command_workflow_fork_guard_and_auth_filter() -> None:
     text = COMMAND_WORKFLOW.read_text(encoding="utf-8")
     assert "Fork PR guard" in text
     assert "COLLABORATOR" in text
     assert "OWNER" in text
-    assert CHECKOUT_SHA in text
-    assert SETUP_UV_SHA in text
     assert "secrets: inherit" not in text
-    assert "contents: write" in text
+    assert "actions: write" in text
+    run_text = COMMAND_RUN_WORKFLOW.read_text(encoding="utf-8")
+    assert "contents: write" in run_text
+
+
+def test_command_dispatch_passes_comment_body_via_repository_dispatch() -> None:
+    """Untrusted comment body must reach dispatch payload via file, not shell -f."""
+    text = COMMAND_WORKFLOW.read_text(encoding="utf-8")
+    dispatch = text.split("Dispatch privileged command run", 1)[1]
+    assert '--rawfile comment_body "${BODY_FILE}"' in dispatch
+    assert "gh workflow run prevue-command-run.yml" not in dispatch
+
+
+def test_command_run_revalidates_gate_authorization() -> None:
+    text = COMMAND_RUN_WORKFLOW.read_text(encoding="utf-8")
+    assert "Re-validate gate authorization" in text
+    assert "uv run prevue gate-revalidate" in text
+    assert "python3 - <<'PY'" not in text
+    body_idx = text.index("Write dispatch comment body")
+    checkout_idx = text.index("Checkout Prevue framework")
+    revalidate_idx = text.index("Re-validate gate authorization")
+    consumer_idx = text.index("Checkout consumer base ref")
+    engine_idx = text.index("Install engine CLI")
+    assert body_idx < checkout_idx
+    assert checkout_idx < revalidate_idx
+    assert revalidate_idx < consumer_idx
+    assert revalidate_idx < engine_idx
+
+
+def test_command_run_materializes_event_via_cli() -> None:
+    text = COMMAND_RUN_WORKFLOW.read_text(encoding="utf-8")
+    assert "uv run prevue materialize-comment-event" in text
+    assert "PREVUE_COMMENT_BODY_PATH" in text
+    assert "PREVUE_COMMENT_BODY:" not in text
+    assert "PREVUE_COMMENT_AUTHOR_ASSOCIATION" in text
+
+
+def test_command_gate_detects_needs_engine_via_python() -> None:
+    text = COMMAND_WORKFLOW.read_text(encoding="utf-8")
+    assert "needs_engine_for_body" in text
+    assert "grep -m1 '^/prevue '" not in text

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import tempfile
 
 from prevue.engines import flow
 from prevue.engines.base import EngineAdapter
-from prevue.engines.errors import AuthError, EngineFailure, sanitize_stderr
+from prevue.engines.errors import AuthError
 from prevue.engines.prompt import (
     CLASSIFY_TIMEOUT_SECONDS,
     MAX_PROMPT_BYTES,
@@ -16,6 +15,7 @@ from prevue.engines.prompt import (
     build_prompt,
     parse_classify_response,
 )
+from prevue.engines.subprocess_invoke import invoke_subprocess_text
 from prevue.models import ReviewRequest, ReviewResult
 
 
@@ -44,27 +44,14 @@ class CursorAdapter(EngineAdapter):
                 cmd.extend(["-m", model])
             consumer_root = os.environ.get("PREVUE_CONSUMER_ROOT", "")
             cwd = consumer_root if consumer_root and os.path.isdir(consumer_root) else None
-            try:
-                proc = subprocess.run(
-                    cmd,
-                    env=env,
-                    capture_output=True,
-                    text=True,
-                    timeout=budget_seconds,
-                    cwd=cwd,
-                )
-            except subprocess.TimeoutExpired as e:
-                raise EngineFailure(f"Cursor CLI timed out after {budget_seconds}s") from e
-
-            if proc.returncode != 0:
-                raise EngineFailure(
-                    f"Cursor CLI exited {proc.returncode}: {sanitize_stderr(proc.stderr, secret)}"
-                )
-
-            review_text = proc.stdout.strip()
-            if not review_text:
-                raise EngineFailure("Cursor CLI returned empty output")
-            return review_text
+            return invoke_subprocess_text(
+                cmd,
+                env=env,
+                secret=secret,
+                budget_seconds=budget_seconds,
+                cli_label="Cursor CLI",
+                cwd=cwd,
+            )
         finally:
             try:
                 os.unlink(tmp_path)

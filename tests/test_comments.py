@@ -65,7 +65,8 @@ def test_render_body_contains_marker_and_sections() -> None:
     assert "no verdict in v1" in body.lower()
     assert "### Review" in body
     assert "## Canned review" in body
-    assert "<details><summary>Metadata</summary>" in body
+    assert "### Metadata" in body
+    assert "<details><summary>Run details</summary>" in body
     assert "fake" in body
     assert "0.1" in body
 
@@ -101,7 +102,8 @@ def test_render_body_metadata_shows_labels_and_matched_globs() -> None:
     )
     body = render_body(_sample_result(), classification=classification)
 
-    assert "<details><summary>Metadata</summary>" in body
+    assert "### Metadata" in body
+    assert "<details><summary>Run details</summary>" in body
     assert "frontend" in body
     assert "**/*.tsx" in body
     assert "Bundles:" in body
@@ -831,8 +833,9 @@ class TestStickyWithGate:
         verdict_idx = body.index("### Verdict")
         review_idx = body.index("### Review")
         findings_idx = body.index("### Findings")
-        metadata_idx = body.index("<details><summary>Metadata</summary>")
+        metadata_idx = body.index("### Metadata")
         assert verdict_idx < review_idx < findings_idx < metadata_idx
+        assert body.index("<details><summary>Run details</summary>") > metadata_idx
         assert body.index("<details>") > findings_idx
 
     def test_verdict_mirrors_gate_helpers(self) -> None:
@@ -943,7 +946,7 @@ class TestStickyWithGate:
         assert "<details>" in body
         assert "`docs/readme.md`" in body
         assert "`assets/logo.png`" in body
-        assert body.index("### Coverage") < body.index("<details><summary>Metadata</summary>")
+        assert body.index("### Coverage") < body.index("### Metadata")
 
     def test_skipped_reason_html_escaped_in_summary(self) -> None:
         """A skipped_reason containing HTML cannot break out of the <summary> wrapper."""

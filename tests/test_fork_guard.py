@@ -25,7 +25,7 @@ def test_fork_pr_exits_early_without_side_effects(fork_github_env: None) -> None
 
     with (
         patch("prevue.review.fetch_diff") as mock_fetch,
-        patch("prevue.review.get_adapter") as mock_get_adapter,
+        patch("prevue.review.require_functional_adapter") as mock_get_adapter,
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.upsert_sticky") as mock_upsert,
     ):

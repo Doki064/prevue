@@ -9,7 +9,12 @@ from pathlib import Path
 import pytest
 import responses
 
-from prevue.github.client import CommentContext, load_comment_context, load_pr_context
+from prevue.github.client import (
+    CommentContext,
+    load_comment_context,
+    load_pr_context,
+    read_comment_body,
+)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 REPO_FULL = "owner/prevue"
@@ -95,6 +100,31 @@ def test_load_comment_context_from_issue_comment_event(
 
 
 @responses.activate
+def test_load_comment_context_reads_body_from_path(
+    comment_github_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    body_path = tmp_path / "comment.txt"
+    body_path.write_text("/prevue dismiss abc123def4567890", encoding="utf-8")
+    monkeypatch.delenv("PREVUE_COMMENT_BODY", raising=False)
+    monkeypatch.setenv("PREVUE_COMMENT_BODY_PATH", str(body_path))
+    _register_pull_for_comment_context(responses.mock)
+    assert load_comment_context().comment_body == "/prevue dismiss abc123def4567890"
+
+
+def test_read_comment_body_prefers_path_over_env(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    body_path = tmp_path / "comment.txt"
+    body_path.write_text("from file", encoding="utf-8")
+    monkeypatch.setenv("PREVUE_COMMENT_BODY", "from env")
+    monkeypatch.setenv("PREVUE_COMMENT_BODY_PATH", str(body_path))
+    assert read_comment_body() == "from file"
+
+
+@responses.activate
 def test_load_comment_context_no_pull_request_key_in_event(
     comment_github_env: None,
 ) -> None:
@@ -106,6 +136,27 @@ def test_load_comment_context_no_pull_request_key_in_event(
     _register_pull_for_comment_context(responses.mock)
     ctx = load_comment_context()
     assert ctx.head_sha == HEAD_SHA
+
+
+@responses.activate
+def test_load_comment_context_accepts_matching_pinned_head_sha(
+    comment_github_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PREVUE_PR_HEAD_SHA", HEAD_SHA)
+    _register_pull_for_comment_context(responses.mock)
+    assert load_comment_context().head_sha == HEAD_SHA
+
+
+@responses.activate
+def test_load_comment_context_rejects_moved_head_after_pin(
+    comment_github_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("PREVUE_PR_HEAD_SHA", "deadbeef" + "0" * 32)
+    _register_pull_for_comment_context(responses.mock)
+    with pytest.raises(ValueError, match="PR head moved after authorization"):
+        load_comment_context()
 
 
 @pytest.fixture

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import os
-import subprocess
 
 from prevue.engines import flow
 from prevue.engines.base import EngineAdapter
-from prevue.engines.errors import AuthError, EngineFailure, sanitize_stderr
+from prevue.engines.errors import AuthError
 from prevue.engines.prompt import (
     CLASSIFY_TIMEOUT_SECONDS,
     MAX_PROMPT_BYTES,
@@ -15,6 +14,7 @@ from prevue.engines.prompt import (
     build_prompt,
     parse_classify_response,
 )
+from prevue.engines.subprocess_invoke import invoke_subprocess_text
 from prevue.models import ReviewRequest, ReviewResult
 
 
@@ -36,27 +36,14 @@ class ClaudeCodeAdapter(EngineAdapter):
         cmd = ["claude", "--bare", "-p", "--output-format", "text"]
         if model:
             cmd.extend(["--model", model])
-        try:
-            proc = subprocess.run(
-                cmd,
-                input=prompt,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=budget_seconds,
-            )
-        except subprocess.TimeoutExpired as e:
-            raise EngineFailure(f"Claude Code CLI timed out after {budget_seconds}s") from e
-
-        if proc.returncode != 0:
-            raise EngineFailure(
-                f"Claude Code CLI exited {proc.returncode}: {sanitize_stderr(proc.stderr, secret)}"
-            )
-
-        review_text = proc.stdout.strip()
-        if not review_text:
-            raise EngineFailure("Claude Code CLI returned empty output")
-        return review_text
+        return invoke_subprocess_text(
+            cmd,
+            env=env,
+            secret=secret,
+            budget_seconds=budget_seconds,
+            cli_label="Claude Code CLI",
+            input_text=prompt,
+        )
 
     def review(self, req: ReviewRequest) -> ReviewResult:
         key = os.environ.get("ANTHROPIC_API_KEY", "")

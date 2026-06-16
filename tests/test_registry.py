@@ -5,7 +5,14 @@ from __future__ import annotations
 import pytest
 
 from prevue.engines.copilot_cli import CopilotCliAdapter
-from prevue.engines.registry import DEFAULT_ENGINE, ENGINES, UnknownEngineError, get_adapter
+from prevue.engines.registry import (
+    DEFAULT_ENGINE,
+    ENGINES,
+    NonFunctionalEngineError,
+    UnknownEngineError,
+    get_adapter,
+    require_functional_adapter,
+)
 from tests.engine_helpers import make_sample_request
 
 
@@ -32,3 +39,8 @@ def test_gemini_registered_and_raises_not_implemented() -> None:
     adapter = get_adapter("gemini-cli")
     with pytest.raises(NotImplementedError, match="ENGN-04"):
         adapter.review(make_sample_request())
+
+
+def test_require_functional_adapter_rejects_gemini_skeleton() -> None:
+    with pytest.raises(NonFunctionalEngineError, match="gemini-cli"):
+        require_functional_adapter("gemini-cli")

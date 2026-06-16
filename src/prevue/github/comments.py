@@ -27,12 +27,24 @@ from prevue.models import Finding, ReviewResult
 
 MARKER = "<!-- prevue:sticky -->"
 MARKER_WITH_SHA = "<!-- prevue:sticky head={sha} -->"
-METADATA_SUMMARY = "<details><summary>Metadata</summary>"
-LEGACY_METADATA_HEADING = "### Metadata"
+METADATA_HEADING = "### Metadata"
+METADATA_DETAILS_SUMMARY = "Run details"
+LEGACY_METADATA_DETAILS = "<details><summary>Metadata</summary>"
 _MARKER_RE = re.compile(r"<!--\s*prevue:sticky(?:\s+head=([0-9a-f]{7,40}))?\s*-->")
 INLINE_MARKER = "_posted by Prevue_"
 LEGACY_INLINE_MARKER = "<sub>posted by Prevue</sub>"
 BOT_LOGINS = {"github-actions[bot]", "github-actions"}
+
+
+def trusted_sticky_owner_logins() -> set[str]:
+    """Trusted sticky comment owners: default bots plus optional env extension."""
+    configured = {
+        value.strip()
+        for value in os.environ.get("PREVUE_STICKY_OWNER_LOGINS", "").split(",")
+        if value.strip()
+    }
+    return BOT_LOGINS | configured
+
 
 SEVERITY_BADGES = {"error": "🔴", "warning": "🟡", "info": "🔵"}
 BADGE_TO_SEVERITY = {badge: sev for sev, badge in SEVERITY_BADGES.items()}
@@ -334,7 +346,6 @@ def _escape_table_cell(value: str) -> str:
 
 
 def _format_finding_location(finding: Finding, placement: str) -> str:
-    """Location column/summary — omit bogus line numbers for position-fallback."""
     if placement == "position-fallback":
         return _escape_path_code(finding.path)
     return _escape_location(finding.path, finding.line)
@@ -577,7 +588,9 @@ def render_body(
         f"{details_section}"
         f"{coverage_section}"
         f"{render_dismiss_block(dismissals) if dismissals else ''}"
-        f"{METADATA_SUMMARY}\n\n{metadata}\n</details>\n"
+        f"{METADATA_HEADING}\n"
+        f"<details><summary>{METADATA_DETAILS_SUMMARY}</summary>\n\n"
+        f"{metadata}\n</details>\n"
     )
 
 
@@ -592,13 +605,16 @@ def _is_trusted_sticky_actor(comment) -> bool:
     if not isinstance(login, str):
         return False
 
-    # Optional runtime extension for dedicated app identities.
-    configured_logins = {
-        value.strip()
-        for value in os.environ.get("PREVUE_STICKY_OWNER_LOGINS", "").split(",")
-        if value.strip()
-    }
-    return login in (BOT_LOGINS | configured_logins)
+    return login in trusted_sticky_owner_logins()
+
+
+def read_newest_trusted_sticky_body(pr) -> str | None:
+    """Return the newest trusted Prevue sticky body, if any."""
+    newest: str | None = None
+    for comment in pr.get_issue_comments():
+        if _is_prevue_sticky(comment):
+            newest = comment.body or ""
+    return newest
 
 
 def _is_prevue_sticky(comment) -> bool:
