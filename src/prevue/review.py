@@ -26,18 +26,33 @@ from prevue.engines.base import EngineAdapter
 from prevue.engines.prompt import MAX_PROMPT_BYTES, build_prompt, estimate_prompt_overhead_tokens
 from prevue.engines.registry import get_adapter
 from prevue.engines.tokens import estimate_tokens
-from prevue.gate import GateResult, PlacedFinding, apply_gate
+from prevue.fingerprint import fingerprint
+from prevue.gate import SEVERITY_RANK, GateResult, PlacedFinding, apply_gate
 from prevue.github.checks import conclude_review_check, conclude_skip_check
 from prevue.github.client import get_authenticated_pull, get_repo, load_pr_context
 from prevue.github.comments import (
+    _MARKER_RE,
+    PriorFinding,
+    _derive_prior_findings_with_threads,
+    _is_prevue_sticky,
+    _upsert_marker_comment,
+    derive_prior_findings,
     inline_location_key,
+    parse_marker_sha,
     post_inline_review,
+    render_marker,
+    resolve_outdated_prior_findings,
     upsert_skip_note,
     upsert_sticky,
 )
-from prevue.github.diff import fetch_diff
-from prevue.github.positions import build_valid_lines
-from prevue.models import ReviewRequest
+from prevue.github.diff import (
+    decide_scope,
+    fetch_diff,
+    fetch_diff_in_scope,
+    regions_from_comparison,
+)
+from prevue.github.positions import build_valid_lines, finding_region_changed, regions_changed
+from prevue.models import Finding, ReviewRequest
 from prevue.pack import make_file_weight, pack_files, readmit_files, trim_packed_files
 from prevue.skills.loader import assemble_instructions, load_skills, select_skills
 from prevue.skip import should_skip
@@ -92,6 +107,171 @@ def _inline_key(finding) -> tuple[str, int, str]:
     return inline_location_key(finding.path, finding.line, finding.side)
 
 
+def _read_sticky_body(pr) -> str | None:
+    """Return the trusted Prevue sticky comment body, if any."""
+    for comment in pr.get_issue_comments():
+        if _is_prevue_sticky(comment):
+            return comment.body or ""
+    return None
+
+
+def _refresh_marker_body(body: str, head_sha: str) -> str:
+    """Replace sticky marker prefix with head=<sha> (D-01)."""
+    new_marker = render_marker(head_sha)
+    if _MARKER_RE.search(body):
+        return _MARKER_RE.sub(new_marker, body, count=1)
+    return f"{new_marker}\n{body}"
+
+
+def _prior_to_finding(prior: PriorFinding) -> Finding:
+    return Finding(
+        path=prior.path,
+        line=prior.line,
+        side=prior.side,  # type: ignore[arg-type]
+        severity=prior.severity or "info",  # type: ignore[arg-type]
+        title=prior.title,
+        body="",
+    )
+
+
+def _dedupe_findings_by_location(findings: list[Finding]) -> list[Finding]:
+    """One open-set entry per (path, line, side); keep higher-severity on ties."""
+    best: dict[tuple[str, int, str], Finding] = {}
+    order: list[tuple[str, int, str]] = []
+    for finding in findings:
+        key = (finding.path, finding.line, finding.side)
+        if key not in best:
+            order.append(key)
+            best[key] = finding
+            continue
+        if SEVERITY_RANK[finding.severity] < SEVERITY_RANK[best[key].severity]:
+            best[key] = finding
+    return [best[key] for key in order]
+
+
+def _open_set_findings(
+    current: list[Finding],
+    priors: list[PriorFinding],
+    resolved_fingerprints: set[str],
+) -> list[Finding]:
+    """Union(current, carried-unresolved priors) minus resolved-this-run (D-11).
+
+    Rephrase-at-same-line contract (LIFE-02 / gap #1):
+    When a carried prior's (path, line, side) matches a current finding but the
+    fingerprints DIFFER (engine rephrased the title), the live inline thread keeps
+    the OLD title (D-06 quiet-by-default). The open-set must mirror that — keep the
+    carried prior and exclude the current finding(s) at that location so the sticky
+    Findings row shows the same title as the live inline comment.
+
+    Exception: severity escalation (warning→error, etc.) at the same location keeps
+    the current finding so the gate and inline refresh path can flag the upgrade.
+    """
+    current_fps = {fingerprint(f.path, f.title) for f in current}
+    current_by_loc = {(f.path, f.line, f.side): f for f in current}
+    current_locs = set(current_by_loc)
+    # Locations (path, line, side) where a carried prior takes precedence over the
+    # current engine output (rephrase-at-same-line: live inline unchanged, same
+    # (path,line,side) but different fingerprint).
+    rephrase_locations: set[tuple[str, int, str]] = set()
+    carried: list[Finding] = []
+    for prior in priors:
+        if prior.fingerprint in resolved_fingerprints or prior.fingerprint in current_fps:
+            # True duplicate or resolved: drop the prior (current wins / it's gone).
+            continue
+        loc = (prior.path, prior.line, prior.side)
+        if loc in current_locs:
+            current_f = current_by_loc[loc]
+            prior_rank = SEVERITY_RANK.get(prior.severity or "info", 2)
+            current_rank = SEVERITY_RANK[current_f.severity]
+            if current_rank < prior_rank:
+                # Escalation at same line: current wins; inline refresh path applies.
+                continue
+            if fingerprint(current_f.path, current_f.title) != prior.fingerprint:
+                rephrase_locations.add(loc)
+        carried.append(_prior_to_finding(prior))
+    # Exclude current findings at rephrase-collision locations — the carried prior
+    # is already in `carried` and is the authoritative entry for that location.
+    filtered_current = [f for f in current if (f.path, f.line, f.side) not in rephrase_locations]
+    return _dedupe_findings_by_location(filtered_current + carried)
+
+
+def _build_known_issues_items(
+    priors: list[PriorFinding],
+    in_scope_paths: set[str],
+    max_n: int,
+    *,
+    exclude_fingerprints: set[str] | None = None,
+) -> list[tuple[str, int, str]]:
+    if max_n <= 0:
+        return []
+    excluded = exclude_fingerprints or set()
+    return [
+        (prior.path, prior.line, prior.title)
+        for prior in priors
+        if prior.path in in_scope_paths and prior.fingerprint not in excluded
+    ][:max_n]
+
+
+def _fingerprints_outdated_by_region(
+    priors: list[PriorFinding],
+    in_scope_paths: set[str],
+    regions_by_path: dict[str, list[tuple[int, int]]],
+) -> set[str]:
+    """Priors whose line region overlaps the incremental delta (candidates for resolve)."""
+    outdated: set[str] = set()
+    for prior in priors:
+        if prior.path not in in_scope_paths:
+            continue
+        stub = Finding(
+            path=prior.path,
+            line=prior.line,
+            side=prior.side,  # type: ignore[arg-type]
+            severity=prior.severity or "info",  # type: ignore[arg-type]
+            title=prior.title,
+            body="",
+        )
+        if finding_region_changed(stub, regions_by_path.get(prior.path, [])):
+            outdated.add(prior.fingerprint)
+    return outdated
+
+
+def _finish_noop_review(
+    pr,
+    repo,
+    *,
+    head_sha: str,
+    review_cfg,
+    owner: str,
+    repo_name: str,
+) -> None:
+    """Identical re-run: refresh marker/check without engine or resolve (Pitfall 3)."""
+    priors = derive_prior_findings(pr, owner=owner, repo=repo_name)
+    # Placement is unused in the noop path — gate is verdict-only (conclusion +
+    # severity counts).  Passing empty valid_lines is intentional: gate.inline
+    # and gate.placed are never rendered here, so all carried priors landing on
+    # position-fallback is harmless.  If this path is ever extended to render a
+    # fresh sticky from gate.placed, build valid_lines from the diff first.
+    gate = apply_gate(
+        _open_set_findings([], priors, set()),
+        review_cfg,
+        {},
+    )
+    sticky_body = _read_sticky_body(pr)
+    if sticky_body:
+        body = _refresh_marker_body(sticky_body, head_sha)
+    else:
+        body = f"{render_marker(head_sha)}\n## Prevue Review\n\n_Review up to date._"
+    sticky = _upsert_marker_comment(pr, body)
+    check_published = conclude_review_check(
+        repo,
+        head_sha,
+        gate,
+        sticky_url=getattr(sticky, "html_url", None),
+    )
+    if not check_published:
+        raise RuntimeError("Failed to publish review check run")
+
+
 class ForkPrUnsupported(Exception):
     """Raised when head repo differs from base repo (SECR-01)."""
 
@@ -130,10 +310,42 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
             raise RuntimeError("Failed to publish skip check run")
         return
 
-    diff = fetch_diff()
+    repo = get_repo(ctx)
+    head_sha = pr.head.sha
+    owner, repo_name = ctx.repo_full.split("/", 1)
+    sticky_body = _read_sticky_body(pr)
+    last_sha = parse_marker_sha(sticky_body) if sticky_body else None
+    marker_for_scope = last_sha if review_cfg.incremental else None
+    scope, in_scope_paths, comparison = decide_scope(repo, marker_for_scope, head_sha)
+
+    if scope == "noop":
+        _finish_noop_review(
+            pr,
+            repo,
+            head_sha=head_sha,
+            review_cfg=review_cfg,
+            owner=owner,
+            repo_name=repo_name,
+        )
+        return
+
+    if scope == "incremental" and in_scope_paths is not None:
+        diff = fetch_diff_in_scope(in_scope_paths)
+    else:
+        diff = fetch_diff()
     reduced, dropped = filter_diff(diff, ruleset.ignore_globs)
 
     if not reduced.files:
+        if scope == "incremental":
+            _finish_noop_review(
+                pr,
+                repo,
+                head_sha=diff.head_sha,
+                review_cfg=review_cfg,
+                owner=owner,
+                repo_name=repo_name,
+            )
+            return
         upsert_skip_note(pr, dropped_count=len(dropped))
         skip_published = conclude_skip_check(
             get_repo(ctx), diff.head_sha, dropped_count=len(dropped)
@@ -292,16 +504,54 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
             raise RuntimeError("Failed to publish skip check run")
         return
 
+    # Derive priors and known_items early so the byte-limit guard below accounts for
+    # the known-issues block that will be added to the actual engine prompt on
+    # incremental runs (without this, the guard under-counts on near-limit prompts).
+    # _derive_prior_findings_with_threads returns the fetched threads alongside priors
+    # so resolve_outdated_prior_findings can reuse them (WR-03: avoid double round-trip).
+    reviewed_paths = {f.path for f in packed_files}
+    delta_paths = (
+        in_scope_paths if scope == "incremental" and in_scope_paths is not None else reviewed_paths
+    )
+    priors, fetched_threads = _derive_prior_findings_with_threads(pr, owner=owner, repo=repo_name)
+    incremental_regions = (
+        regions_from_comparison(comparison, delta_paths) if scope == "incremental" else {}
+    )
+    exclude_from_known = (
+        _fingerprints_outdated_by_region(priors, delta_paths, incremental_regions)
+        if scope == "incremental"
+        else set()
+    )
+    known_items = (
+        _build_known_issues_items(
+            priors,
+            reviewed_paths,
+            review_cfg.max_known_issues,
+            exclude_fingerprints=exclude_from_known,
+        )
+        if scope == "incremental"
+        else []
+    )
+
     # Guard against estimate drift BEFORE the LLM classification fallback runs — the
-    # final prompt bytes depend only on instructions + packed_files, both finalized
-    # above. Checking here avoids spending classify tokens on a prompt we will skip.
-    # (bytes/4 token heuristics can undercount non-ASCII content.)
+    # final prompt bytes depend only on instructions + packed_files + known_items, all
+    # finalized above. Checking here avoids spending classify tokens on a prompt we
+    # will skip. (bytes/4 token heuristics can undercount non-ASCII content.)
     prompt_probe = ReviewRequest(
         diff=reduced.model_copy(update={"files": packed_files}),
         instructions=instructions,
         budget_seconds=300,
     )
-    if len(build_prompt(prompt_probe).encode("utf-8")) > MAX_PROMPT_BYTES:
+    if (
+        len(
+            build_prompt(
+                prompt_probe,
+                known_issues=known_items,
+                max_known_issues=review_cfg.max_known_issues,
+            ).encode("utf-8")
+        )
+        > MAX_PROMPT_BYTES
+    ):
         upsert_skip_note(pr, reason="PR too large to review within budget")
         skip_published = conclude_skip_check(
             get_repo(ctx),
@@ -356,14 +606,18 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
     result_cls.dropped_count = len(dropped)
 
     packed_diff = reduced.model_copy(update={"files": packed_files})
-
-    # Prompt bytes were already validated against MAX_PROMPT_BYTES before classify;
-    # instructions and packed_files are unchanged since, so no re-check is needed.
+    # Prompt bytes were already validated against MAX_PROMPT_BYTES before classify
+    # (including known_items overhead); instructions and packed_files are unchanged
+    # since, so no re-check is needed.
+    # known_issues/max_known_issues are carried on ReviewRequest so flow.review_with_retry
+    # passes them directly to build_prompt — no module-level mutation needed (WR-05).
     req = ReviewRequest(
         diff=packed_diff,
         instructions=instructions,
         budget_seconds=300,
         model=os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL")),
+        known_issues=known_items,
+        max_known_issues=review_cfg.max_known_issues,
     )
 
     result = engine.review(req)
@@ -371,16 +625,109 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
 
     # EngineFailure / CopilotAuthError raise before gate (Phase 1 D-09 red run, no check).
     # Parse degrade flows through gate as neutral (D-04) — distinct failure classes.
+    current_fps = {fingerprint(f.path, f.title) for f in result.findings}
+    if scope == "incremental" and comparison is not None:
+        regions_by_path = regions_from_comparison(comparison, delta_paths)
+    else:
+        regions_by_path = {f.path: regions_changed(f.path, f.patch) for f in packed_files}
+    resolved_fps: set[str] = set()
+    if review_cfg.resolve_outdated:
+        resolved_fps = resolve_outdated_prior_findings(
+            pr,
+            in_scope_paths=delta_paths,
+            regions_by_path=regions_by_path,
+            current_fingerprints=current_fps,
+            owner=owner,
+            repo=repo_name,
+            threads=fetched_threads,  # reuse already-fetched threads (WR-03)
+        )
+
     valid_lines = build_valid_lines(packed_files)
     gate = apply_gate(
-        result.findings,
+        _open_set_findings(result.findings, priors, resolved_fps),
         review_cfg,
         valid_lines,
         degraded=result.degraded,
         dropped_findings=result.dropped_findings,
         partial=bool(skipped_files),
     )
-    failed_inline_keys = post_inline_review(pr, gate)
+    engine_tokens = result.engine_meta.get("tokens")
+    engine_tokens = engine_tokens if isinstance(engine_tokens, dict) else {}
+    # Findings carried from outside the incremental diff (paths not in this diff's scope).
+    carried_open_count = (
+        sum(1 for pf in gate.placed if pf.finding.path not in reviewed_paths)
+        if scope == "incremental" and reviewed_paths
+        else 0
+    )
+    sticky_base_kwargs = {
+        "classification": result_cls,
+        "loaded_skills": [
+            f"{s.name} ({s.bundle})"
+            if s.source == "builtin"
+            else f"{s.name} ({s.bundle}, consumer)"
+            for s in matched
+        ],
+        "classification_disclosure": classification_disclosure,
+        "skipped_paths": skipped_paths,
+        "skipped_reason": skipped_reason,
+        "skill_ratios": skill_ratios,
+        "token_meta": {
+            **engine_tokens,
+            "classify": classify_tokens,
+            # review provenance comes from the engine's own "estimated" flag;
+            # classify is always a bytes/4 estimate (estimate_classify_tokens).
+            "review_estimated": bool(engine_tokens.get("estimated")),
+            "classify_estimated": True,
+        },
+        "reviewed_file_count": len(packed_files),
+        "not_reviewed_file_count": len(skipped_files),
+        "cap_skipped": cap_skipped,
+        "scope": scope if scope in ("incremental", "full") else None,
+        "carried_open_count": carried_open_count,
+    }
+
+    def _publish_sticky(gate_for_sticky: GateResult) -> tuple[object | None, bool]:
+        try:
+            sticky_comment = upsert_sticky(
+                pr,
+                result,
+                head_sha=diff.head_sha,
+                gate=gate_for_sticky,
+                **sticky_base_kwargs,
+            )
+        except GithubException as exc:
+            status = getattr(exc, "status", "?")
+            print(
+                f"prevue: sticky comment upsert failed (HTTP {status}), retrying",
+                file=sys.stderr,
+            )
+            try:
+                sticky_comment = upsert_sticky(
+                    pr,
+                    result,
+                    head_sha=diff.head_sha,
+                    gate=gate_for_sticky,
+                    **sticky_base_kwargs,
+                )
+            except GithubException as retry_exc:
+                print(
+                    f"prevue: sticky retry failed (HTTP {getattr(retry_exc, 'status', '?')})",
+                    file=sys.stderr,
+                )
+                return None, True
+            return sticky_comment, False
+        return sticky_comment, False
+
+    sticky, sticky_failed = _publish_sticky(gate)
+    failed_inline_keys = post_inline_review(
+        pr,
+        gate,
+        in_scope_paths=reviewed_paths,
+        regions_by_path=regions_by_path,
+        owner=owner,
+        repo=repo_name,
+        resolve_outdated=False,
+    )
     if failed_inline_keys and gate.inline:
         downgraded = [
             PlacedFinding(
@@ -404,52 +751,7 @@ def run_review(*, adapter: EngineAdapter | None = None) -> None:
             dropped_findings=gate.dropped_findings,
             partial=gate.partial,
         )
-    engine_tokens = result.engine_meta.get("tokens")
-    engine_tokens = engine_tokens if isinstance(engine_tokens, dict) else {}
-    sticky_kwargs = {
-        "classification": result_cls,
-        "loaded_skills": [
-            f"{s.name} ({s.bundle})"
-            if s.source == "builtin"
-            else f"{s.name} ({s.bundle}, consumer)"
-            for s in matched
-        ],
-        "gate": gate,
-        "classification_disclosure": classification_disclosure,
-        "skipped_paths": skipped_paths,
-        "skipped_reason": skipped_reason,
-        "skill_ratios": skill_ratios,
-        "token_meta": {
-            **engine_tokens,
-            "classify": classify_tokens,
-            # review provenance comes from the engine's own "estimated" flag;
-            # classify is always a bytes/4 estimate (estimate_classify_tokens).
-            "review_estimated": bool(engine_tokens.get("estimated")),
-            "classify_estimated": True,
-        },
-        "reviewed_file_count": len(packed_files),
-        "not_reviewed_file_count": len(skipped_files),
-        "cap_skipped": cap_skipped,
-    }
-    try:
-        sticky = upsert_sticky(pr, result, **sticky_kwargs)
-    except GithubException as exc:
-        print(
-            f"prevue: sticky comment upsert failed (HTTP {getattr(exc, 'status', '?')}), retrying",
-            file=sys.stderr,
-        )
-        try:
-            sticky = upsert_sticky(pr, result, **sticky_kwargs)
-            sticky_failed = False
-        except GithubException as retry_exc:
-            print(
-                f"prevue: sticky retry failed (HTTP {getattr(retry_exc, 'status', '?')})",
-                file=sys.stderr,
-            )
-            sticky = None
-            sticky_failed = True
-    else:
-        sticky_failed = False
+        sticky, sticky_failed = _publish_sticky(gate)
     check_published = conclude_review_check(
         get_repo(ctx),
         diff.head_sha,
