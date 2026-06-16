@@ -7,6 +7,8 @@ on:
     branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
 
+# Per-PR concurrency: cancel in-flight wait-ci/review on synchronize so only the
+# latest head SHA is reviewed (intentional; not per-commit overlapping runs).
 concurrency:
   group: prevue-${{ github.event.pull_request.number }}
   cancel-in-progress: true

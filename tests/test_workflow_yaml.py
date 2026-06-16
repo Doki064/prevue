@@ -41,6 +41,12 @@ def test_ci_local_script_exists_and_is_executable() -> None:
     assert os.access(script, os.X_OK)
 
 
+def test_dogfood_concurrency_cancels_superseded_runs_per_pr() -> None:
+    concurrency = _load_review_workflow().get("concurrency", {})
+    assert concurrency.get("group") == "prevue-${{ github.event.pull_request.number }}"
+    assert concurrency.get("cancel-in-progress") is True
+
+
 def test_dogfood_triggers_on_pull_request_and_waits_for_ci() -> None:
     wf = _load_review_workflow()
     on = wf.get("on") or wf.get(True)
