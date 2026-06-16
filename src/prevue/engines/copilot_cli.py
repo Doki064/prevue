@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import subprocess
 
 from prevue.engines import flow
 from prevue.engines.base import EngineAdapter
@@ -20,6 +19,8 @@ from prevue.engines.prompt import (
     build_prompt,
     parse_classify_response,
 )
+from prevue.engines.subprocess_invoke import invoke_subprocess_text
+from prevue.models import ReviewRequest, ReviewResult
 
 __all__ = [
     "CopilotAuthError",
@@ -34,9 +35,7 @@ __all__ = [
     "_sanitize_stderr",
     "build_prompt",
 ]
-from prevue.models import ReviewRequest, ReviewResult
 
-# Re-export shims — legacy import sites in tests and downstream code.
 _sanitize_stderr = sanitize_stderr
 
 
@@ -54,28 +53,14 @@ class CopilotCliAdapter(EngineAdapter):
         token: str,
         budget_seconds: int,
     ) -> str:
-        cmd = ["copilot", "-s", "--no-ask-user"]
-        try:
-            proc = subprocess.run(
-                cmd,
-                input=prompt,
-                env=env,
-                capture_output=True,
-                text=True,
-                timeout=budget_seconds,
-            )
-        except subprocess.TimeoutExpired as e:
-            raise EngineFailure(f"Copilot CLI timed out after {budget_seconds}s") from e
-
-        if proc.returncode != 0:
-            raise EngineFailure(
-                f"Copilot CLI exited {proc.returncode}: {sanitize_stderr(proc.stderr, token)}"
-            )
-
-        review_text = proc.stdout.strip()
-        if not review_text:
-            raise EngineFailure("Copilot CLI returned empty output")
-        return review_text
+        return invoke_subprocess_text(
+            ["copilot", "-s", "--no-ask-user"],
+            env=env,
+            secret=token,
+            budget_seconds=budget_seconds,
+            cli_label="Copilot CLI",
+            input_text=prompt,
+        )
 
     def review(self, req: ReviewRequest) -> ReviewResult:
         token = os.environ.get("COPILOT_GITHUB_TOKEN", "")
