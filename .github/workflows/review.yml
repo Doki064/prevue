@@ -1,37 +1,121 @@
 name: Prevue Review
 
-# Dogfood: run only after CI completes successfully on the PR (not on every push event).
-on:
-  workflow_run:
-    # zizmor: ignore[dangerous-triggers] - gated: CI success, pull_request only, same-repo, non-draft
-    workflows: [CI]
-    types: [completed]
-
+# Dogfood: pull_request attaches to PR; wait-ci gates on pull_request CI workflow (ci.yml).
+# ci.yml must run on pull_request for the PR branch (no path-only skip); poll uses head SHA.
 # LIFE-04 resolveReviewThread requires contents:write — see prevue-review.yml / consumer-setup.md.
-permissions:
-  contents: write
-  pull-requests: write
-  checks: write
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
 
+# Per-PR concurrency: cancel in-flight wait-ci/review on synchronize so only the
+# latest head SHA is reviewed (intentional; not per-commit overlapping runs).
 concurrency:
-  # push + pull_request CI both finish per commit; separate groups so push workflow_run
-  # cannot cancel an in-progress pull_request review (push run skips on job if).
-  group: prevue-${{ github.event.workflow_run.event }}-${{ github.event.workflow_run.head_sha }}
+  group: prevue-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  review:
+  wait-ci:
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.head_repository.full_name == github.repository &&
-      github.event.workflow_run.pull_requests[0].draft != true
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft != true
+    permissions:
+      actions: read
+    runs-on: ubuntu-latest
+    outputs:
+      ci_ok: ${{ steps.wait.outputs.ci_ok }}
+    steps:
+      - name: Wait for pull_request CI workflow
+        id: wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # gh run list --commit matches pull_request CI headSha (branch tip), not merge commit.
+          CI_POLL_SHA: ${{ github.event.pull_request.head.sha }}
+          CI_BRANCH: ${{ github.head_ref }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! gh workflow view ci.yml --repo "$REPOSITORY" >/dev/null 2>&1; then
+            echo "Workflow ci.yml not found; skipping Prevue review." >&2
+            echo "ci_ok=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          fetch_ci_runs() {
+            local attempt=1
+            while [ "$attempt" -le 3 ]; do
+              if gh run list \
+                --repo "$REPOSITORY" \
+                --workflow ci.yml \
+                --commit "$CI_POLL_SHA" \
+                --branch "$CI_BRANCH" \
+                --event pull_request \
+                --limit 50 \
+                --json status,conclusion,event,createdAt 2>/dev/null; then
+                return 0
+              fi
+              echo "gh run list failed (attempt ${attempt}/3); retrying in $((attempt * 5))s..." >&2
+              sleep $((attempt * 5))
+              attempt=$((attempt + 1))
+            done
+            return 1
+          }
+          deadline=$((SECONDS + 1800))
+          while [ "$SECONDS" -lt "$deadline" ]; do
+            if ! run=$(fetch_ci_runs); then
+              echo "gh run list unavailable; continuing poll..." >&2
+              sleep 15
+              continue
+            fi
+            count=$(printf '%s' "$run" | jq 'length')
+            if [ "$count" -eq 0 ]; then
+              echo "No pull_request CI workflow run yet; waiting..."
+              sleep 15
+              continue
+            fi
+            status=$(printf '%s' "$run" | jq -r 'sort_by(.createdAt) | reverse | .[0].status')
+            conclusion=$(printf '%s' "$run" | jq -r 'sort_by(.createdAt) | reverse | .[0].conclusion')
+            echo "CI (pull_request): status=${status} conclusion=${conclusion}"
+            if [ "$status" = "completed" ]; then
+              case "$conclusion" in
+                success)
+                  echo "ci_ok=true" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+                failure|cancelled|timed_out|action_required|startup_failure|stale|skipped|neutral)
+                  echo "pull_request CI did not pass; skipping Prevue review."
+                  echo "ci_ok=false" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+                *)
+                  echo "Unknown CI conclusion '${conclusion}'; skipping Prevue review."
+                  echo "ci_ok=false" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+              esac
+            else
+              sleep 15
+            fi
+          done
+          echo "Timed out waiting for pull_request CI; skipping Prevue review." >&2
+          echo "ci_ok=false" >> "$GITHUB_OUTPUT"
+
+  review:
+    needs: wait-ci
+    if: >-
+      needs.wait-ci.outputs.ci_ok == 'true' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft != true
+    # LIFE-04 resolveReviewThread needs contents:write — see prevue-review.yml.
+    permissions:
+      contents: write
+      pull-requests: write
+      checks: write
     uses: ./.github/workflows/prevue-review.yml
     with:
       engine: ${{ vars.PREVUE_ENGINE || 'copilot-cli' }}
-      prevue-ref: ${{ github.event.workflow_run.head_sha }}
-      pr-head-sha: ${{ github.event.workflow_run.head_sha }}
-      consumer-base-sha: ${{ github.event.workflow_run.pull_requests[0].base.sha }}
+      prevue-ref: ${{ github.event.pull_request.head.sha }}
+      pr-head-sha: ${{ github.event.pull_request.head.sha }}
+      consumer-base-sha: ${{ github.event.pull_request.base.sha }}
       seed-consumer-config: true
     secrets:
       copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}

@@ -41,39 +41,99 @@ def test_ci_local_script_exists_and_is_executable() -> None:
     assert os.access(script, os.X_OK)
 
 
-def test_dogfood_triggers_after_ci_success() -> None:
+def test_dogfood_concurrency_cancels_superseded_runs_per_pr() -> None:
+    concurrency = _load_review_workflow().get("concurrency", {})
+    assert concurrency.get("group") == "prevue-${{ github.event.pull_request.number }}"
+    assert concurrency.get("cancel-in-progress") is True
+
+
+def test_dogfood_triggers_on_pull_request_and_waits_for_ci() -> None:
     wf = _load_review_workflow()
-    text = REVIEW_WORKFLOW.read_text(encoding="utf-8")
-    assert "zizmor: ignore[dangerous-triggers]" in text
     on = wf.get("on") or wf.get(True)
     assert isinstance(on, dict)
-    assert on.get("workflow_run", {}).get("workflows") == ["CI"]
-    assert on.get("workflow_run", {}).get("types") == ["completed"]
-    review_job = wf.get("jobs", {}).get("review", {})
+    pr_on = on.get("pull_request", {})
+    assert pr_on.get("branches") == ["main"]
+    for event_type in ("opened", "synchronize", "reopened", "ready_for_review"):
+        assert event_type in pr_on.get("types", [])
+
+    jobs = wf.get("jobs", {})
+    assert "wait-ci" in jobs
+    wait_run = jobs["wait-ci"]["steps"][0]["run"]
+    assert "--workflow ci.yml" in wait_run
+    assert "--event pull_request" in wait_run
+    assert jobs["wait-ci"]["outputs"]["ci_ok"] == "${{ steps.wait.outputs.ci_ok }}"
+
+    review_job = jobs.get("review", {})
+    assert review_job.get("needs") == "wait-ci"
+    wait_if = jobs["wait-ci"].get("if", "")
     review_if = review_job.get("if", "")
-    assert "workflow_run.conclusion == 'success'" in review_if
-    assert "workflow_run.event == 'pull_request'" in review_if
+    assert "pull_request.head.repo.full_name == github.repository" in wait_if
+    assert "pull_request.head.repo.full_name == github.repository" in review_if
+    assert "needs.wait-ci.outputs.ci_ok == 'true'" in review_if
+    assert "pull_request.draft != true" in review_if
 
 
-def test_dogfood_passes_pr_shas_via_workflow_run_inputs() -> None:
+def test_wait_ci_maps_terminal_conclusions_without_poll_loop() -> None:
+    wait_run = _load_review_workflow()["jobs"]["wait-ci"]["steps"][0]["run"]
+    assert "skipped|neutral" in wait_run
+    assert "Unknown CI conclusion" in wait_run
+    assert "*) sleep 15" not in wait_run
+    assert wait_run.count("ci_ok=false") >= 2
+
+
+def test_wait_ci_polls_pr_head_sha_for_ci_run() -> None:
+    wf = _load_review_workflow()
+    wait_env = wf["jobs"]["wait-ci"]["steps"][0]["env"]
+    assert wait_env.get("CI_POLL_SHA") == "${{ github.event.pull_request.head.sha }}"
+    assert wait_env.get("CI_BRANCH") == "${{ github.head_ref }}"
+    assert "${{ github.sha }}" not in str(wait_env)
+    with_block = wf["jobs"]["review"]["with"]
+    assert with_block.get("pr-head-sha") == "${{ github.event.pull_request.head.sha }}"
+
+
+def test_wait_ci_retries_gh_and_exits_when_workflow_missing() -> None:
+    wait_run = _load_review_workflow()["jobs"]["wait-ci"]["steps"][0]["run"]
+    assert "gh workflow view ci.yml" in wait_run
+    assert "Workflow ci.yml not found" in wait_run
+    assert "fetch_ci_runs()" in wait_run
+    assert "gh run list failed (attempt" in wait_run
+    assert "gh run list unavailable; continuing poll" in wait_run
+    assert '--branch "$CI_BRANCH"' in wait_run
+    assert "--limit 50" in wait_run
+
+
+def test_wait_ci_selects_latest_run_and_skips_on_timeout() -> None:
+    wait_run = _load_review_workflow()["jobs"]["wait-ci"]["steps"][0]["run"]
+    assert "createdAt" in wait_run
+    assert "sort_by(.createdAt)" in wait_run
+    assert "CI_POLL_SHA" in wait_run
+    assert '--commit "$CI_POLL_SHA"' in wait_run
+    assert "Timed out waiting for pull_request CI" in wait_run
+    timeout_tail = wait_run.split("Timed out waiting for pull_request CI", 1)[1]
+    assert "ci_ok=false" in timeout_tail
+    assert "exit 1" not in timeout_tail
+
+
+def test_dogfood_passes_pr_shas_via_pull_request_inputs() -> None:
     wf = _load_review_workflow()
     with_block = wf.get("jobs", {}).get("review", {}).get("with", {})
-    assert with_block.get("prevue-ref") == "${{ github.event.workflow_run.head_sha }}"
-    assert with_block.get("pr-head-sha") == "${{ github.event.workflow_run.head_sha }}"
-    assert (
-        with_block.get("consumer-base-sha")
-        == "${{ github.event.workflow_run.pull_requests[0].base.sha }}"
-    )
+    assert with_block.get("prevue-ref") == "${{ github.event.pull_request.head.sha }}"
+    assert with_block.get("pr-head-sha") == "${{ github.event.pull_request.head.sha }}"
+    assert with_block.get("consumer-base-sha") == "${{ github.event.pull_request.base.sha }}"
 
 
 def test_minimal_permissions() -> None:
-    """WKFL-04: contents:write on dogfood caller for LIFE-04 resolveReviewThread."""
+    """WKFL-04: review job grants contents:write for LIFE-04 resolveReviewThread."""
     wf = _load_review_workflow()
-    assert wf["permissions"] == {
+    assert "permissions" not in wf
+    review_perms = wf.get("jobs", {}).get("review", {}).get("permissions", {})
+    assert review_perms == {
         "contents": "write",
         "pull-requests": "write",
         "checks": "write",
     }
+    wait_perms = wf.get("jobs", {}).get("wait-ci", {}).get("permissions", {})
+    assert wait_perms == {"actions": "read"}
 
 
 def test_no_pull_request_target_in_source() -> None:
@@ -84,7 +144,8 @@ def test_no_pull_request_target_in_source() -> None:
 def test_review_yml_uses_reusable_workflow() -> None:
     wf = _load_review_workflow()
     review_job = wf.get("jobs", {}).get("review", {})
-    assert "workflow_run.conclusion == 'success'" in review_job.get("if", "")
+    assert review_job.get("needs") == "wait-ci"
+    assert "needs.wait-ci.outputs.ci_ok == 'true'" in review_job.get("if", "")
     uses = review_job.get("uses", "")
     assert "./.github/workflows/prevue-review.yml" in uses or uses.endswith("prevue-review.yml")
     assert "runs-on" not in review_job
@@ -97,8 +158,14 @@ def test_review_yml_named_secrets_no_inherit() -> None:
     assert "secrets:inherit" not in text.replace(" ", "")
     wf = _load_review_workflow()
     secrets = wf.get("jobs", {}).get("review", {}).get("secrets", {})
-    assert "copilot-github-token" in secrets
+    reusable = _load_reusable_workflow()
+    on = reusable.get("on") or reusable.get(True) or {}
+    workflow_call_secrets = on["workflow_call"]["secrets"]
+    for name in workflow_call_secrets:
+        assert name in secrets, f"missing workflow_call secret {name!r} on review job"
     assert "${{ secrets.COPILOT_GITHUB_TOKEN }}" in str(secrets["copilot-github-token"])
+    assert "${{ secrets.ANTHROPIC_API_KEY }}" in str(secrets["anthropic-api-key"])
+    assert "${{ secrets.CURSOR_API_KEY }}" in str(secrets["cursor-api-key"])
 
 
 def test_dogfood_caller_engine_from_repo_variable() -> None:
@@ -109,7 +176,7 @@ def test_dogfood_caller_engine_from_repo_variable() -> None:
 def test_dogfood_caller_passes_prevue_ref_head_sha() -> None:
     wf = _load_review_workflow()
     with_block = wf.get("jobs", {}).get("review", {}).get("with", {})
-    assert with_block.get("prevue-ref") == "${{ github.event.workflow_run.head_sha }}"
+    assert with_block.get("prevue-ref") == "${{ github.event.pull_request.head.sha }}"
 
 
 def test_single_prevue_review_invocation_in_reusable() -> None:
