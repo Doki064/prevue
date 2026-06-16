@@ -28,7 +28,8 @@ jobs:
         id: wait
         env:
           GH_TOKEN: ${{ github.token }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # pull_request CI runs bind to merge commit (github.sha), not branch tip.
+          CI_POLL_SHA: ${{ github.sha }}
           REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
@@ -37,7 +38,7 @@ jobs:
             run=$(gh run list \
               --repo "$REPOSITORY" \
               --workflow ci.yml \
-              --commit "$HEAD_SHA" \
+              --commit "$CI_POLL_SHA" \
               --event pull_request \
               --limit 20 \
               --json status,conclusion,event,createdAt)
@@ -73,7 +74,6 @@ jobs:
           done
           echo "Timed out waiting for pull_request CI; skipping Prevue review." >&2
           echo "ci_ok=false" >> "$GITHUB_OUTPUT"
-          exit 1
 
   review:
     needs: wait-ci

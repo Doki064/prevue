@@ -81,14 +81,25 @@ def test_wait_ci_maps_terminal_conclusions_without_poll_loop() -> None:
     assert wait_run.count("ci_ok=false") >= 2
 
 
-def test_wait_ci_selects_latest_run_and_fails_on_timeout() -> None:
+def test_wait_ci_polls_merge_commit_not_pr_head() -> None:
+    wf = _load_review_workflow()
+    wait_env = wf["jobs"]["wait-ci"]["steps"][0]["env"]
+    assert wait_env.get("CI_POLL_SHA") == "${{ github.sha }}"
+    assert "pull_request.head.sha" not in str(wait_env)
+    with_block = wf["jobs"]["review"]["with"]
+    assert with_block.get("pr-head-sha") == "${{ github.event.pull_request.head.sha }}"
+
+
+def test_wait_ci_selects_latest_run_and_skips_on_timeout() -> None:
     wait_run = _load_review_workflow()["jobs"]["wait-ci"]["steps"][0]["run"]
     assert "createdAt" in wait_run
     assert "sort_by(.createdAt)" in wait_run
+    assert 'CI_POLL_SHA' in wait_run
+    assert "--commit \"$CI_POLL_SHA\"" in wait_run
     assert "Timed out waiting for pull_request CI" in wait_run
     timeout_tail = wait_run.split("Timed out waiting for pull_request CI", 1)[1]
     assert "ci_ok=false" in timeout_tail
-    assert "exit 1" in timeout_tail
+    assert "exit 1" not in timeout_tail
 
 
 def test_dogfood_passes_pr_shas_via_pull_request_inputs() -> None:
