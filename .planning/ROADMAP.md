@@ -20,6 +20,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Multi-Engine Adapter Support** - Additional `EngineAdapter`s (Claude Code, Cursor, Gemini) via the same interface, config-selectable, validating engine-agnosticism before public packaging (completed 2026-06-13)
 - [x] **Phase 6: Reusable Workflow & Hybrid Classification** - `workflow_call` packaging, consumer config, LLM classification fallback, skip conditions — first shippable (completed 2026-06-13)
 - [x] **Phase 7: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget (completed 2026-06-14)
+- [x] **Phase 8: Incremental & Stateful Review Lifecycle** - Incremental review scoped to the diff since the last-reviewed SHA, carry-forward/dedupe of prior findings, and auto-resolve of outdated inline threads (LIFE-01/02/04) (completed 2026-06-15)
 
 ## Phase Details
 
@@ -246,7 +247,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -257,6 +258,70 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7
 | 5. Multi-Engine Adapter Support | 3/3 | Complete   | 2026-06-13 |
 | 6. Reusable Workflow & Hybrid Classification | 4/4 | Complete    | 2026-06-13 |
 | 7. Customization & Hardening | 7/7 | Complete    | 2026-06-14 |
+| 8. Incremental & Stateful Review Lifecycle | 16/16 | Complete   | 2026-06-16 |
+
+### Phase 8: Incremental & Stateful Review Lifecycle
+
+**Goal:** Make PR review incremental and stateful across pushes — scope classification and review to the diff since the last-reviewed SHA stored in the sticky marker (LIFE-01); carry forward and dedupe prior findings so incremental scoping never drops still-valid comments (LIFE-02); and auto-resolve outdated inline threads when their underlying lines change (LIFE-04).
+**Requirements**: LIFE-01, LIFE-02, LIFE-04, LIFE-03, LIFE-05
+**Depends on:** Phase 7
+**Plans:** 16/16 plans complete
+
+Plans:
+
+**Wave 1**
+
+- [x] 08-01-PLAN.md — Finding fingerprint/normalize pure unit (D-04) + shared compare/GraphQL fixtures (TDD)
+- [x] 08-02-PLAN.md — Severity parse-back (D-12) + line-region-changed hunk-overlap (D-09) pure units (TDD)
+
+**Wave 2** *(blocked on Wave 1)*
+
+- [x] 08-03-PLAN.md — Marker SHA read/write (D-01), decide_scope ancestry + incremental file-set (D-02/03), gate-over-open-set (D-11) + config knobs (TDD)
+- [x] 08-04-PLAN.md — GraphQL thread-resolve transport (D-08/10) + fenced known-issues list (D-07)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [x] 08-05-PLAN.md — Scoped carry-forward (D-05), escalation-only refresh (D-06), outdated→resolve + prior re-derivation (D-08/09/01/12)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [x] 08-06-PLAN.md — run_review incremental orchestration: marker→scope→known-issues→reconcile→gate-over-open-set→write marker
+
+**Wave 5** *(blocked on Wave 4)*
+
+- [x] 08-07-PLAN.md — Live-runner resolveReviewThread scope verification + incremental E2E + consumer docs (checkpoint)
+
+**Wave 6** *(gap closure)*
+
+- [x] 08-08-PLAN.md — Open-set rephrase-at-same-line fix (LIFE-02 gap #1)
+- [x] 08-09-PLAN.md — GFM inline marker + incremental scope disclaimer (gaps #2, #5)
+- [x] 08-10-PLAN.md — Cursor cwd isolation + workflow noop preflight (gaps #3, #4)
+
+**Wave 7** *(LIFE-05 gap closure — added 2026-06-16)*
+
+- [x] 08-11-PLAN.md — D-13 full-review-authoritative auto-resolve (authoritative flag + run_review wiring, reviewed_paths scope)
+
+**Wave 8** *(blocked on Wave 7)*
+
+- [x] 08-12-PLAN.md — D-14/D-15 DismissEntry model + sticky fenced-block storage (Discretion 1) + audit section + max_dismissals knob
+
+**Wave 9** *(blocked on Wave 8)*
+
+- [x] 08-13-PLAN.md — D-15 dismiss enforcement guards 2/3 (region auto-expire + escalation override) + open-set→gate filter
+
+**Wave 10** *(LIFE-03 gap closure — blocked on Wave 9)*
+
+- [x] 08-14-PLAN.md — D-16 /prevue parser (Discretion 2) + load_comment_context (§L1) + collaborator-permission write gate (Fact 5)
+
+**Wave 11** *(blocked on Wave 10)*
+
+- [x] 08-15-PLAN.md — D-16/D-17 dispatcher + force-full review + D-15 guard-1 dismiss creation + resolve passthrough + prevue command CLI
+
+**Wave 12** *(blocked on Wave 11 — non-autonomous, security checkpoint)*
+
+- [x] 08-16-PLAN.md — D-16 issue_comment prevue-command.yml workflow + actionlint/zizmor + §L7 live pre-ship security checkpoint
 
 ---
 *Roadmap created: 2026-06-12*
+*Phase 8 planned: 2026-06-15 — 10 plans, 6 waves (LIFE-01/02/04)*
+*Phase 8 gap closure planned: 2026-06-16 — 6 plans (08-11..08-16), waves 7-12 (LIFE-03 + LIFE-05)*
