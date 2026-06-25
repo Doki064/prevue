@@ -11,6 +11,7 @@ import responses
 
 from prevue.engines.base import EngineAdapter
 from prevue.models import ReviewRequest, ReviewResult
+from prevue.skills.models import Skill
 from tests.engine_helpers import (
     VALID_TOKEN,
     make_sample_request,
@@ -70,3 +71,26 @@ def event_json() -> dict:
     """Load sample GITHUB_EVENT_PATH pull_request payload."""
     with (FIXTURES_DIR / "event_pull_request.json").open() as f:
         return json.load(f)
+
+
+@pytest.fixture
+def gap_shape_skill() -> Skill:
+    """Gap-shape skill: bundle=security, applies_to=['**/auth/**'], body has GAP-DEMO-SKILL-LOADED.
+
+    This fixture represents the gap-demo-sandbox gap shape (D-12): a skill whose applies-to
+    does NOT match a path like 'src/pages/Checkout.jsx', but whose bundle IS routed by
+    classification — so bundle-scoped selection must load it even when glob matching misses.
+    Unit tests that need the gap shape without disk I/O use this fixture directly.
+    """
+    import frontmatter
+
+    from prevue.skills.models import Skill
+
+    gap_fixture = FIXTURES_DIR / "skills" / "consumer" / "security" / "gap-demo-auth-guard.md"
+    post = frontmatter.loads(gap_fixture.read_text(encoding="utf-8"))
+    skill = Skill.model_validate(post.metadata)
+    skill.bundle = "security"
+    skill.filename = "gap-demo-auth-guard.md"
+    skill.body = post.content
+    skill.source = "consumer"
+    return skill

@@ -236,3 +236,57 @@ def test_dogfood_prevue_yml_fails_on_error_only() -> None:
         pytest.skip("dogfood prevue.yml not present")
     cfg = load_config(str(path))
     assert cfg.review.min_severity_to_fail == "error"
+
+
+# --- New multi-call/run caps tests (D-09, ENGN-05/06/07) ---
+# Flat-field decision: caps live directly on ReviewConfig rather than a nested multicall:
+# sub-model — parity with existing review knobs, extra="forbid" preserved without a nested
+# validator. (RESEARCH Open Question 2: lean flat for v1.)
+
+
+def test_review_cap_all_new_fields_round_trip(tmp_path: Path) -> None:
+    """All five new caps parse from prevue.yml review: block with exact values."""
+    path = tmp_path / "prevue.yml"
+    path.write_text(
+        "review:\n"
+        "  max_review_calls: 3\n"
+        "  review_concurrency: 2\n"
+        "  max_tokens_per_call: 60000\n"
+        "  max_total_run_tokens: 200000\n"
+        "  guardrail_skills:\n"
+        "    - security/committed-secrets.md\n"
+    )
+    cfg = load_config(str(path))
+    assert cfg.review.max_review_calls == 3
+    assert cfg.review.review_concurrency == 2
+    assert cfg.review.max_tokens_per_call == 60000
+    assert cfg.review.max_total_run_tokens == 200000
+    assert cfg.review.guardrail_skills == ["security/committed-secrets.md"]
+
+
+def test_review_cap_defaults_when_no_review_block(tmp_path: Path) -> None:
+    """All five new caps default correctly when no review: block is present."""
+    path = tmp_path / "prevue.yml"
+    path.write_text("ignore:\n  - '**/*.lock'\n")
+    cfg = load_config(str(path))
+    assert cfg.review.max_review_calls == 1
+    assert cfg.review.review_concurrency == 1
+    assert cfg.review.max_tokens_per_call == 120000
+    assert cfg.review.max_total_run_tokens == 500000
+    assert cfg.review.guardrail_skills == []
+
+
+def test_review_cap_invalid_max_review_calls_raises_via_load_config(tmp_path: Path) -> None:
+    """Invalid cap value (ge=1 violated) raises ValidationError through the public loader."""
+    path = tmp_path / "prevue.yml"
+    path.write_text("review:\n  max_review_calls: 0\n")
+    with pytest.raises(ValidationError):
+        load_config(str(path))
+
+
+def test_review_cap_per_call_above_run_ceiling_raises_via_load_config(tmp_path: Path) -> None:
+    """Incoherent per-call > run-ceiling raises through load_config (coherence validator)."""
+    path = tmp_path / "prevue.yml"
+    path.write_text("review:\n  max_tokens_per_call: 300000\n  max_total_run_tokens: 100000\n")
+    with pytest.raises(ValidationError, match="max_tokens_per_call"):
+        load_config(str(path))
