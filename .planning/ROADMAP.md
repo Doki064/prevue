@@ -22,6 +22,10 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget (completed 2026-06-14)
 - [x] **Phase 8: Incremental & Stateful Review Lifecycle** - Incremental review scoped to the diff since the last-reviewed SHA, carry-forward/dedupe of prior findings, and auto-resolve of outdated inline threads (LIFE-01/02/04) (completed 2026-06-15)
 - [x] **Phase 9: Classification-aligned skill loading + multi-call review** - Reconcile classify/route with selective skill selection (SKIL-01 gap), and add configurable multi-call review with context-preserving splitting and optional parallel execution (ENGN-05/06/07) (completed 2026-06-21; live UAT deferred by user)
+- [ ] **Phase 10: Boundary Contracts** - Lock the highest-churn boundaries before they ossify: config precedence, real adapter token usage, adapter raw-args + model tiering, structured JSON output (WKFL-05/PERF-03/ENGN-08/09/OUTP-05)
+- [ ] **Phase 11: Skills as Pinned External Repo** - Extract skills to a dedicated repo consumed as a SHA-pinned submodule = default source, with config-driven skill source and consumer override behind trust gating (SKIL-06/07)
+- [ ] **Phase 12: Cross-File Dependency Context** - Close the tier-2 whole-framework gap: inject unchanged first-party dependencies of changed files as capped, depth-1 reference context (PERF-04)
+- [ ] **Phase 13: Finding Signal Quality** - Confidence/impact scoring + intra-review dedup so a single review emits signal, not near-duplicate noise (QUAL-01)
 
 ## Phase Details
 
@@ -374,6 +378,82 @@ Plans:
 *Phase 9 planned: 2026-06-21 — 6 plans, 5 waves (SKIL-01 gap + ROUT-01/CLSF-03/OUTP-04 + ENGN-05/06/07)*
 *Phase 9 complete: 2026-06-24 — UAT 14/14 pass; WR-01..WR-12 code review fixes applied; ruff CI gate clean; 720/720 tests*
 
+### Phase 10: Boundary Contracts
+
+**Goal**: Stabilize the highest-churn-cost boundaries — config resolution, the engine-adapter contract, and machine-readable output — *before* more adapters and config knobs accrue and make every change N× more expensive to retrofit.
+**Mode:** standard
+**Depends on**: Phase 9
+**Requirements**: WKFL-05, PERF-03, ENGN-08, ENGN-09, OUTP-05
+**Success Criteria** (what must be TRUE):
+
+  1. Config resolution order (workflow input > `.github/prevue.yml` > built-in defaults) is declared, documented, and tested; ambiguous precedence cannot silently change behavior (WKFL-05)
+  2. Each engine adapter returns real token usage (input/output/cache) from its own CLI reporting; `bytes/4` estimation is used only as a labeled fallback; OUTP-04 surfaces measured tokens + cost (PERF-03)
+  3. Adapters accept an explicit raw-args passthrough for engine-specific flags without changing typed inputs (ENGN-08)
+  4. Adapters support per-role model selection (cheap classify / strong review / cheap consolidate) (ENGN-09)
+  5. The validated `ReviewResult` is emitted as a GitHub Actions job output (and/or JSON artifact) that consumers can chain automation on (OUTP-05)
+
+**Plans**: 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 10 to break down)
+
+### Phase 11: Skills as Pinned External Repo
+
+**Goal**: Extract built-in skills into a dedicated repo consumed as a SHA-pinned git submodule that doubles as the default skill source, and make the skill source a config value — restructuring *before* the skill catalog and loader ossify around the in-repo path.
+**Mode:** standard
+**Depends on**: Phase 10 (config precedence)
+**Requirements**: SKIL-06, SKIL-07
+**Success Criteria** (what must be TRUE):
+
+  1. Built-in skills live in a dedicated repo, vendored into Prevue as a git submodule pinned to a SHA; the loader reads from the pinned submodule by default; zero-config consumers get the defaults unchanged (SKIL-06)
+  2. The skill source is a config value defaulting to the bundled pin; the SKIL-04 trust model is preserved (pinned = trusted, no runtime mutable fetch)
+  3. A consumer can override the skill source to point at their own external skills repo, which MUST be pinned by SHA and pass trust gating (allowlist + mandatory pin); floating refs rejected (SKIL-07)
+  4. The label taxonomy is a versioned contract between framework and skills repo; consumer-local custom skills (SKIL-03) continue to work
+
+**Plans**: 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 11 to break down)
+
+### Phase 12: Cross-File Dependency Context
+
+**Goal**: Close the whole-framework tier-2 gap — a changed file's contract-bearing but *unchanged* first-party dependencies are invisible to review. Pull them in selectively (depth-1, first-party, capped), starting with the simplest lossless approach.
+**Mode:** standard
+**Depends on**: Phase 9 (importscan groundwork, ENGN-06)
+**Requirements**: PERF-04
+**Success Criteria** (what must be TRUE):
+
+  1. When a changed file references a first-party symbol defined in an *unchanged* file, that definition is read from the trusted base-ref checkout and injected as labeled read-only context (capped-A): depth-1 only, per-file byte cap, max-N files (PERF-04)
+  2. Third-party/package imports are never pulled in; transitive/full-graph stays out of scope
+  3. The demonstrated tier-2 bug class (a referenced module constant / method-body constraint in an unchanged dependency) becomes visible to the engine; measured added-token cost is reported
+  4. Symbol-slice (option D) is specced as the earned next optimization, not required to ship if capped-A's measured token cost is acceptable
+
+**Plans**: 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 12 to break down)
+
+### Phase 13: Finding Signal Quality
+
+**Goal**: Raise the signal-to-noise of a single review — score findings by confidence/impact, suppress low-confidence ones below a threshold, and collapse overlapping findings so one review never emits near-duplicate comments.
+**Mode:** standard
+**Depends on**: Phase 10 (ENGN-09 model tiering enables a cheap scoring/dedup pass)
+**Requirements**: QUAL-01
+**Success Criteria** (what must be TRUE):
+
+  1. Each finding carries a confidence/impact score; findings below a configurable threshold are suppressed (QUAL-01)
+  2. Overlapping findings on the same lines are collapsed within a single review (intra-review dedup — distinct from LIFE-02 cross-push dedupe)
+  3. Behavior is configurable; defaults preserve current output unless thresholds are set
+
+**Plans**: 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 13 to break down)
+
 ---
 
 ## Backlog
@@ -388,6 +468,7 @@ _Unsequenced task/spike items mined 2026-06-25 (ai-code-review, claude-code-acti
 **Source:** headroomlabs-ai/headroom (AST CodeCompressor, CacheAligner); bobmatnyc/ai-code-review semantic chunking.
 
 Plans:
+
 - [ ] TBD — run via `/gsd-spike` when PERF-02 is next in scope
 
 ### Phase 999.2: Consumer docs — `paths:` trigger filter + severity-gate examples (BACKLOG)
@@ -398,4 +479,5 @@ Plans:
 **Source:** anthropics/claude-code-action path-specific reviews.
 
 Plans:
+
 - [ ] TBD (promote with /gsd-review-backlog when ready)

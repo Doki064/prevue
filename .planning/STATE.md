@@ -122,6 +122,7 @@ Progress: [██████████] 6/6 plans complete (Phase 09) — All
 - Phase 8 edited: shortened title; LIFE-01/02/04 detail moved into Goal; dir slug → 08-incremental-stateful-review-lifecycle
 - Phase 9 added: Classification-aligned skill loading — reconcile classify/route with selective skill selection (SKIL-01 gap; gap-demo-sandbox PR #25 proof)
 - Phase 9 scope expanded 2026-06-21: added multi-call review (ENGN-05/06/07 — configurable max_review_calls, context-preserving split, optional parallelism); CUST-04 superseded; dir slug → 09-classification-skill-loading-multi-call-review; old 3 plans deleted (re-plan after discuss)
+- Phases 10–13 added 2026-06-25 (prioritized by cost-of-delay — adapter/config contracts first): Phase 10 Boundary Contracts (WKFL-05, PERF-03, ENGN-08/09, OUTP-05); Phase 11 Skills as Pinned External Repo (SKIL-06/07); Phase 12 Cross-File Dependency Context (PERF-04); Phase 13 Finding Signal Quality (QUAL-01). 9 reqs promoted v2 → v1; LIFE-03/05 relocated v2 → v1 (Phase 8, complete). All four phases unplanned — run /gsd-plan-phase 10 next.
 
 ### Decisions
 
