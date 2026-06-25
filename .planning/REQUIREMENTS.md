@@ -145,6 +145,15 @@ Deferred to future release. Tracked but not in current roadmap.
 
 - **SKIL-05**: Additional built-in skill bundles beyond the core set (security/frontend/backend/data/infra) — candidates validated by ai-code-review's 16 review types: `extract-patterns` (surface reusable conventions), `evaluation` (rubric scoring), `unused-code` (dead-code/unreachable detection). Each is a SKILL.md bundle + routing rules; no framework change. Pick by consumer demand.
   - *Source (added 2026-06-25): bobmatnyc/ai-code-review review-type catalog.*
+- **SKIL-06**: Extract the built-in skill bundles into a **dedicated skills repo**, consumed by Prevue as a **git submodule pinned to a SHA** — which doubles as the **default built-in skill source** (Prevue ships pointing at the pinned submodule; zero-config consumers get the defaults). Decouples skill-content authoring/versioning/contribution from framework code, and makes the bundles portable to other tools, while preserving the SKIL-04 trust model: a pinned ref is trusted exactly like the framework checkout — this is **pin-at-checkout, NOT a runtime registry** (see reopened Out-of-Scope row). The label taxonomy (security/frontend/backend/data/infra) becomes a **versioned contract** between the two repos. Skill source is expressed as a config value defaulting to the bundled submodule pin (shared mechanism with SKIL-07).
+  - *Source (added 2026-06-25): skills-rework discussion. Reopens OOS "Remote/central skill registry at runtime" — resolved by pinned submodule, not dynamic lookup.*
+- **SKIL-07**: Consumer can point Prevue at an **external skills repo** via config/input — same config knob as SKIL-06's default, just overridden — in addition to consumer-local custom skills (SKIL-03, unchanged). **Security-gated, non-negotiable:** skills are instructions injected into a privileged LLM holding secrets, so an external source MUST be pinned by SHA and trusted to the same bar as framework code; floating tags / `main` / any runtime mutable fetch are forbidden (prompt-injection / instruction-hijack surface). Likely requires an allowlist + mandatory pin + documented trust model. Treat the full form as "do not solve in v1" complexity (same class as the GitHub-App token flow).
+  - *Source (added 2026-06-25): skills-rework discussion. Reopens OOS "Remote/central skill registry at runtime" — admissible only under mandatory pin + trust gating.*
+
+### Distribution & Local Surface
+
+- **LOCL-01**: Skills (portable agentskills.io bundles once SKIL-06 lands) are invocable as **interactive agent-skill slash commands** (e.g. `/prevue review frontend`) outside the CI workflow, for local / pre-push review — a **second delivery surface** alongside the reusable workflow. Note this **bypasses auto-classification** (manual skill selection), so it is a thinner, manual variant of the core classify→route→load pipeline, not a replacement. Enabled by SKIL-06's portable bundles.
+  - *Source (added 2026-06-25): skills-rework discussion. Reopens OOS "IDE / local pre-push review mode."*
 
 ### Workflow Packaging
 
@@ -164,8 +173,8 @@ Explicitly excluded. Documented to prevent scope creep.
 | Conversational `/ask` chat on PRs | Unbounded token spend; prompt-injection surface on attacker-writable comment text |
 | LLM-only classification | Burns tokens on trivially classifiable PRs; non-deterministic routing is undebuggable — hybrid is non-negotiable |
 | Non-GitHub platforms (GitLab, Bitbucket) | Contradicts "GitHub reusable workflow" identity; engine adapter is the portability layer that matters |
-| Remote/central skill registry at runtime | Network/auth complexity; built-in + consumer-local skills cover v1 |
-| IDE / local pre-push review mode | CI-first; may come later |
+| Remote/central skill registry at runtime | Network/auth complexity; built-in + consumer-local skills cover v1. **Reopened 2026-06-25 → SKIL-06/07 (v2):** admissible as a **pinned-SHA git submodule / pinned external repo**, never a dynamic runtime registry. The "runtime registry" exclusion still stands; pin-at-checkout does not. |
+| IDE / local pre-push review mode | CI-first; may come later. **Reopened 2026-06-25 → LOCL-01 (v2):** interactive agent-skill slash commands as a second surface, enabled by SKIL-06 portable bundles. |
 | Auto-approve / bot-submitted approving reviews | Escalates Prevue from an advisory pass/fail check (OUTP-03) to approving authority; a bot approval can satisfy branch protection and bypass human review intent — trust/safety regression (considered from PR-Agent self-review/auto-approve) |
 | Suggestion-application analytics / acceptance tracking | Needs a persistent backend to store which suggestions were applied across runs — same stateless-workflow objection as 👍/👎 learning (considered from PR-Agent suggestion analytics) |
 | Auto-commit of changelog/docstrings (`/update_changelog`, `/add_docs`) | Requires `contents: write`; same minimal-permissions objection as auto-fix (considered from PR-Agent authoring tools) |
@@ -226,3 +235,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 *Last updated: 2026-06-24 — Phase 9 complete; SKIL-01 gap + ENGN-05/06/07 traceability updated to Complete; UAT 14/14 pass*
 *v2 expanded 2026-06-25 — research mining of ai-code-review, claude-code-action, headroom, tokscale: added CUST-06, ENGN-08/09, OUTP-05/06, SKIL-05, WKFL-05, PERF-03 (actual token tracking); folded compression/severity sources into PERF-02 + QUAL-01. Spike + consumer-doc tasks parked in ROADMAP Backlog.*
 *PERF-04 added 2026-06-25 — selective cross-file dependency context (capped-A → symbol-slice ladder, depth-1 first-party); proven a whole-framework (not just incremental) gap via live tier-2 demo on test-sandbox-repo PR #11.*
+*Skills rework 2026-06-25 — added SKIL-06 (skills → dedicated repo as pinned git submodule = default built-in source), SKIL-07 (consumer external skills repo, pin+trust gated), LOCL-01 (interactive slash-command surface); reopened two OOS rows as pinned-not-registry / local-surface. Considered and DROPPED: domain-composite skills + language-axis routing (`/review-web-app`, `--python`) — composites are sugar over existing multi-label routing; not pursued.*
