@@ -52,6 +52,9 @@ Requirements for initial release. Each maps to roadmap phases.
   - *Promoted v2 → v1 on 2026-06-25 (Phase 10). Source: anthropics/claude-code-action `claude_args` passthrough.*
 - [ ] **ENGN-09** *(Phase 10)*: Per-role model tiering — let the adapter select different models per role (cheap classify → strong review → cheap consolidate/dedup) instead of one model for every call; pairs with ENGN-05 multi-call and PERF-01 to cut cost without losing review depth. Enables the cheap dedup/scoring pass QUAL-01 (Phase 13) relies on.
   - *Promoted v2 → v1 on 2026-06-25 (Phase 10). Source: bobmatnyc/ai-code-review separate "writer model" for consolidation.*
+- [ ] **ENGN-10** *(Phase 10 — FIRST task)*: Consolidate the CLI engine adapters into a **spec-driven generic adapter** (declarative `CliEngineSpec`: secret env + validator, argv, prompt-delivery {stdin|tempfile-arg}, model-flag {env|argv}, cli_label, cwd, functional flag), or a template-method base at minimum. Today `copilot_cli.py` / `cursor_cli.py` / `claude_code_cli.py` repeat identical `review`/`classify`/`classify_skills` wiring — only ~4 axes vary — and `registry.py` requires a manual import + dict entry per engine. The generic adapter implements those methods once; the registry auto-populates from the spec list; `gemini` skeleton becomes `functional=False` (drops the `SKELETON_ENGINES` special-case). **Must land before PERF-03 / ENGN-08 / ENGN-09**, which are all adapter-contract changes that otherwise cost 4× (one edit per existing adapter) instead of 1×.
+  - *Migration caveats: preserve per-engine `AuthError` subclasses (tests assert on type); repoint `copilot_cli.__all__` internal re-exports relied on by tests; `classify_skills` becomes available to every engine for free. Recommend spec-driven; template-method base is the low-risk fallback.*
+  - *Source (added 2026-06-25): adapter-layer review — shared flow/prompt/subprocess already factored; remaining per-adapter file is boilerplate shell.*
 - [x] **ENGN-05**: Pipeline supports configurable multi-call review (max_review_calls, default 1 = single call); when more than one call is configured, the diff is split into multiple review requests and findings are merged/deduped across all call results
   - *Note (added 2026-06-21, Phase 9 discussion):* single call is the baseline; multi-call addresses PRs too large for one context window or where parallel coverage improves quality. Default stays 1 (backward-compatible). Promoted from CUST-04 scope with broader framing — CUST-04 was budget-overflow only; this is a first-class configurable mode.
 - [x] **ENGN-06**: When multi-call is active, the diff is split in a context-preserving way — files that share imports/references or belong to the same routed skill bundle must land in the same call to avoid losing cross-file context; exact splitting strategy is configurable (bundle-aligned is the default candidate)
@@ -237,6 +240,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ENGN-05 | Phase 9 | Complete |
 | ENGN-06 | Phase 9 | Complete |
 | ENGN-07 | Phase 9 | Complete |
+| ENGN-10 | Phase 10 | Planned (first task) |
 | WKFL-05 | Phase 10 | Planned |
 | PERF-03 | Phase 10 | Planned |
 | ENGN-08 | Phase 10 | Planned |
@@ -249,8 +253,8 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 **Coverage:**
 
-- v1 requirements: 42 (33 prior + 9 promoted 2026-06-25: WKFL-05, PERF-03, PERF-04, ENGN-08, ENGN-09, OUTP-05, SKIL-06, SKIL-07, QUAL-01)
-- Mapped to phases: 42 (Phases 1–9 Complete; Phases 10–13 Planned)
+- v1 requirements: 43 (33 prior + 9 promoted 2026-06-25 + ENGN-10 adapter consolidation)
+- Mapped to phases: 43 (Phases 1–9 Complete; Phases 10–13 Planned)
 - Unmapped: 0 ✓
 
 ---
@@ -260,3 +264,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 *PERF-04 added 2026-06-25 — selective cross-file dependency context (capped-A → symbol-slice ladder, depth-1 first-party); proven a whole-framework (not just incremental) gap via live tier-2 demo on test-sandbox-repo PR #11.*
 *Skills rework 2026-06-25 — added SKIL-06 (skills → dedicated repo as pinned git submodule = default built-in source), SKIL-07 (consumer external skills repo, pin+trust gated), LOCL-01 (interactive slash-command surface); reopened two OOS rows as pinned-not-registry / local-surface. Considered and DROPPED: domain-composite skills + language-axis routing (`/review-web-app`, `--python`) — composites are sugar over existing multi-label routing; not pursued.*
 *Roadmap + promotion 2026-06-25 — added Phases 10–13 to ROADMAP. Promoted 9 reqs v2 → v1 (prioritized by cost-of-delay — adapter/config contracts first): Phase 10 Boundary Contracts (WKFL-05, PERF-03, ENGN-08/09, OUTP-05), Phase 11 Skills as Pinned Repo (SKIL-06/07), Phase 12 Cross-File Dependency Context (PERF-04), Phase 13 Finding Signal Quality (QUAL-01). Relocated LIFE-03/05 from v2 into v1 (Phase 8, complete). Remaining v2 (CUST-01/02/05/06, QUAL-02, PERF-01/02, DESC-01, OUTP-06, SKIL-05, LOCL-01) stay deferred.*
+*ENGN-10 added 2026-06-25 (v1, Phase 10 first task) — consolidate CLI adapters into a spec-driven generic before PERF-03/ENGN-08/ENGN-09, so those adapter-contract changes cost 1× not 4×.*

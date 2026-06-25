@@ -383,14 +383,16 @@ Plans:
 **Goal**: Stabilize the highest-churn-cost boundaries — config resolution, the engine-adapter contract, and machine-readable output — *before* more adapters and config knobs accrue and make every change N× more expensive to retrofit.
 **Mode:** standard
 **Depends on**: Phase 9
-**Requirements**: WKFL-05, PERF-03, ENGN-08, ENGN-09, OUTP-05
+**Requirements**: ENGN-10, WKFL-05, PERF-03, ENGN-08, ENGN-09, OUTP-05
+**Sequencing**: ENGN-10 (adapter consolidation) lands FIRST — PERF-03/ENGN-08/ENGN-09 are adapter-contract changes that cost 4× against copy-pasted adapters but 1× against a spec-driven generic. Consolidate, then add the contract features once.
 **Success Criteria** (what must be TRUE):
 
-  1. Config resolution order (workflow input > `.github/prevue.yml` > built-in defaults) is declared, documented, and tested; ambiguous precedence cannot silently change behavior (WKFL-05)
-  2. Each engine adapter returns real token usage (input/output/cache) from its own CLI reporting; `bytes/4` estimation is used only as a labeled fallback; OUTP-04 surfaces measured tokens + cost (PERF-03)
-  3. Adapters accept an explicit raw-args passthrough for engine-specific flags without changing typed inputs (ENGN-08)
-  4. Adapters support per-role model selection (cheap classify / strong review / cheap consolidate) (ENGN-09)
-  5. The validated `ReviewResult` is emitted as a GitHub Actions job output (and/or JSON artifact) that consumers can chain automation on (OUTP-05)
+  1. The CLI adapters are consolidated into a spec-driven generic (or template-method base): per-engine code is a small declarative spec, `review`/`classify`/`classify_skills` wiring exists once, and the registry auto-populates from the spec list — adding an engine is ~1 spec entry, no duplicated methods (ENGN-10)
+  2. Config resolution order (workflow input > `.github/prevue.yml` > built-in defaults) is declared, documented, and tested; ambiguous precedence cannot silently change behavior (WKFL-05)
+  3. Each engine adapter returns real token usage (input/output/cache) from its own CLI reporting; `bytes/4` estimation is used only as a labeled fallback; OUTP-04 surfaces measured tokens + cost (PERF-03)
+  4. Adapters accept an explicit raw-args passthrough for engine-specific flags without changing typed inputs (ENGN-08)
+  5. Adapters support per-role model selection (cheap classify / strong review / cheap consolidate) (ENGN-09)
+  6. The validated `ReviewResult` is emitted as a GitHub Actions job output (and/or JSON artifact) that consumers can chain automation on (OUTP-05)
 
 **Plans**: 0 plans
 
