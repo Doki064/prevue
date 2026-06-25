@@ -6,8 +6,8 @@ started: 2026-06-16T12:00:00Z
 updated: 2026-06-16T22:00:00Z
 session: life03-life05-supplemental
 prior_session: gap-closure-supplemental (14/14 pass, 2026-06-16)
-sandbox_pr: https://github.com/Doki064/MaruDryFruits/pull/24
-sandbox_repo: https://github.com/Doki064/MaruDryFruits
+sandbox_pr: https://github.com/[redacted]/[redacted]/pull/24
+sandbox_repo: https://github.com/[redacted]/[redacted]
 ---
 
 ## Current Test

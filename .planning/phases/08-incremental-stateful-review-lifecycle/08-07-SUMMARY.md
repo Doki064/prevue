@@ -31,7 +31,7 @@ key-files:
     - src/prevue/review.py
 
 key-decisions:
-  - "resolveReviewThread requires broader scope on MaruDryFruits sandbox (403 FORBIDDEN); ship LIFE-04 as best-effort with resolve_outdated opt-out — do NOT add contents: write (WKFL-04)"
+  - "resolveReviewThread requires broader scope on gap-demo-sandbox sandbox (403 FORBIDDEN); ship LIFE-04 as best-effort with resolve_outdated opt-out — do NOT add contents: write (WKFL-04)"
   - "Post-UAT fixes: line=null outdated crash, open-set dedupe by (path,line), sticky-before-inline write order"
 
 patterns-established:
@@ -59,7 +59,7 @@ completed: 2026-06-15
 
 - Minimal token scope test-pinned (`contents: read`, `pull-requests: write`, `checks: write`); workflow comment documents graceful 403 degradation
 - Consumer docs cover `review.incremental`, `review.resolve_outdated`, `review.max_known_issues` with defaults and scope caveat
-- Live UAT on MaruDryFruits sandbox: resolve scope **403** (best-effort skip, LIFE-01/02 green); incremental scoping **PASS**; noop re-run **PASS**
+- Live UAT on gap-demo-sandbox sandbox: resolve scope **403** (best-effort skip, LIFE-01/02 green); incremental scoping **PASS**; noop re-run **PASS**
 - Post-UAT bug fixes committed: outdated inline `line=null` crash, open-set dedupe by `(path,line)`, sticky-before-inline write order
 
 ## Task Commits
@@ -67,13 +67,13 @@ completed: 2026-06-15
 1. **Task 1: Assert minimal token scope unchanged + document the new knobs** - `48ff762` (docs)
 2. **Task 2: Live sandbox UAT (checkpoint)** - UAT approved; post-UAT fixes `eac308c`, `0c92a04` (fix)
 
-## Live UAT Results (MaruDryFruits sandbox)
+## Live UAT Results (gap-demo-sandbox sandbox)
 
 ### 1. Resolve scope (RESEARCH Open Q #1) — **403**
 
 | Aspect | Result |
 |--------|--------|
-| PR | MaruDryFruits #21 |
+| PR | gap-demo-sandbox #21 |
 | Observation | `prevue: review thread resolve failed (FORBIDDEN)` in workflow logs |
 | Scope | `pull-requests: write` insufficient for `resolveReviewThread` in this account |
 | Run outcome | LIFE-01/02 still green — best-effort skip works; sticky + check published, marker advanced |
@@ -83,7 +83,7 @@ completed: 2026-06-15
 
 | Aspect | Result |
 |--------|--------|
-| PR | MaruDryFruits #21, commit 5 (Create test2.js) |
+| PR | gap-demo-sandbox #21, commit 5 (Create test2.js) |
 | In-scope review | Only `test2.js` re-reviewed |
 | Carry-forward | `test1.js` priors carried as position-fallback out of scope |
 | Marker | `head=<sha>` advanced to new head |
@@ -92,7 +92,7 @@ completed: 2026-06-15
 
 | Aspect | Result |
 |--------|--------|
-| PR | MaruDryFruits #22, workflow re-run attempt 2 on same SHA |
+| PR | gap-demo-sandbox #22, workflow re-run attempt 2 on same SHA |
 | Engine | Not re-invoked (~6s prevue step) |
 | Sticky | Updated in place |
 | Comments | No duplicates |
@@ -115,7 +115,7 @@ completed: 2026-06-15
 ### Post-UAT Bug Fixes (outside plan tasks, user-directed)
 
 **1. [Rule 1 - Bug] Outdated inline `line=null` crash**
-- **Found during:** UAT on MaruDryFruits PR #21
+- **Found during:** UAT on gap-demo-sandbox PR #21
 - **Issue:** Resolve path crashed when outdated finding had `line=null`
 - **Fix:** Guard null line in outdated resolution
 - **Commit:** `eac308c`
