@@ -94,11 +94,15 @@ Deferred to future release. Tracked but not in current roadmap.
 - ~~**CUST-04**: Chunked map-reduce review for PRs exceeding the token budget~~ → **superseded by ENGN-05/06/07 (v1, Phase 9)** 2026-06-21. Broader framing: configurable multi-call mode (not only budget-overflow), context-preserving split strategy, and optional parallelism.
 - **CUST-05**: Surface classification labels as native GitHub PR labels (opt-in) — cheap reuse of the existing zero-token classifier output
   - *Source (added 2026-06-15): Qodo PR-Agent `/generate_labels`.*
+- **CUST-06**: Contributor-aware review profile — vary review stringency by `author_association` (e.g. a stricter, onboarding-oriented review for `FIRST_TIME_CONTRIBUTOR`/`NONE`) on PRs that already run under the `pull_request` trigger; no new permissions, no secret exposure.
+  - *Scope note:* this covers only non-fork PRs that already execute. Giving **fork** PRs a restricted/no-secrets review path is the `pull_request_target` credential-theft class and stays **Out of Scope** — see that table below.
+  - *Source (added 2026-06-25): anthropics/claude-code-action `if: author_association == 'FIRST_TIME_CONTRIBUTOR'` conditional review.*
 
 ### Review Quality
 
 - **QUAL-01**: Per-finding confidence/impact scoring with intra-review dedup — score each finding, suppress low-confidence ones below a configurable threshold, and collapse overlapping findings on the same lines so a single review never emits near-duplicate comments (noise control; distinct from LIFE-02, which dedupes *across* pushes)
   - *Source (added 2026-06-15): Qodo PR-Agent `/improve` scores and self-filters suggestions.*
+  - *Source (added 2026-06-25): anthropics/claude-code-action `classify_inline_comments` (buffer + filter low-value comments) + severity-gated posting — reinforces the threshold-before-post design.*
 - **QUAL-02**: Ticket/issue compliance check — when a PR links an issue, verify the diff plausibly satisfies the issue's acceptance criteria and flag gaps (reads linked issue text only; no extra write scope)
   - *Source (added 2026-06-15): Qodo PR-Agent ticket-compliance tool.*
 
@@ -108,11 +112,38 @@ Deferred to future release. Tracked but not in current roadmap.
   - *Source (added 2026-06-15): CodeRabbit linter integration; GitHub "token efficiency in agentic workflows" — the cheapest LLM call is the one you don't make.*
 - **PERF-02**: Diff packing/compression optimization — language-aware file prioritization, drop deleted-file bodies, and hunk-level compression before the engine call (complements CUST-04: compress first, split via map-reduce only if still over budget)
   - *Source (added 2026-06-15): Qodo PR-Agent PR-compression strategy.*
+  - *Source (added 2026-06-25): candidate techniques — (a) **semantic chunking** via TreeSitter function/class units, feeding only relevant chunks (bobmatnyc/ai-code-review, claims 95%+ reduction on whole-codebase review); (b) **Headroom** local pre-LLM compression (AST CodeCompressor, JSON SmartCrusher, `CacheAligner` for KV-cache prefix hits, Python library mode). Caveat: both add heavy dependency surface against Prevue's lean thesis, and the headline reductions are measured on whole-file/codebase input, not diff-only review — **gate adoption behind a spike (see Backlog)** that measures real savings on Prevue's hunk-level input before phasing. Prefer library mode over Headroom's HTTP proxy (proxy doesn't fit the Copilot-CLI subprocess model).*
+- **PERF-03**: Actual token accounting — replace the `bytes/4` estimate (`src/prevue/engines/tokens.py`, surfaced as "~est" in OUTP-04) with real token counts captured from each engine adapter's own usage reporting (input / output / cache tokens), falling back to estimation only when an engine does not report usage; optionally compute cost from a pricing database. Turns OUTP-04's "tokens used (~est)" into measured tokens + cost. The existing `token_meta.estimated` / `review_estimated` / `classify_estimated` flags already anticipate this swap.
+  - *Source (added 2026-06-25): junhoyeo/tokscale — aggregates the usage AI CLIs already record (Claude Code JSONL `usage`, Codex `token_count`, etc.) and prices via the LiteLLM pricing DB; no tokenization, no estimation. Prevue's analog: have the adapter parse engine-reported usage from CLI output.*
 
 ### PR Authoring (opt-in)
 
 - **DESC-01**: PR description assist — optionally generate a title/summary/walkthrough into the PR body, reusing the existing classification labels (opt-in; uses the `pull-requests: write` scope Prevue already holds, no new permissions)
   - *Source (added 2026-06-15): Qodo PR-Agent `/describe`; CodeRabbit walkthroughs.*
+
+### Engine Adapter
+
+- **ENGN-08**: Adapter raw-args passthrough — an explicit escape-hatch field on the adapter contract so engine-specific CLI flags can be passed through without changing Prevue's typed inputs; keeps the abstraction stable as new engines add flags.
+  - *Source (added 2026-06-25): anthropics/claude-code-action `claude_args` passthrough; its multi-provider auth (Bedrock/Vertex/Foundry/direct) validates Prevue's pluggable-adapter bet.*
+- **ENGN-09**: Per-role model tiering — let the adapter select different models per role (cheap classify → strong review → cheap consolidate/dedup) instead of one model for every call; pairs with ENGN-05 multi-call and PERF-01 to cut cost without losing review depth.
+  - *Source (added 2026-06-25): bobmatnyc/ai-code-review separate "writer model" for cost-optimized consolidation.*
+
+### Output
+
+- **OUTP-05**: Structured machine-readable review output — emit the validated findings result (the existing pydantic `ReviewResult`) as a GitHub Actions job `output:` and/or JSON artifact, so consumers can chain automation (merge gates, dashboards) off the review. Cheap, and core to being a framework other repos build on.
+  - *Source (added 2026-06-25): anthropics/claude-code-action structured JSON outputs become Action outputs for downstream automation.*
+- **OUTP-06**: Live progress comment — post an in-progress sticky comment with checkboxes that update as the review proceeds and finalize on completion, improving perceived latency on large/slow reviews. Uses the `pull-requests: write` scope already held; keep edit cadence coarse (per-phase, not per-finding) to stay under secondary rate limits.
+  - *Source (added 2026-06-25): anthropics/claude-code-action `track_progress`.*
+
+### Skills
+
+- **SKIL-05**: Additional built-in skill bundles beyond the core set (security/frontend/backend/data/infra) — candidates validated by ai-code-review's 16 review types: `extract-patterns` (surface reusable conventions), `evaluation` (rubric scoring), `unused-code` (dead-code/unreachable detection). Each is a SKILL.md bundle + routing rules; no framework change. Pick by consumer demand.
+  - *Source (added 2026-06-25): bobmatnyc/ai-code-review review-type catalog.*
+
+### Workflow Packaging
+
+- **WKFL-05**: Declared config precedence for `prevue.yml` — define and test a single resolution order (workflow input > `.github/prevue.yml` > built-in defaults) before consumers depend on ambiguous behavior; precedence is hard to change once relied upon.
+  - *Source (added 2026-06-25): bobmatnyc/ai-code-review config precedence hierarchy (CLI > project config > env > defaults).*
 
 ## Out of Scope
 
@@ -187,3 +218,4 @@ Which phases cover which requirements. Updated during roadmap creation.
 ---
 *Requirements defined: 2026-06-12*
 *Last updated: 2026-06-24 — Phase 9 complete; SKIL-01 gap + ENGN-05/06/07 traceability updated to Complete; UAT 14/14 pass*
+*v2 expanded 2026-06-25 — research mining of ai-code-review, claude-code-action, headroom, tokscale: added CUST-06, ENGN-08/09, OUTP-05/06, SKIL-05, WKFL-05, PERF-03 (actual token tracking); folded compression/severity sources into PERF-02 + QUAL-01. Spike + consumer-doc tasks parked in ROADMAP Backlog.*

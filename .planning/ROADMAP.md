@@ -378,34 +378,24 @@ Plans:
 
 ## Backlog
 
-_Unsequenced ideas mined 2026-06-25 from research of `bobmatnyc/ai-code-review` and `anthropics/claude-code-action`. Promote with `/gsd-review-backlog`._
+_Unsequenced task/spike items mined 2026-06-25 (ai-code-review, claude-code-action, headroom, tokscale). Product **capabilities** from this research are tracked as v2 requirements in REQUIREMENTS.md (CUST-06, ENGN-08/09, OUTP-05/06, SKIL-05, WKFL-05, PERF-03); only items that are not capabilities live here. Promote with `/gsd-review-backlog`._
 
-### Phase 999.1: Expose ReviewResult as workflow output (JSON) (BACKLOG)
+### Phase 999.1: Spike — evaluate pre-LLM compression for PERF-02 (BACKLOG)
 
-**Goal:** Emit the existing pydantic `ReviewResult` as a GitHub Actions `output:` so consumers can chain automation (block merge, route to dashboards). Cheap, core to being a *framework* others build on.
-**Requirements:** TBD
+**Goal:** Measure whether semantic chunking (TreeSitter) and/or Headroom library-mode compression deliver meaningful token savings on Prevue's **diff-only / hunk-level** input — not the whole-codebase input their headline numbers (95%+) are measured on — before PERF-02 becomes a phase. Decide adopt vs reject; weigh dependency-surface cost against Prevue's lean thesis.
+**Requirements:** Informs PERF-02
 **Plans:** 0 plans
-**Source:** claude-code-action structured outputs.
+**Source:** headroomlabs-ai/headroom (AST CodeCompressor, CacheAligner); bobmatnyc/ai-code-review semantic chunking.
 
 Plans:
-- [ ] TBD (promote with /gsd-review-backlog when ready)
+- [ ] TBD — run via `/gsd-spike` when PERF-02 is next in scope
 
-### Phase 999.2: Consumer-facing cost patterns — `paths:` filter + severity gate (BACKLOG)
+### Phase 999.2: Consumer docs — `paths:` trigger filter + severity-gate examples (BACKLOG)
 
-**Goal:** Document/support two near-zero-code consumer patterns that serve the token/cost constraint: (1) `paths:` trigger filter to short-circuit the workflow before a runner spins (cut cost pre-classification); (2) a severity threshold gate on findings so not every finding is posted (signal not noise).
-**Requirements:** TBD
+**Goal:** Document a consumer-side pattern (not framework code): a `paths:` filter on the caller workflow to short-circuit Prevue before a runner spins (cut cost pre-classification), plus example `min-severity-to-comment`/`min-severity-to-fail` config (the gating capability already exists via NOIS-02/QUAL-01).
+**Requirements:** Consumer documentation
 **Plans:** 0 plans
-**Source:** claude-code-action path-specific reviews + inline-comment classification.
-
-Plans:
-- [ ] TBD (promote with /gsd-review-backlog when ready)
-
-### Phase 999.3: Fork handling via author_association (BACKLOG)
-
-**Goal:** Upgrade the v1 "skip forks" decision to a restricted/no-secrets review path that *varies* review for external contributors instead of skipping them entirely, while keeping the secrets/security boundary intact.
-**Requirements:** TBD
-**Plans:** 0 plans
-**Source:** claude-code-action `if: author_association == 'FIRST_TIME_CONTRIBUTOR'`.
+**Source:** anthropics/claude-code-action path-specific reviews.
 
 Plans:
 - [ ] TBD (promote with /gsd-review-backlog when ready)
