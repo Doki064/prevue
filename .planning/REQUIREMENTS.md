@@ -42,6 +42,12 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **ENGN-02**: GitHub Copilot CLI adapter runs headless on Actions runners (`copilot -p ... -s --no-ask-user`, auth via `COPILOT_GITHUB_TOKEN`, minimal `--allow-tool` set)
 - [x] **ENGN-03**: Engine output is schema-validated with retry-then-degrade handling; a parse failure produces a neutral check, never a crash or false block
 - [x] **ENGN-04**: Additional engine adapters (Claude Code CLI, Cursor CLI, Gemini CLI) implement the same pluggable interface and are selectable via config, validating the engine abstraction beyond Copilot (promoted from CUST-03, 2026-06-13)
+- [x] **ENGN-05**: Pipeline supports configurable multi-call review (max_review_calls, default 1 = single call); when more than one call is configured, the diff is split into multiple review requests and findings are merged/deduped across all call results
+  - *Note (added 2026-06-21, Phase 9 discussion):* single call is the baseline; multi-call addresses PRs too large for one context window or where parallel coverage improves quality. Default stays 1 (backward-compatible). Promoted from CUST-04 scope with broader framing — CUST-04 was budget-overflow only; this is a first-class configurable mode.
+- [x] **ENGN-06**: When multi-call is active, the diff is split in a context-preserving way — files that share imports/references or belong to the same routed skill bundle must land in the same call to avoid losing cross-file context; exact splitting strategy is configurable (bundle-aligned is the default candidate)
+  - *Note (added 2026-06-21, Phase 9 discussion):* bundle-aligned splitting (group files by their classified skill bundle) is the leading candidate because bundles already represent semantic cohesion; other strategies (call-graph, directory, size-balanced) are alternatives to consider during planning.
+- [x] **ENGN-07**: When multi-call is active, calls can be executed in parallel (configurable concurrency, default 1 = sequential); parallel mode is opt-in because it multiplies token spend and adapter subprocess count
+  - *Note (added 2026-06-21, Phase 9 discussion):* sequential default avoids surprise cost spikes; parallel is useful when latency matters more than cost. Concurrency cap prevents runaway subprocess count on large PRs.
 
 ### Output
 
@@ -85,7 +91,7 @@ Deferred to future release. Tracked but not in current roadmap.
 - **CUST-01**: Per-path severity/skill overrides for monorepos
 - **CUST-02**: GitHub native `suggestion` blocks in findings for one-click apply
 - ~~**CUST-03**: Second engine adapter (e.g. Claude Code, Gemini CLI) to validate the abstraction~~ → **promoted to ENGN-04 (v1, Phase 5)** 2026-06-13
-- **CUST-04**: Chunked map-reduce review for PRs exceeding the token budget
+- ~~**CUST-04**: Chunked map-reduce review for PRs exceeding the token budget~~ → **superseded by ENGN-05/06/07 (v1, Phase 9)** 2026-06-21. Broader framing: configurable multi-call mode (not only budget-overflow), context-preserving split strategy, and optional parallelism.
 - **CUST-05**: Surface classification labels as native GitHub PR labels (opt-in) — cheap reuse of the existing zero-token classifier output
   - *Source (added 2026-06-15): Qodo PR-Agent `/generate_labels`.*
 
@@ -167,13 +173,17 @@ Which phases cover which requirements. Updated during roadmap creation.
 | LIFE-04 | Phase 8 | Complete |
 | LIFE-03 | Phase 8 | Complete (08-15) |
 | LIFE-05 | Phase 8 | Complete (08-15) |
+| SKIL-01 (gap) | Phase 9 | Complete |
+| ENGN-05 | Phase 9 | Complete |
+| ENGN-06 | Phase 9 | Complete |
+| ENGN-07 | Phase 9 | Complete |
 
 **Coverage:**
 
-- v1 requirements: 30 total
-- Mapped to phases: 30
+- v1 requirements: 33 total (added ENGN-05/06/07 2026-06-21)
+- Mapped to phases: 33
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-12*
-*Last updated: 2026-06-16 — LIFE-03 + LIFE-05 promoted to v1 (Phase 8 gap closure) to counter the false-positive carry-forward treadmill from the PR #16 dogfood*
+*Last updated: 2026-06-24 — Phase 9 complete; SKIL-01 gap + ENGN-05/06/07 traceability updated to Complete; UAT 14/14 pass*

@@ -48,10 +48,10 @@ PR submit -> fetch diff -> classify -> route -> load -> review -> output
 
 ## Context
 
-- Greenfield repository (`prevue`), only a LICENSE exists.
-- GitHub Copilot CLI supports headless use on Actions runners: `copilot -p "<prompt>" -s --no-ask-user --allow-tool=...`, auth via `COPILOT_GITHUB_TOKEN` (PAT of a user with Copilot access), model selection via `COPILOT_MODEL` or `--model`. Verified against GitHub docs (2026).
-- The token-efficiency thesis: most PR review token waste comes from loading every guideline/skill for every PR. Classification + selective skill loading bounds context size per review while specialist skills keep depth.
-- Skills follow a bundled-skillset model (similar to Agent Skills / SKILL.md conventions): each bundle is a directory of markdown skill files with metadata for routing.
+- v1 milestone complete (2026-06-24): all 9 phases shipped, 55 plans complete, 720 tests passing, live UAT 14/14 pass. Full framework implemented: walking skeleton → classification → skill loading → structured findings → multi-engine adapters → reusable workflow → customization/hardening → incremental lifecycle → classify-first + multi-call review.
+- GitHub Copilot CLI supports headless use on Actions runners: `copilot -p "<prompt>" -s --no-ask-user --allow-tool=...`, auth via `COPILOT_GITHUB_TOKEN` (PAT of a user with Copilot access), model selection via `COPILOT_MODEL` or `--model`. Verified against GitHub docs (2026). Three additional adapters (Claude Code, Cursor, Gemini) implemented and validated (Phase 5).
+- The token-efficiency thesis: most PR review token waste comes from loading every guideline/skill for every PR. Classification + selective skill loading bounds context size per review while specialist skills keep depth. Proven: classify-first pipeline (Phase 9) closes the routing→skill loading gap; multi-call mode handles oversized PRs without full-context waste.
+- Skills follow a bundled-skillset model (similar to Agent Skills / SKILL.md conventions): each bundle is a directory of markdown skill files with metadata for routing. Consumer custom skills and overrides supported (Phase 7).
 
 ## Constraints
 
@@ -65,12 +65,12 @@ PR submit -> fetch diff -> classify -> route -> load -> review -> output
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Pluggable engine adapter layer from day one | Avoid vendor lock-in; teams have different AI subscriptions | — Pending |
-| GitHub Copilot CLI as first adapter | Runs headless in Actions (`copilot -p`); consumers likely already pay for Copilot | — Pending |
-| Hybrid classification (deterministic first, LLM fallback) | Zero-token classification for clear-cut PRs; LLM only when globs are ambiguous | — Pending |
-| Built-in skill bundles + consumer overrides | Useful out of the box, customizable per repo; no remote registry complexity | — Pending |
-| Output = summary + inline comments + pass/fail check | Summary for humans scanning, inline for actionability, check for merge gating | — Pending |
-| Python implementation | User preference; strong ecosystem for GitHub API and CLI tooling | — Pending |
+| Pluggable engine adapter layer from day one | Avoid vendor lock-in; teams have different AI subscriptions | Validated — Copilot, Claude Code, Cursor, Gemini adapters all pass same contract tests (Phase 5) |
+| GitHub Copilot CLI as first adapter | Runs headless in Actions (`copilot -p`); consumers likely already pay for Copilot | Validated — live E2E on Actions runner (Phase 1); UAT confirmed multi-call and gap-closure with Copilot (Phase 9) |
+| Hybrid classification (deterministic first, LLM fallback) | Zero-token classification for clear-cut PRs; LLM only when globs are ambiguous | Validated — deterministic classifier (Phase 2); LLM fallback wired in Phase 6; classify-first ordering enforced in Phase 9 |
+| Built-in skill bundles + consumer overrides | Useful out of the box, customizable per repo; no remote registry complexity | Validated — five built-in bundles (Phase 3); consumer override/custom merge (Phase 7); classify-first gap closure (Phase 9) |
+| Output = summary + inline comments + pass/fail check | Summary for humans scanning, inline for actionability, check for merge gating | Validated — all three outputs live since Phase 4; sticky upsert, batched review API, check run confirmed |
+| Python implementation | User preference; strong ecosystem for GitHub API and CLI tooling | Validated — entire framework implemented in Python; uv + pytest + ruff toolchain solid across all phases |
 
 ## Evolution
 
@@ -90,4 +90,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-06-12 after initialization*
+*Last updated: 2026-06-24 — v1 milestone complete; context and key decisions updated to reflect shipped state*

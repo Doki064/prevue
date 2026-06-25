@@ -2,123 +2,201 @@
 
 # Getting Started
 
-Get Prevue running locally for development and testing. To wire Prevue into a consumer repository for production PR reviews, see [consumer-setup.md](./consumer-setup.md).
+Add Prevue AI PR review to your repository in four steps. This doc is for developers who want to consume Prevue from their own repo — not for contributors who want to develop Prevue itself (see [DEVELOPMENT.md](./DEVELOPMENT.md)).
 
 ## Prerequisites
 
-| Tool | Version | Required for |
-|------|---------|--------------|
-| **Python** | `>=3.12` | Framework runtime (`requires-python` in `pyproject.toml`) |
-| **uv** | `0.11.x` recommended (CI pins `0.11.21`) | Dependency install and `uv run` commands |
-| **Git** | any recent | Clone and contribute |
+You need these before starting:
 
-**Optional — only for live engine runs** (not needed for unit tests):
+| What | Requirement | Notes |
+|------|-------------|-------|
+| **GitHub repository** | Any visibility | Prevue runs on `pull_request` events; fork PRs are unsupported in v1 |
+| **Engine secret** | At least one (see table below) | Copilot CLI is the default engine |
+| **Branch protection** (optional) | Ability to add required checks | Needed if you want Prevue to gate merges |
 
-| Tool / credential | When needed |
-|-------------------|-------------|
-| **Node.js** `>=22` | Installing `copilot-cli` or `claude-code-cli` locally |
-| **`COPILOT_GITHUB_TOKEN`** | Fine-grained user PAT with Copilot Requests (`github_pat_…`) for `copilot-cli` |
-| **`ANTHROPIC_API_KEY`** | Claude Code CLI adapter |
-| **`CURSOR_API_KEY`** | Cursor CLI adapter |
-| **`GITHUB_TOKEN`** | GitHub API access when running `prevue review` outside Actions |
-| **`GITHUB_EVENT_PATH`** + **`GITHUB_REPOSITORY`** | PR event context for `prevue review` (normally set by Actions) |
+### Engine secrets
 
-Install uv if you do not have it:
+Pick one engine. You only need the secret for the engine you choose.
 
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
+| Engine | Workflow input | Secret name | How to get it |
+|--------|---------------|-------------|---------------|
+| `copilot-cli` (default) | `engine: copilot-cli` | `COPILOT_GITHUB_TOKEN` | Fine-grained user-owned PAT with **Copilot Requests** permission (prefix `github_pat_`) — not the Actions `GITHUB_TOKEN` |
+| `claude-code-cli` | `engine: claude-code-cli` | `ANTHROPIC_API_KEY` | Anthropic API key |
+| `cursor-cli` | `engine: cursor-cli` | `CURSOR_API_KEY` | Cursor API key |
+
+## Step 1 — Add the caller workflow
+
+Create `.github/workflows/prevue-review.yml` in your repository. Pin to a [release tag](https://github.com/Doki064/prevue/releases) — do not use `@main`.
+
+```yaml
+name: Prevue Review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: prevue-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  prevue:
+    uses: Doki064/prevue/.github/workflows/prevue-review.yml@v0.6.0
+    with:
+      engine: copilot-cli
+    secrets:
+      copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
 ```
 
-## Installation
+**Permission notes:**
+- `contents: write` — required for resolving outdated review threads via GraphQL. Prevue does not commit to your repository.
+- `pull-requests: write` — post sticky summary and inline comments.
+- `checks: write` — create the `prevue/review` merge-gate check.
+- Do **not** use `secrets: inherit` — pass only the named secret for your engine.
 
-1. Clone the repository:
+**To use Claude Code CLI instead**, replace the `with:` / `secrets:` block:
 
-```bash
-git clone https://github.com/Doki064/prevue.git
-cd prevue
+```yaml
+    with:
+      engine: claude-code-cli
+    secrets:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
-2. Install dependencies (creates a virtualenv and installs dev tools):
+## Step 2 — Add the secret to your repository
 
-```bash
-uv sync --locked
+Go to **Settings → Secrets and variables → Actions → New repository secret** and add the secret matching your chosen engine:
+
+| Engine | Secret name |
+|--------|-------------|
+| `copilot-cli` | `COPILOT_GITHUB_TOKEN` |
+| `claude-code-cli` | `ANTHROPIC_API_KEY` |
+| `cursor-cli` | `CURSOR_API_KEY` |
+
+The secret name in your repository settings must match the name in the `secrets:` block of your caller workflow exactly.
+
+## Step 3 — Add the Prevue config file
+
+Create `.github/prevue.yml` on your **default branch** (not just on a feature branch — Prevue reads config from the PR base ref for security).
+
+Copy the minimal starter below, or use the [full annotated example](./examples/prevue.yml):
+
+```yaml
+review:
+  max_input_tokens: 120000
+  output_reserve_tokens: 12000
+  min_severity_to_comment: warning
+  min_severity_to_fail: null
+  max_inline_comments: 10
+  incremental: true
+  resolve_outdated: true
+  max_known_issues: 20
+
+skills:
+  exclude: []
+  max_skill_bytes: 65536
+  max_total_consumer_bytes: 262144
+  max_consumer_skills: 50
+
+classification:
+  fallback:
+    enabled: true
+    model: null
+
+engine:
+  name: copilot-cli
+
+skip:
+  review_bots: []
+  skip_labels:
+    - skip-review
+  skip_title_patterns: []
 ```
 
-`uv sync --locked` installs the `prevue` CLI (`uv run prevue …`) and dev dependencies (`pytest`, `ruff`, `responses`).
+Commit this file to your default branch before opening a test PR. Config changes on a PR head branch take effect only after merge.
 
-## First run
+## Step 4 — Open a test PR
 
-Confirm the install with the test suite — no engine tokens or GitHub credentials required:
+Open a non-draft pull request that touches at least one non-ignored file. The workflow triggers on `opened`, `synchronize`, `reopened`, and `ready_for_review` events.
 
-```bash
-uv run pytest -q
-```
+## Verifying it works
 
-Explore the CLI:
+After the workflow runs, check these three places:
 
-```bash
-uv run prevue review --help
-uv run prevue preflight --help
-```
+**1. Actions tab — workflow run**
 
-Run the same checks CI runs before opening a PR:
+Open the `Prevue Review` workflow run. Successful output looks like:
 
-```bash
-./scripts/ci-local.sh
-```
+- `Pre-flight: head changed or no marker — full install` (first run)
+- `Install engine CLI` step completes
+- `Run review` step completes with exit 0
 
-That script runs `uv sync --locked`, pytest with coverage, ruff check/format, actionlint, and zizmor on workflow YAML.
+If the run is skipped (shows as green but no steps ran), the PR may be from a fork (unsupported in v1) or the PR was in draft state.
 
-### Optional: live `prevue review` locally
+**2. PR — sticky summary comment**
 
-Unit tests mock GitHub and engine boundaries. A real review needs a PR event payload and API access:
+Prevue posts a sticky comment titled `Prevue Review`. It includes:
 
-```bash
-export GITHUB_TOKEN="ghp_…"                    # repo-scoped token with pull-requests + checks access
-export GITHUB_REPOSITORY="owner/repo"
-export GITHUB_EVENT_PATH="/path/to/event.json" # pull_request webhook JSON
-export PREVUE_ENGINE="copilot-cli"             # or claude-code-cli, cursor-cli
-export COPILOT_GITHUB_TOKEN="github_pat_…"     # when using copilot-cli
+- A verdict line (`pass`, `neutral`, or `fail`)
+- A **Coverage** section listing which files were reviewed and which were skipped due to token budget
+- Open findings with severity and fingerprints
 
-uv run prevue review
-```
+**3. PR — Checks tab**
 
-Install the matching engine CLI first (see `.github/scripts/install-engine-cli.sh`). For day-to-day framework work, prefer `uv run pytest` over local live reviews.
+Look for the `prevue/review` check (not the `prevue / review` job check). The Python-posted check is what you require in branch protection — the Actions job check is a separate entry and should not be the required gate.
+
+| Check result | Meaning |
+|--------------|---------|
+| `pass` | No findings at or above `min_severity_to_fail` |
+| `neutral` | Skipped (draft, bot, label, title), or partial review with no threshold-triggering findings |
+| `fail` | At least one finding at or above `min_severity_to_fail` |
+
+If the Coverage section says "⚠️ Partial review — some files not reviewed", some files were dropped due to the token budget. Raise `review.max_input_tokens` or add `labels` globs for high-risk paths so they pack with higher priority.
+
+## What happens on each subsequent PR
+
+- **On each push:** Prevue reviews only files changed since the last reviewed SHA (`incremental: true` default). Same-SHA re-runs skip engine CLI install entirely.
+- **Outdated threads:** When findings are resolved or go stale, Prevue collapses the inline review threads (`resolve_outdated: true` default).
+- **Skip labels:** Add the `skip-review` label to a PR to skip review for that PR. Customize the list in `skip.skip_labels`.
 
 ## Common setup issues
 
-### `requires-python >=3.12` install failure
+### Workflow runs but no `prevue/review` check appears
 
-**Symptom:** `uv sync` or package resolution fails on an older Python.
+The Python step may have exited early. Check the `Run review` step logs for error output. Common causes:
 
-**Fix:** Install Python 3.12 or newer and point uv at it (`uv python install 3.12`, or set `UV_PYTHON`).
+- Missing or wrong secret name (the secret name in repository settings must match exactly)
+- `COPILOT_GITHUB_TOKEN` is the Actions `GITHUB_TOKEN` instead of a user-owned fine-grained PAT — Copilot CLI requires `github_pat_` prefix
 
-### `prevue review` exits with missing env vars
+### `prevue/review` check is `neutral` on first run
 
-**Symptom:** `KeyError` or errors referencing `GITHUB_EVENT_PATH`, `GITHUB_REPOSITORY`, or `GITHUB_TOKEN`.
+The PR may have matched a skip condition (`skip_labels`, `skip_title_patterns`) or no non-ignored files changed. Check the sticky summary comment for the skip reason.
 
-**Fix:** Export the variables above, or use fixture payloads under `tests/fixtures/` (for example `event_pull_request.json`) with a PAT that can read the target PR. For framework development, run `uv run pytest` instead.
+### `contents: write` permission error
 
-### Engine auth errors on live runs
+If you see a GraphQL 403 on thread resolution, ensure your caller workflow grants `contents: write` (not `contents: read`). This scope is required for the `resolveReviewThread` mutation and was verified live against the GitHub API. If you cannot grant write scope, set `review.resolve_outdated: false` in `.github/prevue.yml`.
 
-**Symptom:** `COPILOT_GITHUB_TOKEN must be a fine-grained…` or similar from an engine adapter.
+### Config changes not taking effect
 
-**Fix:** Set the secret for your chosen engine (`COPILOT_GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, or `CURSOR_API_KEY`). Copilot requires a **user-owned** fine-grained PAT — not the Actions `GITHUB_TOKEN`. See [consumer-setup.md](./consumer-setup.md#per-engine-named-secrets).
+Prevue reads `.github/prevue.yml` from the **PR base ref** (your default branch), not the PR head. Commit config changes to your default branch first; they take effect on the next PR opened after the merge.
 
-### `./scripts/ci-local.sh` fails on actionlint
+## Optional: enable `/prevue` commands
 
-**Symptom:** `actionlint not found and go is not installed`.
-
-**Fix:** Install [actionlint](https://github.com/rhysd/actionlint#installation) or Go (the script auto-installs actionlint via `go install`). Workflow YAML linting is optional for quick pytest-only loops.
+Phase 8 adds on-demand commands via PR issue comments (`/prevue review`, `/prevue dismiss <id>`, `/prevue resolve <id>`). This requires a separate caller workflow. Copy the template from the Prevue repo and pin `ref:` to a release tag — see [consumer-setup.md](./consumer-setup.md) for the full snippet and permission requirements.
 
 ## Next steps
 
 | Goal | Doc |
 |------|-----|
-| Adopt Prevue in your repo (caller workflow, secrets, merge gate) | [consumer-setup.md](./consumer-setup.md) |
-| Tune `prevue.yml` knobs and defaults | [configuration.md](./configuration.md) |
-| Understand pipeline modules and data flow | [ARCHITECTURE.md](./ARCHITECTURE.md) |
-| Local dev workflow, lint, and PR conventions | [DEVELOPMENT.md](./DEVELOPMENT.md) |
-| Test layout, coverage, and CI test commands | [TESTING.md](./TESTING.md) |
-| Custom review skills | [skills.md](./skills.md) |
-| Threat model and trust boundaries | [security.md](./security.md) |
+| Tune token budgets, severity gates, skip rules | [configuration.md](./configuration.md) |
+| Add custom review skills for your codebase | [skills.md](./skills.md) |
+| `/prevue` commands, branch protection, upgrade notes | [consumer-setup.md](./consumer-setup.md) |
+| Understand the pipeline internals | [ARCHITECTURE.md](./ARCHITECTURE.md) |
+| Threat model, trust boundaries, D-08 tool posture | [security.md](./security.md) |
+| Develop and contribute to Prevue itself | [DEVELOPMENT.md](./DEVELOPMENT.md) |

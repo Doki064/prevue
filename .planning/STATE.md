@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 08-15-PLAN.md
-last_updated: "2026-06-16T12:00:00.000Z"
-last_activity: 2026-06-16 -- Completed 08-15 /prevue command surface
+status: complete
+stopped_at: "v1 milestone complete — all 9 phases done; UAT 14/14 pass; WR-01..WR-12 code review fixes applied"
+last_updated: "2026-06-24T00:00:00.000Z"
+last_activity: 2026-06-24 -- Phase 09 verification updated; UAT 14/14 confirmed; WR-08..WR-12 fixes committed; ruff CI gate clean; 720/720 tests
 progress:
-  total_phases: 8
-  completed_phases: 7
-  total_plans: 49
-  completed_plans: 45
-  percent: 90
+  total_phases: 9
+  completed_phases: 9
+  total_plans: 55
+  completed_plans: 55
+  percent: 100
 ---
 
 # Project State
@@ -21,24 +21,24 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-12)
 
 **Core value:** Optimal memory context and token usage when integrating with AI — load only the review skills the PR actually needs — while keeping review quality on par with a full-context review.
-**Current focus:** Phase 08 — incremental-stateful-review-lifecycle
+**Current focus:** v1 milestone complete — all 9 phases shipped
 
 ## Current Position
 
-Phase: 08 (incremental-stateful-review-lifecycle) — EXECUTING
-Plan: 15 of 16 complete
-Status: Ready for 08-16
-Last activity: 2026-06-16 -- Completed 08-15 /prevue command surface
+Phase: 09 (classification-skill-loading-multi-call-review) — COMPLETE
+Plan: 6 of 6 (all complete; UAT 14/14 pass; WR-01..WR-12 fixes applied)
+Status: v1 complete — 720/720 tests, live UAT confirmed, verification report finalized
+Last activity: 2026-06-24 -- Phase 09 post-review fixes committed; VERIFICATION.md updated to 10/10
 
-Progress: [██████████] 11/16 plans complete (Phase 08)
+Progress: [██████████] 6/6 plans complete (Phase 09) — All 9 phases complete
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 43
-- Average duration: 16 min (30 plans with recorded duration)
-- Total execution time: 8.0 hours (30 plans with recorded duration)
+- Total plans completed: 55
+- Average duration: 16 min (46 plans with recorded duration)
+- Total execution time: ~12.5 hours (46 plans with recorded duration; Phase 08/09 partially recorded)
 
 **By Phase:**
 
@@ -51,11 +51,12 @@ Progress: [██████████] 11/16 plans complete (Phase 08)
 | 05 | 3 | 90 min | 30 min |
 | 06 | 4 | 48 min | 12 min |
 | 07 | 7 | 53 min | 8 min |
-| 08 | 10 | 133 min | 13 min |
+| 08 | 16 | 133 min (10 recorded) | 13 min |
+| 09 | 6 | 56 min | 9 min |
 
 **Recent Trend:**
 
-- Last 5 plans: 07-03 (-), 07-04 (-), 07-05 (-), 07-06 (8 min), 07-07 (5 min)
+- Last 5 plans: 09-02 (6 min), 09-03 (4 min), 09-04 (16 min), 09-05 (12 min), 09-06 (11 min)
 
 **By Plan:**
 
@@ -106,6 +107,12 @@ Progress: [██████████] 11/16 plans complete (Phase 08)
 | Phase 08-incremental-stateful-review-lifecycle P08 | 7 | 3 tasks | 3 files |
 | Phase 08-incremental-stateful-review-lifecycle P10 | 6 | 2 tasks | 4 files |
 | Phase 08-incremental-stateful-review-lifecycle P09 | 5 | 2 tasks | 2 files |
+| Phase 09-classification-skill-loading-multi-call-review P01 | 7 | 3 tasks | 7 files |
+| Phase 09-classification-skill-loading-multi-call-review P02 | 6 | 3 tasks | 5 files |
+| Phase 09-classification-skill-loading-multi-call-review P03 | 4 | 3 tasks | 1 files |
+| Phase 09-classification-skill-loading-multi-call-review P04 | 16 | 2 tasks | 3 files |
+| Phase 09-classification-skill-loading-multi-call-review PP05 | 12 | 3 tasks | 4 files |
+| Phase 09-classification-skill-loading-multi-call-review P06 | 11 | 2 tasks (+ 1 checkpoint) | 6 files |
 
 ## Accumulated Context
 
@@ -113,6 +120,8 @@ Progress: [██████████] 11/16 plans complete (Phase 08)
 
 - Phase 8 added: Incremental & Stateful Review Lifecycle (LIFE-01/02/04)
 - Phase 8 edited: shortened title; LIFE-01/02/04 detail moved into Goal; dir slug → 08-incremental-stateful-review-lifecycle
+- Phase 9 added: Classification-aligned skill loading — reconcile classify/route with selective skill selection (SKIL-01 gap; gap-demo-sandbox PR #25 proof)
+- Phase 9 scope expanded 2026-06-21: added multi-call review (ENGN-05/06/07 — configurable max_review_calls, context-preserving split, optional parallelism); CUST-04 superseded; dir slug → 09-classification-skill-loading-multi-call-review; old 3 plans deleted (re-plan after discuss)
 
 ### Decisions
 
@@ -178,10 +187,25 @@ Recent decisions affecting current work:
 - [Phase 08-incremental-stateful-review-lifecycle]: D-05/D-06 reconciliation: in_scope_paths stale scope; SEVERITY_RANK escalation-only .edit() (08-05)
 - [Phase 08-incremental-stateful-review-lifecycle]: D-01/D-11 orchestration: decide_scope before fetch; resolve-before-gate open set; noop skips engine; head_sha sticky marker (08-06)
 - [Phase 08-incremental-stateful-review-lifecycle]: resolveReviewThread 403 under pull-requests:write on live sandbox — best-effort skip ships LIFE-01/02; resolve_outdated opt-out documented; no contents:write (WKFL-04) (08-07)
-- [Phase 08-incremental-stateful-review-lifecycle]: Live UAT PASS incremental scoping + noop re-run on MaruDryFruits PR #21/#22 (08-07)
-- [Phase ?]: Rephrase-at-same-line open-set fix: keep carried prior when fingerprint differs at same location; post_inline_review _severity_escalated already handles quiet path — no fingerprint gating needed in comments.py (08-08)
-- [Phase ?]: Engine CLI install only (not checkout/uv sync) skipped on noop — prevue review step still runs for marker/check refresh via _finish_noop_review (08-10)
-- [Phase ?]: GFM _posted by Prevue_ replaces HTML sub INLINE_MARKER; LEGACY_INLINE_MARKER for backward-compat; deterministic incremental disclaimer in render_body (08-09)
+- [Phase 08-incremental-stateful-review-lifecycle]: Live UAT PASS incremental scoping + noop re-run on gap-demo-sandbox PR #21/#22 (08-07)
+- [Phase 08-gap-closure]: Rephrase-at-same-line open-set fix: keep carried prior when fingerprint differs at same location; post_inline_review _severity_escalated already handles quiet path — no fingerprint gating needed in comments.py (08-08)
+- [Phase 08-gap-closure]: Engine CLI install only (not checkout/uv sync) skipped on noop — prevue review step still runs for marker/check refresh via _finish_noop_review (08-10)
+- [Phase 08-gap-closure]: GFM _posted by Prevue_ replaces HTML sub INLINE_MARKER; LEGACY_INLINE_MARKER for backward-compat; deterministic incremental disclaimer in render_body (08-09)
+- [Phase 09]: Flat ReviewConfig caps (not nested multicall: sub-model) — parity with existing knobs, extra=forbid preserved (09-01)
+- [Phase 09]: KEYWORD_THRESHOLD=0.15 with Jaccard 0.7/path_signal 0.3 weighting — strong content overlap crosses threshold; weak content + path match also crosses (09-02)
+- [Phase 09]: Gap-closure guard pass-through: no adapter + no llm_skill_names conservatively includes all routed below-threshold skills (prefer over-loading to silent drop) (09-02)
+- [Phase 09]: _dedup_sort shared between select_skills and select_skills_hybrid — loader.py imports from selection.py (09-02)
+- [Phase 09]: referenced_paths(path, patch) two-arg signature matches 09-01 RED scaffold contract (importscan)
+- [Phase 09]: Python ast-first + regex-fallback; JS/TS regex-only; unknown lang degrades to [] (importscan D-06/09-03)
+- [Phase 09]: Classify-first: classify(reduced.files) before pack fixes SKIL-01 gap
+- [Phase 09]: Double-duty llm_select_skills gated on fallback ran — no extra adapter call on fully-matched PRs
+- [Phase 09]: Empty llm_select_skills degrade leaves llm_skill_names=None preserving gap-closure escalation path in select_skills_hybrid
+- [Phase 09]: Single-call EngineFailure propagates (D-09 preserved); multi-call fail-soft only when len(call_requests)>1 (09-05)
+- [Phase 09]: Whole-run cap (D-10): repack with budget=max_total_run_tokens-classify_tokens; all-dropped→skip neutral; partial→skipped_reason with 'run token budget reached' (09-05)
+- [Phase 09]: merge_findings fingerprint dedup with SEVERITY_RANK tie-break: error beats warning on collision (Pitfall 4); per_call token breakdown in engine_meta for 09-06 (Pitfall 5) (09-05)
+- [Phase 09]: skill_sources built via keyword_score re-eval per matched skill: crossed KEYWORD_THRESHOLD→'keyword', LLM double-duty names→'llm', below-threshold routed→'routed' (09-06)
+- [Phase 09]: run_budget_alert rendered as standalone section BEFORE Metadata <details> block (T-09-20 D-10 prominent alert requirement) (09-06)
+- [Phase 09]: ARCHITECTURE.md classify-first pipeline + multi-call section; configuration.md routing drives hybrid skill loading not metadata-only (CLSF-03/09-06)
 
 ### Pending Todos
 
@@ -189,9 +213,7 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Research]: Copilot CLI behavior on clean Actions runners (auth, output stability, timeouts) is the highest unknown — spike landed in Phase 1 deliberately
-- [Research]: Diff-hunk → inline-comment position mapping is a known multi-day rabbit hole — budget real time in Phase 4
-- [Research]: REQUIREMENTS.md header said 26 v1 requirements; actual count is 27 — corrected in traceability
+None — all pre-v1 research risks resolved. Phase 1 spike confirmed Copilot CLI headless auth. Phase 4 solved diff-hunk position mapping. v1 milestone complete.
 
 ### Quick Tasks Completed
 
@@ -205,11 +227,11 @@ Items acknowledged and carried forward from previous milestone close:
 
 | Category | Item | Status | Deferred At |
 |----------|------|--------|-------------|
-| lint | Pre-existing ruff E501/I001 in test_copilot_adapter.py, test_positions.py | open | 04-05 |
-| lifecycle | LIFE-05 smarter inline thread resolve/dismiss (see REQUIREMENTS.md v2) | open | 08-ship |
+| lint | Pre-existing ruff E501/I001 in test_copilot_adapter.py, test_positions.py | resolved (commit 418a1f0, 2026-06-23) | 04-05 |
+| lifecycle | LIFE-05 smarter inline thread resolve/dismiss (see REQUIREMENTS.md v2) | open (v2 backlog) | 08-ship |
 
 ## Session Continuity
 
-Last session: 2026-06-16T05:33:08.233Z
-Stopped at: Phase 08 LIFE-03+LIFE-05 gap-closure context gathered
-Resume file: .planning/phases/08-incremental-stateful-review-lifecycle/08-CONTEXT.md
+Last session: 2026-06-24T00:00:00.000Z
+Stopped at: v1 milestone complete — verification finalized, all docs updated
+Resume file: None

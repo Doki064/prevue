@@ -21,6 +21,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Reusable Workflow & Hybrid Classification** - `workflow_call` packaging, consumer config, LLM classification fallback, skip conditions — first shippable (completed 2026-06-13)
 - [x] **Phase 7: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget (completed 2026-06-14)
 - [x] **Phase 8: Incremental & Stateful Review Lifecycle** - Incremental review scoped to the diff since the last-reviewed SHA, carry-forward/dedupe of prior findings, and auto-resolve of outdated inline threads (LIFE-01/02/04) (completed 2026-06-15)
+- [x] **Phase 9: Classification-aligned skill loading + multi-call review** - Reconcile classify/route with selective skill selection (SKIL-01 gap), and add configurable multi-call review with context-preserving splitting and optional parallel execution (ENGN-05/06/07) (completed 2026-06-21; live UAT deferred by user)
 
 ## Phase Details
 
@@ -247,7 +248,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -259,6 +260,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8
 | 6. Reusable Workflow & Hybrid Classification | 4/4 | Complete    | 2026-06-13 |
 | 7. Customization & Hardening | 7/7 | Complete    | 2026-06-14 |
 | 8. Incremental & Stateful Review Lifecycle | 16/16 | Complete   | 2026-06-16 |
+| 9. Classification-aligned skill loading + multi-call review | 6/6 | Complete   | 2026-06-21 |
 
 ### Phase 8: Incremental & Stateful Review Lifecycle
 
@@ -321,7 +323,53 @@ Plans:
 
 - [x] 08-16-PLAN.md — D-16 issue_comment prevue-command.yml workflow + actionlint/zizmor + §L7 live pre-ship security checkpoint
 
+### Phase 9: Classification-aligned skill loading + multi-call review
+
+**Goal:** (1) Close the classify/route → skill loading gap: routed bundle labels expand the loaded skill set, not only sticky Metadata. (2) Add configurable multi-call review: when one LLM call is not enough to cover a PR, split the diff into logical chunks (default: by routed skill bundle to preserve cross-file import locality), run calls sequentially or in parallel (configurable), and merge/dedupe findings.
+**Mode:** gap-closure + feature
+**Depends on:** Phase 8
+**Requirements:** SKIL-01 (gap closure), ROUT-01, CLSF-03, OUTP-04, ENGN-05, ENGN-06, ENGN-07
+**Success Criteria** (what must be TRUE):
+
+  1. After `classify` + `route`, skills from **routed bundles** are unioned into the loaded set and appear in assembled `instructions` before `engine.review()`
+  2. Path-glob `select_skills` behavior is unchanged for bundles **not** present in `result_cls.bundles`
+  3. LLM fallback labels trigger the same union as deterministic labels
+  4. Post-union re-trim and byte-limit guard prevent budget overrun; neutral skip if still too large
+  5. Sticky Metadata audit reflects final loaded skills; docs pipeline diagram matches implementation
+  6. Regression test covers “classified bundle ≠ glob path” case (gap-demo-sandbox gap shape)
+  7. `max_review_calls` config (default 1) controls whether multi-call review is active; single-call path is unchanged
+  8. When multi-call is active, the diff is split into chunks that keep cross-referencing files together (bundle-aligned by default); splitting strategy is configurable
+  9. When multi-call is active, findings from all calls are merged and deduped using the existing fingerprint mechanism before gate/output
+  10. `review_concurrency` config (default 1 = sequential) controls parallel execution; parallel calls run concurrently up to the cap
+
+**Plans:** 6/6 plans complete
+
+Plans:
+
+**Wave 1**
+
+- [x] 09-01-PLAN.md — Foundation: 5 new ReviewConfig caps (D-09) + gap-demo-sandbox gap-shape fixture + RED scaffolds (selection/importscan/multicall)
+
+**Wave 2** *(parallel, blocked on Wave 1)*
+
+- [x] 09-02-PLAN.md — B+D hybrid skill selection: keyword floor + LLM escalation within routed bundles (D-02 SKIL-01 gap, TDD)
+- [x] 09-03-PLAN.md — Safe cross-file import scan: ast/regex with graceful degrade (D-06 ENGN-06, TDD)
+
+**Wave 3** *(blocked on Wave 2)*
+
+- [x] 09-04-PLAN.md — Classify-first reorder in run_review + hybrid selection wiring + gap-demo-sandbox regression (D-01/D-03/D-12)
+
+**Wave 4** *(blocked on Wave 3)*
+
+- [x] 09-05-PLAN.md — Multi-call split/execute/merge orchestration + run_review wiring + whole-run cap (ENGN-05/06/07, D-05/06/07/08/10, TDD)
+
+**Wave 5** *(blocked on Wave 4; not autonomous — live UAT checkpoint)*
+
+- [x] 09-06-PLAN.md — Sticky audit (skill-source + per-call token meta + prominent budget alert) + docs pipeline update + live gap-demo-sandbox/multi-call UAT (D-10/D-11, OUTP-04/CLSF-03) — Tasks 1+2 complete; Task 3 live UAT deferred by user
+
 ---
 *Roadmap created: 2026-06-12*
 *Phase 8 planned: 2026-06-15 — 10 plans, 6 waves (LIFE-01/02/04)*
 *Phase 8 gap closure planned: 2026-06-16 — 6 plans (08-11..08-16), waves 7-12 (LIFE-03 + LIFE-05)*
+*Phase 9 planned: 2026-06-21 — 6 plans, 5 waves (SKIL-01 gap + ROUT-01/CLSF-03/OUTP-04 + ENGN-05/06/07)*
+*Phase 9 complete: 2026-06-24 — UAT 14/14 pass; WR-01..WR-12 code review fixes applied; ruff CI gate clean; 720/720 tests*

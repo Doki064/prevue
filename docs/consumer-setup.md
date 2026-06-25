@@ -56,15 +56,15 @@ On personal repos, invited write collaborators are labeled **`COLLABORATOR`** (n
 
 Commands on fork PRs are refused with no engine spend (same SECR-01 posture as automatic review). The command workflow runs in **default-branch context** and never checks out the PR head or merge ref — diff and state are fetched via the API only.
 
-### Minimal scopes (same as review)
+### Minimal scopes
 
 | Permission | Scope |
 |------------|-------|
-| `contents` | `write` |
+| `contents` | `read` |
 | `pull-requests` | `write` |
-| `checks` | `write` |
+| `actions` | `write` |
 
-`contents: write` is required for LIFE-04 (`resolveReviewThread`). Verified on live dogfood (PR #16, 2026-06): `pull-requests: write` alone returns GraphQL **403 Forbidden**; with `contents: write`, thread resolution succeeds. Prevue only uses write scope for GraphQL lifecycle mutations — not for committing to the repository.
+`actions: write` is required for the gate workflow to dispatch `prevue-command-run.yml`. `contents: write` and `checks: write` are granted to the dispatched run workflow, not to this gate — consumers do not need to configure them here.
 
 Do **not** use `pull_request_target` or `secrets: inherit`. Pass only the named engine secret(s) you need.
 
@@ -80,9 +80,9 @@ on:
     types: [created]
 
 permissions:
-  contents: write
+  contents: read
   pull-requests: write
-  checks: write
+  actions: write
 
 jobs:
   command:
@@ -106,7 +106,7 @@ Optional inputs:
 |-------|---------|---------|
 | `engine` | `copilot-cli` | Review engine (`copilot-cli`, `claude-code-cli`, `cursor-cli`) |
 | `config-path` | `.github/prevue.yml` | Path to Prevue config inside the consumer repo |
-| `prevue-ref` | `v0.6.0` | Prevue branch/tag/SHA for self-checkout (use your feature branch pre-release) |
+| `prevue-ref` | `""` (uses `main`) | Prevue branch/tag/SHA for self-checkout (use your feature branch pre-release) |
 
 `classification.fallback.enabled` defaults to **`true`** — unmatched file paths trigger a cheap LLM classify call before review. Set `enabled: false` in `.github/prevue.yml` for purely deterministic (zero-token) classification.
 
