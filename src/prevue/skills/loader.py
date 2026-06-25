@@ -10,9 +10,9 @@ from pathlib import Path
 import frontmatter
 from pathspec import GitIgnoreSpec
 
-from prevue.classify.models import canonical_index
 from prevue.config import SkillsConfig
 from prevue.skills.models import Skill
+from prevue.skills.selection import _dedup_sort
 
 
 def _skills_root():
@@ -145,7 +145,6 @@ def load_skills(
 def select_skills(skills: list[Skill], paths: list[str]) -> list[Skill]:
     """Select skills whose applies-to globs match any changed path (D-03/D-04)."""
     matched: list[Skill] = []
-    seen: set[str] = set()
     for skill in skills:
         spec = GitIgnoreSpec.from_lines(skill.applies_to)
         # Use check_file().include (not match_file) to agree with pack.make_file_weight
@@ -153,13 +152,8 @@ def select_skills(skills: list[Skill], paths: list[str]) -> list[Skill]:
         # which would let a skill affect pack priority without being loaded (or vice versa).
         if not any(spec.check_file(path).include for path in paths):
             continue
-        key = f"{skill.bundle}/{skill.filename}"
-        if key in seen:
-            continue
-        seen.add(key)
         matched.append(skill)
-    matched.sort(key=lambda s: (canonical_index(s.bundle), s.filename))
-    return matched
+    return _dedup_sort(matched)
 
 
 def assemble_instructions(baseline: str, skills: list[Skill]) -> str:
