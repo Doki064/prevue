@@ -26,6 +26,7 @@ from prevue.github.comments import (
     INLINE_MARKER,
     LEGACY_INLINE_MARKER,
     MARKER,
+    PARTIAL_MARKER,
     _escape_inline_markdown,
     _escape_table_cell,
     _is_prevue_inline_comment,
@@ -1625,3 +1626,274 @@ class TestRenderBodyIncrementalDisclaimer:
         # Both bodies share the same disclaimer prefix (deterministic)
         assert "scoped to files changed since" in body1
         assert "scoped to files changed since" in body2
+
+
+# ---------------------------------------------------------------------------
+# Task 1 (09-06) — D-10/D-11: Skill-source provenance, per-call token meta,
+# and prominent whole-run budget-reached alert
+# ---------------------------------------------------------------------------
+
+
+class TestRenderBodySkillSourceProvenance:
+    """D-11: skill_sources kwarg annotates the Skills metadata line with selection source."""
+
+    def _cls(self) -> ClassificationResult:
+        return ClassificationResult(labels={"security": "**/*"}, bundles=["security"])
+
+    def test_render_body_skill_source_provenance_routed_and_keyword(self) -> None:
+        """A routed (below-keyword-threshold) skill shows source; a keyword-floor skill shows
+        'keyword'. Sources appear in the collapsed Metadata block adjacent to the Skills line."""
+        body = render_body(
+            _sample_result(),
+            classification=self._cls(),
+            loaded_skills=["Gap Demo Auth Guard (security, consumer)", "Sec Rule (security)"],
+            # WR-03: skill_sources is keyed by the FULL rendered entry, not the bare name.
+            skill_sources={
+                "Gap Demo Auth Guard (security, consumer)": "routed",
+                "Sec Rule (security)": "keyword",
+            },
+        )
+
+        assert "routed" in body
+        assert "keyword" in body
+
+    def test_render_body_skill_source_provenance_llm(self) -> None:
+        """A skill selected via LLM escalation shows source 'llm'."""
+        body = render_body(
+            _sample_result(),
+            classification=self._cls(),
+            loaded_skills=["AI Picked (security)"],
+            skill_sources={"AI Picked (security)": "llm"},
+        )
+
+        assert "llm" in body
+
+    def test_render_body_skill_source_name_contains_open_paren(self) -> None:
+        """WR-03: a skill name containing ' (' must still get its [source] tag.
+
+        The old split(' (')[0] reconstruction truncated such names and silently
+        dropped the annotation; keying skill_sources by the full rendered entry fixes it.
+        """
+        entry = "Auth (legacy) Guard (security)"
+        body = render_body(
+            _sample_result(),
+            classification=self._cls(),
+            loaded_skills=[entry],
+            skill_sources={entry: "llm"},
+        )
+
+        assert "Auth (legacy) Guard (security) [llm]" in body
+
+    def test_render_body_skill_source_absent_renders_unchanged(self) -> None:
+        """When skill_sources is None (default), the Skills line renders as today —
+        backward compatible; the word 'routed' must not appear."""
+        body_with = render_body(
+            _sample_result(),
+            classification=self._cls(),
+            loaded_skills=["Sec Rule (security)"],
+        )
+        body_without = render_body(
+            _sample_result(),
+            classification=self._cls(),
+            loaded_skills=["Sec Rule (security)"],
+            skill_sources=None,
+        )
+
+        assert body_with == body_without
+        # Neither 'routed' nor 'keyword' injected when skill_sources absent
+        assert "routed" not in body_without
+        assert "keyword" not in body_without
+
+
+class TestRenderBodyPerCallTokenMeta:
+    """D-11 / Pitfall 5: per_call breakdown in token_meta renders a per-bundle token line."""
+
+    def test_render_body_per_call_token_meta_renders_breakdown(self) -> None:
+        """When token_meta has a per_call list, each bundle/label + token count is shown."""
+        token_meta = {
+            "review": 1500,
+            "classify": 100,
+            "per_call": [
+                {"bundle": "security", "review": 800},
+                {"bundle": "frontend", "review": 700},
+            ],
+        }
+        body = render_body(_sample_result(), token_meta=token_meta)
+
+        # The per-call breakdown is present
+        assert "security" in body
+        assert "800" in body
+        assert "frontend" in body
+        assert "700" in body
+        # Aggregate total is still present
+        assert "1500" in body
+
+    def test_render_body_no_per_call_renders_unchanged(self) -> None:
+        """Single-call runs (no per_call key) produce the same Tokens line as today."""
+        token_meta_without = {
+            "review": 1200,
+            "classify": 80,
+        }
+        token_meta_with_empty = {
+            "review": 1200,
+            "classify": 80,
+            "per_call": [],
+        }
+        body_without = render_body(_sample_result(), token_meta=token_meta_without)
+        body_with_empty = render_body(_sample_result(), token_meta=token_meta_with_empty)
+
+        # Empty per_call list should render the same as absent
+        assert "Tokens: review" in body_without
+        assert body_without == body_with_empty
+
+    def test_render_body_per_call_single_entry_no_breakdown_noise(self) -> None:
+        """With exactly 1 call, no per-bundle breakdown is needed (just the aggregate line)."""
+        token_meta = {
+            "review": 900,
+            "classify": 50,
+            "per_call": [{"bundle": "backend", "review": 900}],
+        }
+        body = render_body(_sample_result(), token_meta=token_meta)
+
+        # Single-call: aggregate Tokens line present
+        assert "900" in body
+
+
+class TestRenderBodyProminentBudgetAlert:
+    """D-10: Whole-run budget-reached alert is PROMINENT — before the Metadata heading."""
+
+    def test_render_body_prominent_budget_alert_present(self) -> None:
+        """When run_budget_reached=True, the alert text contains 'run token budget reached'
+        and the N-files-not-reviewed count."""
+        body = render_body(
+            _sample_result(),
+            run_budget_reached=True,
+            run_budget_skipped_count=3,
+        )
+
+        assert "run token budget reached" in body.lower()
+        assert "3" in body
+
+    def test_render_body_prominent_budget_alert_outside_metadata(self) -> None:
+        """The budget alert MUST appear BEFORE the Metadata heading so it is visible
+        without expanding the <details> block (D-10 / T-09-20)."""
+        body = render_body(
+            _sample_result(),
+            run_budget_reached=True,
+            run_budget_skipped_count=2,
+        )
+
+        alert_pos = body.lower().find("run token budget reached")
+        metadata_pos = body.find("### Metadata")
+
+        assert alert_pos != -1, "Alert text not found in body"
+        assert metadata_pos != -1, "Metadata heading not found in body"
+        assert alert_pos < metadata_pos, (
+            "Budget alert must appear BEFORE the Metadata heading (D-10 / T-09-20). "
+            f"Alert at {alert_pos}, Metadata at {metadata_pos}"
+        )
+
+    def test_render_body_prominent_budget_alert_not_inside_details(self) -> None:
+        """The alert must NOT be inside the collapsed <details> Metadata block."""
+        body = render_body(
+            _sample_result(),
+            run_budget_reached=True,
+            run_budget_skipped_count=5,
+        )
+
+        # Split on the Metadata details block opening tag
+        metadata_details_start = body.find("<details><summary>Run details</summary>")
+        if metadata_details_start == -1:
+            metadata_details_start = body.find("<details><summary>Metadata</summary>")
+        alert_pos = body.lower().find("run token budget reached")
+
+        assert alert_pos < metadata_details_start, (
+            "Budget alert must appear BEFORE the Metadata <details> block (T-09-20)"
+        )
+
+    def test_render_body_no_budget_alert_when_false(self) -> None:
+        """When run_budget_reached=False (default), no budget alert appears."""
+        body = render_body(_sample_result())
+
+        assert "run token budget reached" not in body.lower()
+
+    def test_render_body_budget_alert_backward_compat_no_args(self) -> None:
+        """Existing callers that pass no run_budget_reached see the body unchanged."""
+        baseline = render_body(_sample_result())
+        body_explicit_false = render_body(
+            _sample_result(),
+            run_budget_reached=False,
+            run_budget_skipped_count=0,
+        )
+
+        assert baseline == body_explicit_false
+
+
+# WR-11: regression coverage for the WR-08 durable partial-marker fix. The marker is the
+# only signal that survives the no-op body (which drops the human-facing coverage prose),
+# so without these tests a future edit to the is_partial predicate, marker placement, or
+# the _PARTIAL_COVERAGE_MARKERS tuple could silently upgrade a partial review to a clean
+# pass with every test still green.
+class TestRenderBodyPartialMarker:
+    def test_clean_render_omits_partial_marker(self) -> None:
+        """A render with no skipped coverage must NOT carry the durable partial marker."""
+        body = render_body(_sample_result())
+        assert PARTIAL_MARKER not in body
+
+    def test_not_reviewed_file_count_emits_marker(self) -> None:
+        body = render_body(
+            _sample_result(),
+            reviewed_file_count=2,
+            not_reviewed_file_count=3,
+        )
+        assert PARTIAL_MARKER in body
+
+    def test_run_budget_reached_emits_marker(self) -> None:
+        body = render_body(
+            _sample_result(),
+            run_budget_reached=True,
+            run_budget_skipped_count=4,
+        )
+        assert PARTIAL_MARKER in body
+
+    def test_skipped_paths_emits_marker(self) -> None:
+        body = render_body(
+            _sample_result(),
+            skipped_paths=["src/a.py", "src/b.py"],
+            skipped_reason="over token budget",
+        )
+        assert PARTIAL_MARKER in body
+
+    def test_explicit_partial_marker_kwarg_emits_marker(self) -> None:
+        """The no-op path carries recovered partial state via partial_marker=True even
+        though this render itself skipped nothing."""
+        body = render_body(_sample_result(), partial_marker=True)
+        assert PARTIAL_MARKER in body
+
+    def test_marker_in_stable_header_survives_round_trip(self) -> None:
+        """The original 3-step break: partial real review -> no-op #1 -> no-op #2.
+
+        The no-op body drops the coverage prose, so the durable marker is the only thing
+        carrying partial state forward. Re-feeding the marker via partial_marker= (as
+        _finish_noop_review does with _prior_review_was_partial) must keep it present
+        across an arbitrary number of consecutive no-op renders.
+        """
+        # Step 1: a real partial review (files skipped over budget).
+        partial_body = render_body(
+            _sample_result(),
+            skipped_paths=["src/skipped.py"],
+            skipped_reason="over token budget",
+        )
+        assert PARTIAL_MARKER in partial_body
+
+        # Step 2 (no-op #1): the no-op result drops coverage prose; partial state is
+        # recovered from the prior body (marker present) and re-emitted.
+        prior_partial = PARTIAL_MARKER in partial_body
+        noop_body_1 = render_body(_sample_result(), partial_marker=prior_partial)
+        assert PARTIAL_MARKER in noop_body_1
+
+        # Step 3 (no-op #2): recover from no-op #1's body; the marker must still survive,
+        # so the conclusion cannot be silently upgraded from neutral to success.
+        prior_partial_2 = PARTIAL_MARKER in noop_body_1
+        noop_body_2 = render_body(_sample_result(), partial_marker=prior_partial_2)
+        assert PARTIAL_MARKER in noop_body_2
