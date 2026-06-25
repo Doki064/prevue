@@ -17,8 +17,13 @@ WeightFn = Callable[[ChangedFile], object]
 def make_file_weight(
     label_rules: dict[str, list[str]],
     skills: list[Skill] | None = None,
+    path_labels: dict[str, str] | None = None,
 ) -> WeightFn:
-    """Score files by label_rules + loaded skill applies-to globs (D-18)."""
+    """Score files by label_rules + loaded skill applies-to globs (D-18).
+
+    path_labels overrides glob matching for LLM-classified files so they rank at
+    the correct canonical priority instead of worst-case fallback (D-10, D-18).
+    """
     specs = {label: GitIgnoreSpec.from_lines(globs) for label, globs in label_rules.items()}
     skill_specs = [GitIgnoreSpec.from_lines(s.applies_to) for s in (skills or [])]
     # Strictly worse than any matched label. A non-canonical custom label resolves
@@ -31,11 +36,14 @@ def make_file_weight(
         # Use check_file().include (not match_file) to match label_rules below and
         # classifier.py — with negation (!) patterns the two APIs can disagree.
         skill_match = 0 if any(sp.check_file(f.path).include for sp in skill_specs) else 1
-        best = fallback_priority
-        for label, spec in specs.items():
-            res = spec.check_file(f.path)
-            if res.include:
-                best = min(best, canonical_index(label))
+        if path_labels and f.path in path_labels:
+            best = canonical_index(path_labels[f.path])
+        else:
+            best = fallback_priority
+            for label, spec in specs.items():
+                res = spec.check_file(f.path)
+                if res.include:
+                    best = min(best, canonical_index(label))
         churn = -(f.additions + f.deletions)
         return (skill_match, best, churn, f.path)
 

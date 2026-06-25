@@ -17,7 +17,20 @@ SEVERITY_RANK: dict[str, int] = {"error": 0, "warning": 1, "info": 2}
 
 
 class ReviewConfig(BaseModel):
-    """Consumer review thresholds (D-12/D-13/D-16/D-18/D-20)."""
+    """Consumer review thresholds (D-12/D-13/D-16/D-18/D-20/D-09/ENGN-05/ENGN-06/ENGN-07).
+
+    Multi-call/run caps (D-09):
+      max_review_calls    — ENGN-05: number of review calls; default 1 = single-call path.
+      review_concurrency  — ENGN-07: parallel call cap; default 1 = sequential.
+      max_tokens_per_call — per-call input ceiling; mirrors max_input_tokens default so
+                            packing success implies invoke success.
+      max_total_run_tokens — whole-run ceiling (classify + Σ review calls); default
+                             500_000 (A3 starting point) — a flat constant, not derived
+                             from max_tokens_per_call.
+      guardrail_skills    — D-07: always-on per-call skill keys as bundle/filename strings
+                            (e.g. "security/committed-secrets.md"); empty = no forced
+                            guardrails, preserving current behavior.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -33,11 +46,22 @@ class ReviewConfig(BaseModel):
     # Upper bound matches MAX_PROMPT_BYTES // 4 so packing success implies invoke success.
     max_input_tokens: int = Field(default=120000, ge=1, le=250_000)
     output_reserve_tokens: int = Field(default=12000, ge=0)
+    # Multi-call/run caps — flat fields (RESEARCH Open Question 2: lean flat, parity with
+    # existing knobs under extra="forbid"; nested sub-model deferred unless knob count grows).
+    max_review_calls: int = Field(default=1, ge=1)  # ENGN-05
+    review_concurrency: int = Field(default=1, ge=1)  # ENGN-07
+    max_tokens_per_call: int = Field(default=120000, ge=1, le=250_000)  # D-09
+    max_total_run_tokens: int = Field(default=500_000, ge=1)  # D-09 whole-run ceiling
+    guardrail_skills: list[str] = Field(default_factory=list)  # D-07 always-on per-call
 
     @model_validator(mode="after")
     def _validate_token_budget(self) -> ReviewConfig:
         if self.output_reserve_tokens > self.max_input_tokens:
             raise ValueError("review.output_reserve_tokens must be <= review.max_input_tokens")
+        if self.max_tokens_per_call > self.max_total_run_tokens:
+            raise ValueError("review.max_tokens_per_call must be <= review.max_total_run_tokens")
+        if self.output_reserve_tokens > self.max_tokens_per_call:
+            raise ValueError("review.output_reserve_tokens must be <= review.max_tokens_per_call")
         return self
 
 

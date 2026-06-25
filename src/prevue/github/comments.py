@@ -27,6 +27,7 @@ from prevue.models import Finding, ReviewResult
 
 MARKER = "<!-- prevue:sticky -->"
 MARKER_WITH_SHA = "<!-- prevue:sticky head={sha} -->"
+PARTIAL_MARKER = "<!-- prevue:partial -->"
 METADATA_HEADING = "### Metadata"
 METADATA_DETAILS_SUMMARY = "Run details"
 LEGACY_METADATA_DETAILS = "<details><summary>Metadata</summary>"
@@ -345,6 +346,13 @@ def _escape_table_cell(value: str) -> str:
     return escaped.replace("\r\n", " ").replace("\n", " ").replace("\r", " ")
 
 
+def _skill_with_source(entry: str, skill_sources: dict[str, str]) -> str:
+    source = skill_sources.get(entry)
+    if source:
+        return f"{entry} [{_escape_table_cell(source)}]"
+    return entry
+
+
 def _format_finding_location(finding: Finding, placement: str) -> str:
     if placement == "position-fallback":
         return _escape_path_code(finding.path)
@@ -457,13 +465,16 @@ def render_body(
     scope: str | None = None,
     carried_open_count: int = 0,
     dismissals: list[DismissEntry] | None = None,
+    skill_sources: dict[str, str] | None = None,
+    run_budget_reached: bool = False,
+    run_budget_skipped_count: int = 0,
+    partial_marker: bool = False,
 ) -> str:
     """Sectioned sticky body: Verdict / Review / Findings / details / Metadata.
 
     When scope='incremental', the Review section is prefixed with a deterministic
     disclaimer naming the incremental scope and, when carried_open_count > 0,
-    that prior open findings exist outside this diff. All other scope values
-    (including None/'full') leave the Review section unchanged (engine summary only).
+    that prior open findings exist outside this diff.
     """
     marker_line = render_marker(head_sha) if head_sha else MARKER
     engine_name = result.engine_meta.get("engine", "unknown")
@@ -492,7 +503,11 @@ def render_body(
         if classification.dropped_count:
             metadata += f"\nFiltered: {classification.dropped_count} filtered"
         if loaded_skills:
-            metadata += f"\nSkills: {', '.join(loaded_skills)}"
+            if skill_sources:
+                skills_line = ", ".join(_skill_with_source(s, skill_sources) for s in loaded_skills)
+                metadata += f"\nSkills: {skills_line}"
+            else:
+                metadata += f"\nSkills: {', '.join(loaded_skills)}"
         else:
             metadata += "\nSkills: none (baseline only)"
 
@@ -530,6 +545,14 @@ def render_body(
         if classify_tokens:
             token_line += f" · classify{classify_est} {classify_tokens}"
         metadata += f"\n{token_line}"
+        per_call: list[dict] = token_meta.get("per_call", [])  # type: ignore[assignment]
+        if len(per_call) >= 2:
+            per_call_parts = []
+            for entry in per_call:
+                label = entry.get("bundle", "call")
+                tokens = entry.get("review", 0)
+                per_call_parts.append(f"{label} {tokens}")
+            metadata += "\nPer-call tokens: " + " · ".join(per_call_parts)
 
     if skill_ratios:
         loaded_total = sum(loaded for loaded, _total in skill_ratios.values())
@@ -557,6 +580,16 @@ def render_body(
             _escape_table_cell(s) for s in cap_skipped
         )
 
+    run_budget_alert = ""
+    if run_budget_reached and run_budget_skipped_count > 0:
+        run_budget_alert = (
+            f"### Coverage\n"
+            f"**Run token budget reached — {run_budget_skipped_count} file(s) not reviewed.**\n\n"
+            "The whole-run token cap (`max_total_run_tokens`) was reached. "
+            f"Lowest-priority file(s) were excluded from this review. "
+            "Verdict reflects reviewed files only.\n\n"
+        )
+
     coverage_section = ""
     if skipped_paths:
         count = len(skipped_paths)
@@ -578,8 +611,17 @@ def render_body(
             disclaimer += _INCREMENTAL_CARRIED_CLAUSE.format(count=carried_open_count)
         review_content = f"{disclaimer}\n\n{review_content}"
 
+    is_partial = bool(
+        partial_marker
+        or (not_reviewed_file_count and not_reviewed_file_count > 0)
+        or (run_budget_reached and run_budget_skipped_count > 0)
+        or skipped_paths
+    )
+    partial_marker_line = f"{PARTIAL_MARKER}\n" if is_partial else ""
+
     return (
         f"{marker_line}\n"
+        f"{partial_marker_line}"
         "## Prevue Review\n\n"
         f"### Verdict\n"
         f"{verdict_section}"
@@ -587,6 +629,7 @@ def render_body(
         f"{findings_section}"
         f"{details_section}"
         f"{coverage_section}"
+        f"{run_budget_alert}"
         f"{render_dismiss_block(dismissals) if dismissals else ''}"
         f"{METADATA_HEADING}\n"
         f"<details><summary>{METADATA_DETAILS_SUMMARY}</summary>\n\n"
@@ -677,6 +720,10 @@ def upsert_sticky(
     scope: str | None = None,
     carried_open_count: int = 0,
     dismissals: list[DismissEntry] | None = None,
+    skill_sources: dict[str, str] | None = None,
+    run_budget_reached: bool = False,
+    run_budget_skipped_count: int = 0,
+    partial_marker: bool = False,
 ):
     """Create one sticky comment or edit in place when marker exists (D-06)."""
     body = render_body(
@@ -696,6 +743,10 @@ def upsert_sticky(
         scope=scope,
         carried_open_count=carried_open_count,
         dismissals=dismissals,
+        skill_sources=skill_sources,
+        run_budget_reached=run_budget_reached,
+        run_budget_skipped_count=run_budget_skipped_count,
+        partial_marker=partial_marker,
     )
     return _upsert_marker_comment(pr, body)
 

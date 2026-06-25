@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import json
 import subprocess
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from prevue.skills.models import Skill
 
 from prevue.classify.models import CANONICAL_LABEL_ORDER, GENERAL_LABEL
 from prevue.engines.base import EngineAdapter
@@ -56,6 +60,7 @@ def _classify_batch(
         )
     except (
         NotImplementedError,
+        AttributeError,
         AuthError,
         EngineFailure,
         subprocess.TimeoutExpired,
@@ -98,3 +103,52 @@ def llm_classify(
         return partial, disclosure
 
     return validated, None
+
+
+_RELEVANT_LABEL = "relevant"
+_IRRELEVANT_LABEL = "irrelevant"
+_SKILL_SELECT_ALLOWED: tuple[str, ...] = (_RELEVANT_LABEL, _IRRELEVANT_LABEL)
+
+
+def llm_select_skills(
+    candidate_skills: list[Skill],
+    adapter: EngineAdapter,
+    *,
+    model: str | None = None,
+    paths: list[str] | None = None,
+    diff_text: str | None = None,
+) -> set[str] | None:
+    """Return skill names rated relevant via classify_skills; None on any error.
+
+    None means the call degraded (caller may fall back or pass-through).
+    Empty set means the LLM succeeded but rated every candidate irrelevant.
+    """
+    if not candidate_skills:
+        return set()
+
+    diff_excerpt = diff_text[:8000] if diff_text else None
+    try:
+        raw = adapter.classify_skills(
+            candidate_skills,
+            list(_SKILL_SELECT_ALLOWED),
+            model=model,
+            paths=paths,
+            diff_excerpt=diff_excerpt,
+        )
+    except AuthError:
+        raise
+    except (
+        NotImplementedError,
+        AttributeError,
+        EngineFailure,
+        subprocess.TimeoutExpired,
+        json.JSONDecodeError,
+        ValueError,
+    ):
+        return None
+
+    return {
+        name
+        for name, label in raw.items()
+        if isinstance(name, str) and isinstance(label, str) and label == _RELEVANT_LABEL
+    }
