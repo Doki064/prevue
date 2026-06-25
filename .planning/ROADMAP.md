@@ -373,3 +373,39 @@ Plans:
 *Phase 8 gap closure planned: 2026-06-16 — 6 plans (08-11..08-16), waves 7-12 (LIFE-03 + LIFE-05)*
 *Phase 9 planned: 2026-06-21 — 6 plans, 5 waves (SKIL-01 gap + ROUT-01/CLSF-03/OUTP-04 + ENGN-05/06/07)*
 *Phase 9 complete: 2026-06-24 — UAT 14/14 pass; WR-01..WR-12 code review fixes applied; ruff CI gate clean; 720/720 tests*
+
+---
+
+## Backlog
+
+_Unsequenced ideas mined 2026-06-25 from research of `bobmatnyc/ai-code-review` and `anthropics/claude-code-action`. Promote with `/gsd-review-backlog`._
+
+### Phase 999.1: Expose ReviewResult as workflow output (JSON) (BACKLOG)
+
+**Goal:** Emit the existing pydantic `ReviewResult` as a GitHub Actions `output:` so consumers can chain automation (block merge, route to dashboards). Cheap, core to being a *framework* others build on.
+**Requirements:** TBD
+**Plans:** 0 plans
+**Source:** claude-code-action structured outputs.
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.2: Consumer-facing cost patterns — `paths:` filter + severity gate (BACKLOG)
+
+**Goal:** Document/support two near-zero-code consumer patterns that serve the token/cost constraint: (1) `paths:` trigger filter to short-circuit the workflow before a runner spins (cut cost pre-classification); (2) a severity threshold gate on findings so not every finding is posted (signal not noise).
+**Requirements:** TBD
+**Plans:** 0 plans
+**Source:** claude-code-action path-specific reviews + inline-comment classification.
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
+
+### Phase 999.3: Fork handling via author_association (BACKLOG)
+
+**Goal:** Upgrade the v1 "skip forks" decision to a restricted/no-secrets review path that *varies* review for external contributors instead of skipping them entirely, while keeping the secrets/security boundary intact.
+**Requirements:** TBD
+**Plans:** 0 plans
+**Source:** claude-code-action `if: author_association == 'FIRST_TIME_CONTRIBUTOR'`.
+
+Plans:
+- [ ] TBD (promote with /gsd-review-backlog when ready)
