@@ -60,11 +60,11 @@ Commands on fork PRs are refused with no engine spend (same SECR-01 posture as a
 
 | Permission | Scope |
 |------------|-------|
-| `contents` | `read` |
+| `contents` | `write` |
 | `pull-requests` | `write` |
 | `actions` | `write` |
 
-`actions: write` is required for the gate workflow to dispatch `prevue-command-run.yml`. `contents: write` and `checks: write` are granted to the dispatched run workflow, not to this gate — consumers do not need to configure them here.
+`contents: write` is required — the `POST /repos/{owner}/{repo}/dispatches` (repository_dispatch) API requires write scope on the token; `contents: read` returns 403. `checks: write` is granted to the dispatched run workflow, not to this gate — consumers do not need to configure it here.
 
 Do **not** use `pull_request_target` or `secrets: inherit`. Pass only the named engine secret(s) you need.
 
@@ -80,7 +80,7 @@ on:
     types: [created]
 
 permissions:
-  contents: read
+  contents: write   # required for repository_dispatch API
   pull-requests: write
   actions: write
 

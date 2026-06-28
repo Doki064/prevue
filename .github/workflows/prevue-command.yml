@@ -5,8 +5,9 @@ on:
     types: [created]
 
 # Gate-only: validate /prevue, dispatch prevue-command-run with pinned SHAs.
+# contents: write required — POST /repos/.../dispatches (repository_dispatch) needs write scope.
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
   actions: write
 
