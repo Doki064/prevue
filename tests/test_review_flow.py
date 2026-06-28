@@ -1529,6 +1529,41 @@ def test_incremental_scope_reviews_only_in_scope_files() -> None:
     assert captured["paths"] == ["src/example.py"]
 
 
+def test_run_review_with_pr_ctx_passes_pr_to_fetch_diff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fake_engine
+) -> None:
+    # Regression: command flow sets GITHUB_EVENT_PATH to materialized issue_comment.json
+    # (keys: "issue", "comment" — no "pull_request"). fetch_diff must NOT re-read the
+    # event file; it must use the pr object already fetched from the provided pr_ctx.
+    import json
+
+    issue_comment_path = tmp_path / "issue_comment.json"
+    issue_comment_path.write_text(
+        json.dumps({"issue": {"number": PR_NUMBER, "pull_request": {}}, "comment": {"body": "/prevue review"}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GITHUB_EVENT_PATH", str(issue_comment_path))
+
+    mock_pr = MagicMock()
+    mock_pr.head.sha = HEAD_SHA
+    mock_pr.get_issue_comments.return_value = []
+
+    with (
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()) as mock_fetch,
+        patch("prevue.review.fetch_diff_in_scope") as mock_fetch_scoped,
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=_mock_repo()),
+        patch("prevue.review._derive_prior_findings_with_threads", return_value=([], [])),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=_mock_sticky()),
+        patch("prevue.review.conclude_review_check", return_value=True),
+    ):
+        run_review(pr_ctx=_sample_ctx(), adapter=fake_engine)
+
+    mock_fetch.assert_called_once_with(pr=mock_pr)
+    mock_fetch_scoped.assert_not_called()
+
+
 def test_identical_rerun_noop_skips_engine() -> None:
     mock_pr = MagicMock()
     mock_pr.head.sha = HEAD_SHA
