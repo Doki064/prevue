@@ -395,14 +395,23 @@ Plans:
   6. The validated `ReviewResult` is emitted as a GitHub Actions job output (and/or JSON artifact) that consumers can chain automation on (OUTP-05)
 
 **Plans**: 6 plans (4 waves)
-
 Plans:
+**Wave 1**
 
 - [ ] 10-01-PLAN.md — Wave-0 RED test scaffolds + usage/pricing fixtures for all new contracts (Wave 1)
 - [ ] 10-02-PLAN.md — ENGN-10: spec-driven CliEngineAdapter + auto-populated registry; antigravity replaces gemini (Wave 1, FIRST)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 10-03-PLAN.md — PERF-03: per-engine usage capture + vendored pricing snapshot + pure cost compute (Wave 2)
 - [ ] 10-04-PLAN.md — WKFL-05/ENGN-08/ENGN-09: declared precedence + raw_args passthrough + per-role models (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 10-05-PLAN.md — OUTP-05: versioned compact output + full JSON artifact + sticky cost line + workflow wiring (Wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 10-06-PLAN.md — Antigravity install/checksum + secret + scheduled pricing-bump PR + live human-verify checkpoint (Wave 4)
 
 ### Phase 11: Skills as Pinned External Repo
