@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from github import GithubException
+from github.PullRequest import PullRequest
 
 from prevue.github.client import get_authenticated_pull, load_pr_context
 from prevue.github.positions import regions_changed
@@ -53,14 +54,16 @@ def regions_from_comparison(
     return regions
 
 
-def fetch_diff_in_scope(in_scope_paths: set[str]) -> DiffBundle:
+def fetch_diff_in_scope(in_scope_paths: set[str], *, pr: PullRequest | None = None) -> DiffBundle:
     """Build DiffBundle from pr.get_files() filtered to in-scope paths (D-02).
 
     Each file carries its full base..head patch from the PR files endpoint,
     not the compare micro-diff — compare only identifies which files changed.
+    Pass `pr` to skip re-reading GITHUB_EVENT_PATH (required in command flow).
     """
-    ctx = load_pr_context()
-    pr = get_authenticated_pull(ctx)
+    if pr is None:
+        ctx = load_pr_context()
+        pr = get_authenticated_pull(ctx)
     files = [
         ChangedFile(
             path=f.filename,
@@ -73,17 +76,21 @@ def fetch_diff_in_scope(in_scope_paths: set[str]) -> DiffBundle:
         if f.filename in in_scope_paths
     ]
     return DiffBundle(
-        pr_number=ctx.pr_number,
+        pr_number=pr.number,
         base_sha=pr.base.sha,
         head_sha=pr.head.sha,
         files=files,
     )
 
 
-def fetch_diff() -> DiffBundle:
-    """Map pr.get_files() → DiffBundle; patch=None when GitHub omits hunks."""
-    ctx = load_pr_context()
-    pr = get_authenticated_pull(ctx)
+def fetch_diff(*, pr: PullRequest | None = None) -> DiffBundle:
+    """Map pr.get_files() → DiffBundle; patch=None when GitHub omits hunks.
+
+    Pass `pr` to skip re-reading GITHUB_EVENT_PATH (required in command flow).
+    """
+    if pr is None:
+        ctx = load_pr_context()
+        pr = get_authenticated_pull(ctx)
     files = [
         ChangedFile(
             path=f.filename,
@@ -95,7 +102,7 @@ def fetch_diff() -> DiffBundle:
         for f in pr.get_files()
     ]
     return DiffBundle(
-        pr_number=ctx.pr_number,
+        pr_number=pr.number,
         base_sha=pr.base.sha,
         head_sha=pr.head.sha,
         files=files,

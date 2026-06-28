@@ -528,9 +528,9 @@ def run_review(
         return
 
     if scope == "incremental" and in_scope_paths is not None:
-        diff = fetch_diff_in_scope(in_scope_paths)
+        diff = fetch_diff_in_scope(in_scope_paths, pr=pr)
     else:
-        diff = fetch_diff()
+        diff = fetch_diff(pr=pr)
     reduced, dropped = filter_diff(diff, ruleset.ignore_globs)
 
     if not reduced.files:
