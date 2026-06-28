@@ -1524,7 +1524,7 @@ def test_incremental_scope_reviews_only_in_scope_files() -> None:
     ):
         run_review(adapter=CaptureEngine())
 
-    mock_inc.assert_called_once_with(in_scope)
+    mock_inc.assert_called_once_with(in_scope, pr=mock_pr)
     mock_full.assert_not_called()
     assert captured["paths"] == ["src/example.py"]
 
