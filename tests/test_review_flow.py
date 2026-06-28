@@ -1539,7 +1539,10 @@ def test_run_review_with_pr_ctx_passes_pr_to_fetch_diff(
 
     issue_comment_path = tmp_path / "issue_comment.json"
     issue_comment_path.write_text(
-        json.dumps({"issue": {"number": PR_NUMBER, "pull_request": {}}, "comment": {"body": "/prevue review"}}),
+        json.dumps({
+            "issue": {"number": PR_NUMBER, "pull_request": {}},
+            "comment": {"body": "/prevue review"},
+        }),
         encoding="utf-8",
     )
     monkeypatch.setenv("GITHUB_EVENT_PATH", str(issue_comment_path))
