@@ -150,6 +150,18 @@ class TestValidateCommandDispatch:
                     repository=REPO,
                 )
 
+    def test_tolerates_trailing_newline_in_payload_body(self) -> None:
+        # jq --rawfile adds a trailing \n; live API body has none — must not reject
+        with patch("prevue.gate_validate.authorize_commenter", return_value=True):
+            validate_command_dispatch(
+                payload=_payload(comment_body="/prevue review\n"),
+                pull=_pull(),
+                comment=_comment(body="/prevue review"),
+                expected_engine="copilot-cli",
+                framework_sha=FRAMEWORK_SHA,
+                repository=REPO,
+            )
+
     def test_rejects_association_drift(self) -> None:
         with patch("prevue.gate_validate.authorize_commenter", return_value=True):
             with pytest.raises(GateValidationError, match="association does not match"):

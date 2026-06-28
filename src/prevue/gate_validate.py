@@ -80,8 +80,8 @@ def validate_command_dispatch(
             "Comment author association does not match gate payload; refusing."
         )
 
-    live_body = comment.body or ""
-    if live_body != payload.comment_body:
+    live_body = (comment.body or "").rstrip("\r\n")
+    if live_body != payload.comment_body.rstrip("\r\n"):
         raise GateValidationError("Comment body does not match gate payload; refusing.")
 
     live_author = comment.user.login
