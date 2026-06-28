@@ -110,7 +110,7 @@ def run_gate_revalidate() -> int:
     gh = Github(auth=Auth.Token(os.environ["GITHUB_TOKEN"]))
     repo = gh.get_repo(repository)
     pull = repo.get_pull(issue_number)
-    comment = repo.get_issue_comment(comment_id)
+    comment = repo.get_issue(issue_number).get_comment(comment_id)
     framework_sha = resolve_framework_sha(prevue_ref, framework_repo=framework_repo)
 
     try:

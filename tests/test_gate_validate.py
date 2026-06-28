@@ -254,7 +254,7 @@ class TestRunGateRevalidate:
         mock_pull = _pull()
         mock_repo = MagicMock()
         mock_repo.get_pull.return_value = mock_pull
-        mock_repo.get_issue_comment.return_value = mock_comment
+        mock_repo.get_issue.return_value.get_comment.return_value = mock_comment
 
         with (
             patch("prevue.gate_validate.Github") as mock_github,
@@ -280,7 +280,7 @@ class TestRunGateRevalidate:
         mock_pull.head.sha = "mismatch" * 8
         mock_repo = MagicMock()
         mock_repo.get_pull.return_value = mock_pull
-        mock_repo.get_issue_comment.return_value = _comment()
+        mock_repo.get_issue.return_value.get_comment.return_value = _comment()
 
         with (
             patch("prevue.gate_validate.Github") as mock_github,
