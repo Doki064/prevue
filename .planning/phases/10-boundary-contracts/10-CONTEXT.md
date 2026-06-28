@@ -71,8 +71,9 @@ Stabilize the three highest-churn-cost boundaries before more adapters and confi
 
 ### External references (study before implementing)
 - https://github.com/junhoyeo/tokscale — reference for capturing accurate per-engine token usage without estimation (PERF-03 D-04). README states it uses LiteLLM pricing data with tiered + cache-token discount support.
-- https://github.com/BerriAI/litellm — `model_prices_and_context_window.json` is the pricing source of truth (PERF-03 D-06). Vendor a pinned snapshot.
+- https://github.com/BerriAI/litellm — `model_prices_and_context_window.json` is the pricing source of truth (PERF-03 D-06). Vendor a pinned snapshot. **Also the deferred candidate unification layer** for the future `ApiEngineAdapter` sibling (D-02) — see Deferred Ideas; NOT used as a provider router this phase.
 - Google **Antigravity CLI** docs — verify invocation + usage reporting (D-12). Researcher to locate the official CLI reference (replaces the old `gemini` CLI).
+- https://github.com/qodo-ai/pr-agent — **deferred research reference** for API-engine selection ergonomics: pr-agent has no explicit engine field because it sits on litellm — provider is derived from the `model` string prefix (e.g. `anthropic/…`, `bedrock/…`) + presence of the matching `*_API_KEY` env var. Relevant ONLY to the future API sibling (D-02), NOT the CLI family.
 
 ### Code touchpoints (existing boundaries being locked)
 - `src/prevue/engines/base.py` — `EngineAdapter` ABC (stays the top boundary, D-02).
@@ -112,6 +113,7 @@ Stabilize the three highest-churn-cost boundaries before more adapters and confi
 - tokscale (junhoyeo/tokscale) is the user's reference point for "accurate tokens are achievable without estimation" — it leans on LiteLLM pricing data with tiered + cache-token-discount support. Mirror that approach.
 - Antigravity CLI replaces Gemini CLI in the user's mental model of the engine roster — treat the old `gemini` adapter as obsolete, not just dormant.
 - The whole phase is framed as "lock the contract before it ossifies" — favor stable, versioned, documented, tested boundaries over feature breadth.
+- **Engine-selection ergonomics differ by family.** CLI engines (this phase) need an explicit `engine` selector — you cannot derive a subprocess binary from an API key. API engines (future, D-02) can adopt the litellm/pr-agent pattern: no engine field, provider derived from model-string prefix + present `*_API_KEY`. Keep the CLI `engine` selector; do NOT retrofit auto-derivation onto the CLI family.
 
 </specifics>
 
@@ -119,7 +121,7 @@ Stabilize the three highest-churn-cost boundaries before more adapters and confi
 ## Deferred Ideas
 
 - **LLM consolidate/dedup pass** — the actual cheap-model merge pass behind ENGN-09's consolidate role belongs to **Phase 13 (QUAL-01)**. Phase 10 only reserves the role wiring (D-13).
-- **API engines (Bedrock / Vertex / Azure)** — the `ApiEngineAdapter` sibling is left *possible* by D-02 but **not built** this phase. Future phase when an API engine is actually needed.
+- **API engines (Bedrock / Vertex / Azure)** — the `ApiEngineAdapter` sibling is left *possible* by D-02 but **not built** this phase. Future phase when an API engine is actually needed. **Research target for that phase:** evaluate **litellm** as the provider-unification layer (one format across all API vendors) and the **pr-agent** ergonomic (no engine field; provider derived from model-string prefix + `*_API_KEY` presence). The pricing JSON we vendor this phase (D-06) already comes from litellm, so the dependency is partly paid down. Explicitly deferred — no API/litellm-router code this phase.
 - **Generic layered config resolver** — only if the planner finds enough knobs need caller-side overrides to justify it (D-07); otherwise deferred indefinitely in favor of formalize-existing.
 
 None of the above are scope creep into Phase 10 — they are explicitly bounded out.
