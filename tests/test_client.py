@@ -159,6 +159,35 @@ def test_load_comment_context_rejects_moved_head_after_pin(
         load_comment_context()
 
 
+@responses.activate
+def test_load_comment_context_uses_prevue_comment_event_path(
+    comment_github_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    # Regression: GITHUB_EVENT_PATH is a runner system var that GITHUB_ENV cannot
+    # override. PREVUE_COMMENT_EVENT_PATH is used instead when set.
+    alt_event = tmp_path / "alt_event.json"
+    alt_event.write_text(
+        json.dumps(
+            {
+                "issue": {"number": ISSUE_NUMBER, "pull_request": {}},
+                "comment": {
+                    "body": "/prevue review",
+                    "user": {"login": "alice"},
+                    "author_association": "COLLABORATOR",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("GITHUB_EVENT_PATH", "/nonexistent/should-not-be-read.json")
+    monkeypatch.setenv("PREVUE_COMMENT_EVENT_PATH", str(alt_event))
+    _register_pull_for_comment_context(responses.mock)
+    ctx = load_comment_context()
+    assert ctx.issue_number == ISSUE_NUMBER
+
+
 @pytest.fixture
 def github_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """PR-event env for load_pr_context regression."""

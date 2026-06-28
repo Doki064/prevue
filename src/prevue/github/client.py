@@ -74,7 +74,8 @@ def load_comment_context() -> CommentContext:
     comment_body = read_comment_body()
     comment_author = os.environ["PREVUE_COMMENT_AUTHOR"]
 
-    with open(os.environ["GITHUB_EVENT_PATH"]) as f:
+    event_path = os.environ.get("PREVUE_COMMENT_EVENT_PATH") or os.environ["GITHUB_EVENT_PATH"]
+    with open(event_path) as f:
         event = json.load(f)
 
     event_issue_number = event["issue"]["number"]

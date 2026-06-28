@@ -158,8 +158,10 @@ def run_materialize_comment_event() -> int:
         comment_author_association=os.environ["PREVUE_COMMENT_AUTHOR_ASSOCIATION"],
         output_path=output_path,
     )
+    # GITHUB_EVENT_PATH is a runner system var that GITHUB_ENV cannot override.
+    # Use PREVUE_COMMENT_EVENT_PATH so load_comment_context() reads the right file.
     github_env = os.environ.get("GITHUB_ENV")
     if github_env:
         with open(github_env, "a", encoding="utf-8") as env_file:
-            env_file.write(f"GITHUB_EVENT_PATH={output_path}\n")
+            env_file.write(f"PREVUE_COMMENT_EVENT_PATH={output_path}\n")
     return 0

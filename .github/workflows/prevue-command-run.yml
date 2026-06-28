@@ -74,6 +74,9 @@ jobs:
         run: uv run prevue command
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # GITHUB_EVENT_PATH is a runner system var that GITHUB_ENV cannot override.
+          # Use PREVUE_COMMENT_EVENT_PATH so load_comment_context() reads the materialized file.
+          PREVUE_COMMENT_EVENT_PATH: ${{ runner.temp }}/issue_comment.json
           PREVUE_STICKY_OWNER_LOGINS: ${{ vars.PREVUE_STICKY_OWNER_LOGINS }}
           PREVUE_COMMENT_BODY_PATH: ${{ runner.temp }}/prevue-comment-body.txt
           PREVUE_COMMENT_AUTHOR: ${{ github.event.client_payload.comment_author }}

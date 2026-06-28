@@ -237,16 +237,23 @@ class TestMaterializeCommentEvent:
         body_path = tmp_path / "comment.txt"
         body_path.write_text("/prevue review", encoding="utf-8")
         out_path = tmp_path / "issue_comment.json"
+        github_env_file = tmp_path / "github_env"
+        github_env_file.touch()
         monkeypatch.setenv("PREVUE_ISSUE_NUMBER", "42")
         monkeypatch.setenv("PREVUE_COMMENT_BODY_PATH", str(body_path))
         monkeypatch.setenv("PREVUE_COMMENT_AUTHOR", "alice")
         monkeypatch.setenv("PREVUE_COMMENT_AUTHOR_ASSOCIATION", "MEMBER")
         monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+        monkeypatch.setenv("GITHUB_ENV", str(github_env_file))
         from prevue.gate_validate import run_materialize_comment_event
 
         assert run_materialize_comment_event() == 0
         payload = json.loads(out_path.read_text(encoding="utf-8"))
         assert payload["comment"]["body"] == "/prevue review"
+        # Verify PREVUE_COMMENT_EVENT_PATH (not GITHUB_EVENT_PATH) is written
+        env_content = github_env_file.read_text(encoding="utf-8")
+        assert f"PREVUE_COMMENT_EVENT_PATH={out_path}" in env_content
+        assert "GITHUB_EVENT_PATH" not in env_content
 
 
 class TestRunGateRevalidate:
