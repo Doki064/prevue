@@ -155,3 +155,111 @@ def test_cursor_install_supports_optional_sha256_pin() -> None:
     ).read_text(encoding="utf-8")
     assert "PREVUE_CURSOR_INSTALL_SHA256" in script
     assert "sha256sum -c" in script
+
+
+# ---------------------------------------------------------------------------
+# OUTP-05 / D-08/D-09: job outputs, artifact upload, OTEL env (Plan 05)
+# ---------------------------------------------------------------------------
+
+
+def test_job_outputs_map_declared() -> None:
+    """OUTP-05 / D-09: review job must declare outputs: map with all compact keys."""
+    wf = _load_reusable_workflow()
+    job = wf["jobs"]["review"]
+    outputs = job.get("outputs", {})
+    expected_keys = {
+        "schema_version",
+        "conclusion",
+        "error_count",
+        "warning_count",
+        "info_count",
+        "tokens",
+        "cost_usd",
+    }
+    assert expected_keys <= set(outputs.keys()), (
+        f"Missing job output keys: {expected_keys - set(outputs.keys())}"
+    )
+    # All outputs must reference the run-review step
+    for key, value in outputs.items():
+        if key in expected_keys:
+            assert "run-review" in str(value), (
+                f"Job output '{key}' must reference steps.run-review (got: {value})"
+            )
+
+
+def test_run_review_step_has_id() -> None:
+    """Run review step must have id: run-review so job outputs can reference its $GITHUB_OUTPUT."""
+    wf = _load_reusable_workflow()
+    steps = wf["jobs"]["review"]["steps"]
+    run_review_steps = [s for s in steps if s.get("id") == "run-review"]
+    assert len(run_review_steps) == 1, (
+        f"Expected exactly one step with id: run-review; found {len(run_review_steps)}"
+    )
+    step = run_review_steps[0]
+    assert "prevue review" in str(step.get("run", "")), (
+        "The run-review step must invoke 'prevue review'"
+    )
+
+
+def test_upload_artifact_step_present() -> None:
+    """OUTP-05 / D-08 (Pitfall 6): full JSON goes to artifact to avoid 1 MB job-output limit."""
+    wf = _load_reusable_workflow()
+    steps = wf["jobs"]["review"]["steps"]
+    artifact_steps = [s for s in steps if "upload-artifact" in str(s.get("uses", ""))]
+    assert artifact_steps, "No upload-artifact step found in the review job"
+    step = artifact_steps[0]
+    # Must run with if: always() so artifact is produced even on degraded/neutral reviews
+    assert step.get("if") == "always()", (
+        f"upload-artifact step must have 'if: always()'; got: {step.get('if')}"
+    )
+    # Must upload prevue-result.json (or reference it)
+    path = str((step.get("with") or {}).get("path", ""))
+    assert "prevue-result" in path, f"upload-artifact must upload prevue-result.json; path={path}"
+
+
+def test_otel_env_set_in_run_review_step() -> None:
+    """WARNING 3 (cross-wave): COPILOT_OTEL_FILE_EXPORTER_PATH must be in Run review env.
+
+    Without this, flow.py's capture_usage(otel-jsonl) cannot read the OTEL spans file
+    and falls back to estimated=True (bytes/4). Plan 05 wires this so real-token capture
+    (Plan 03) functions end-to-end in CI.
+    """
+    wf = _load_reusable_workflow()
+    steps = wf["jobs"]["review"]["steps"]
+    run_review_steps = [s for s in steps if s.get("id") == "run-review"]
+    assert run_review_steps, "run-review step not found"
+    step = run_review_steps[0]
+    env = step.get("env") or {}
+    assert "COPILOT_OTEL_FILE_EXPORTER_PATH" in env, (
+        "COPILOT_OTEL_FILE_EXPORTER_PATH must be set in the Run review step env "
+        "so Copilot OTEL token capture (Plan 03) functions in CI (WARNING 3)"
+    )
+
+
+def test_otel_env_end_to_end_capture(tmp_path) -> None:
+    """WARNING 3 end-to-end: with COPILOT_OTEL_FILE_EXPORTER_PATH set and a fixture OTEL log,
+    capture_usage returns estimated=False (real tokens, not bytes/4 estimate).
+    """
+    from prevue.engines.usage import capture_usage
+
+    # Simulate the CliEngineSpec otel-jsonl strategy
+    class _FakeSpec:
+        usage_capture = "otel-jsonl"
+
+    # Use the fixture copilot_otel.jsonl that already exists from Plan 01/03
+    fixture_otel = (
+        Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "usage" / "copilot_otel.jsonl"
+    )
+    if not fixture_otel.exists():
+        # Fallback path used when running from project root
+        fixture_otel = Path(__file__).resolve().parent / "fixtures" / "usage" / "copilot_otel.jsonl"
+    assert fixture_otel.exists(), f"copilot_otel.jsonl fixture not found at {fixture_otel}"
+
+    result = capture_usage(_FakeSpec(), stdout="", otel_path=str(fixture_otel))
+    assert result is not None, (
+        "capture_usage returned None for otel-jsonl strategy with a valid OTEL log path — "
+        "COPILOT_OTEL_FILE_EXPORTER_PATH cross-wave dependency not satisfied"
+    )
+    assert result.get("estimated") is False, (
+        f"capture_usage must return estimated=False for otel-jsonl strategy; got: {result}"
+    )

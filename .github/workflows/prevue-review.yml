@@ -58,6 +58,16 @@ jobs:
         )
       }}
     runs-on: ubuntu-latest
+    # OUTP-05 / D-08/D-09: expose compact machine-readable review results as job
+    # outputs so downstream jobs can chain automation on a stable versioned contract.
+    outputs:
+      schema_version: ${{ steps.run-review.outputs.schema_version }}
+      conclusion: ${{ steps.run-review.outputs.conclusion }}
+      error_count: ${{ steps.run-review.outputs.error_count }}
+      warning_count: ${{ steps.run-review.outputs.warning_count }}
+      info_count: ${{ steps.run-review.outputs.info_count }}
+      tokens: ${{ steps.run-review.outputs.tokens }}
+      cost_usd: ${{ steps.run-review.outputs.cost_usd }}
     steps:
       - name: Checkout Prevue framework
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -115,6 +125,7 @@ jobs:
         run: bash .prevue/.github/scripts/install-engine-cli.sh
 
       - name: Run review
+        id: run-review
         working-directory: .prevue
         run: uv run prevue review
         env:
@@ -126,3 +137,23 @@ jobs:
           COPILOT_GITHUB_TOKEN: ${{ inputs.engine == 'copilot-cli' && secrets.copilot-github-token || '' }}
           ANTHROPIC_API_KEY: ${{ inputs.engine == 'claude-code-cli' && secrets.anthropic-api-key || '' }}
           CURSOR_API_KEY: ${{ inputs.engine == 'cursor-cli' && secrets.cursor-api-key || '' }}
+          # WARNING 3 (Plan 03 cross-wave): Copilot OTEL log path wired here so that
+          # capture_usage(otel-jsonl) in flow.py can read real token counts from the OTEL
+          # spans file. Without this env var, capture_usage returns None → estimated=True.
+          # Set in the review step env (not globally) so it is scoped to Copilot invocations.
+          COPILOT_OTEL_FILE_EXPORTER_PATH: ${{ runner.temp }}/copilot-otel
+          # OUTP-05: full ReviewResult JSON written here; uploaded as artifact below.
+          PREVUE_RESULT_FILE: ${{ runner.temp }}/prevue-result.json
+
+      # OUTP-05 / D-08 (Pitfall 6): the compact form goes to $GITHUB_OUTPUT (above);
+      # the full ReviewResult JSON is too large for job outputs (1 MB limit) so it is
+      # uploaded as a build artifact. Runs with if: always() so the artifact is produced
+      # even on degraded/neutral reviews where the review step may exit non-zero.
+      - name: Upload review result artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: prevue-result
+          path: ${{ runner.temp }}/prevue-result.json
+          if-no-files-found: warn
+          retention-days: 30
