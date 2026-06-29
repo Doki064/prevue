@@ -26,3 +26,25 @@ def sanitize_stderr(stderr: str | bytes | None, secret: str) -> str:
 
 
 _sanitize_stderr = sanitize_stderr
+
+
+# ---------------------------------------------------------------------------
+# Per-engine AuthError subclasses — defined here to avoid circular imports
+# (spec.py imports these; per-engine modules re-export for test compat)
+# ---------------------------------------------------------------------------
+
+
+class CopilotAuthError(AuthError):
+    """Raised when COPILOT_GITHUB_TOKEN is missing or not a fine-grained PAT."""
+
+
+class ClaudeAuthError(AuthError):
+    """Raised when ANTHROPIC_API_KEY is missing."""
+
+
+class CursorAuthError(AuthError):
+    """Raised when CURSOR_API_KEY is missing."""
+
+
+class AntigravityAuthError(AuthError):
+    """Raised when ANTIGRAVITY_API_KEY is missing."""

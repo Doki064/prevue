@@ -356,9 +356,13 @@ class TestRetryThenDegrade:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         import prevue.engines.copilot_cli as copilot_cli
+        import prevue.engines.prompt as prompt_module
 
         prompt = _build_prompt(_sample_request())
-        monkeypatch.setattr(copilot_cli, "MAX_PROMPT_BYTES", len(prompt.encode("utf-8")) + 50)
+        small_limit = len(prompt.encode("utf-8")) + 50
+        # Patch both the re-export and the source module used by CliEngineAdapter
+        monkeypatch.setattr(copilot_cli, "MAX_PROMPT_BYTES", small_limit)
+        monkeypatch.setattr(prompt_module, "MAX_PROMPT_BYTES", small_limit)
         call_count = 0
 
         def _run(*_args, **_kwargs):

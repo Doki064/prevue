@@ -19,12 +19,13 @@ from tests.engine_helpers import (
     stdout_with_fence,
 )
 
-FUNCTIONAL = [name for name in ENGINES if name != "gemini-cli"]
+FUNCTIONAL = sorted(ENGINES.keys())  # all four engines are now functional (D-12/D-03)
 
 AUTH_ENV: dict[str, tuple[str, str | None]] = {
     "copilot-cli": ("COPILOT_GITHUB_TOKEN", VALID_TOKEN),
     "claude-code-cli": ("ANTHROPIC_API_KEY", "sk-ant-test-key"),
     "cursor-cli": ("CURSOR_API_KEY", "cur_test_key"),
+    "antigravity-cli": ("ANTIGRAVITY_API_KEY", "agy-test-key"),
 }
 
 
@@ -138,6 +139,11 @@ def test_vendor_argv(
         assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "text"]
         assert "-f" in cmd
         assert "--force" not in cmd
+    elif engine_name == "antigravity-cli":
+        # antigravity: prompt_delivery=argv — prompt appended after base_argv ["agy","-p"]
+        assert cmd[:2] == ["agy", "-p"]
+        # prompt is the last element when no model flag
+        assert len(cmd) == 3  # ["agy", "-p", "<prompt>"]
     else:
         pytest.fail(f"Unexpected engine {engine_name!r}")
 
@@ -265,11 +271,6 @@ def test_classify_missing_credential_raises_auth_error(
         adapter.classify(["src/main.py"], CANONICAL_LABEL_ORDER)
     assert not called
 
-
-def test_gemini_classify_raises_not_implemented() -> None:
-    adapter = get_adapter("gemini-cli")
-    with pytest.raises(NotImplementedError, match="does not implement classify"):
-        adapter.classify(["src/main.py"], CANONICAL_LABEL_ORDER)
 
 
 def test_adapter_cli_commands_contain_no_allow_tool_flags() -> None:

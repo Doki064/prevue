@@ -11,8 +11,6 @@ cannot be confirmed without a live CI test. Plan 06 handles install plumbing.
 
 from __future__ import annotations
 
-from prevue.engines.errors import AuthError
+from prevue.engines.errors import AntigravityAuthError  # noqa: F401 — re-export for test compat
 
-
-class AntigravityAuthError(AuthError):
-    """Raised when ANTIGRAVITY_API_KEY is missing."""
+__all__ = ["AntigravityAuthError"]

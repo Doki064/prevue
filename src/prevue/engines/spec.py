@@ -7,12 +7,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
-# AuthError subclasses are imported from their per-engine modules for test compat.
-# These imports happen at module load after those modules define the error classes.
-from prevue.engines.claude_code_cli import ClaudeAuthError
-from prevue.engines.copilot_cli import CopilotAuthError
-from prevue.engines.cursor_cli import CursorAuthError
-from prevue.engines.gemini_cli import AntigravityAuthError
+# AuthError subclasses are defined in errors.py to avoid circular imports.
+# Per-engine modules re-export them for test backward compat.
+from prevue.engines.errors import (
+    AntigravityAuthError,
+    AuthError,  # noqa: F401 — re-exported for convenience
+    ClaudeAuthError,
+    CopilotAuthError,
+    CursorAuthError,
+)
 
 
 class CliEngineSpec(BaseModel):
@@ -58,6 +61,7 @@ class CliEngineSpec(BaseModel):
 # ---------------------------------------------------------------------------
 # Per-engine validate_secret helpers
 # ---------------------------------------------------------------------------
+
 
 def _validate_copilot_secret(token: str) -> str:
     """Validate COPILOT_GITHUB_TOKEN is a fine-grained PAT."""
