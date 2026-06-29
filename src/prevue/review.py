@@ -957,8 +957,7 @@ def run_review(
         _run_budget_reached = True
         skipped_reason = (
             "run token budget reached — lowest-priority files dropped "
-            f"({not_reviewed_run_budget} file(s) not reviewed; "
-            "run token budget reached)"
+            f"({not_reviewed_run_budget} file(s) not reviewed)"
         )
         packed_files = cap_packed
         # Refresh matched skills after cap-triggered repack
