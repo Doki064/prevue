@@ -1,0 +1,8 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 8900,
+  "session_id": "sess-cursor-xyz789",
+  "result": "Code review complete. Found 2 issues in the diff."
+}
