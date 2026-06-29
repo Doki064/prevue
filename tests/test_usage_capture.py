@@ -134,3 +134,95 @@ def test_otel_missing_path_returns_none() -> None:
     result = capture_usage(spec, stdout="", otel_path=None)  # type: ignore[misc]
 
     assert result is None, "Missing OTEL path must degrade gracefully to None"
+
+
+# ---------------------------------------------------------------------------
+# Pitfall 3 regression: Claude stdout-json envelope must not break fence extraction
+# ---------------------------------------------------------------------------
+
+
+def test_claude_stdout_json_fence_extraction_pitfall3() -> None:
+    """Pitfall 3 regression: a Claude stdout-json envelope with a fenced result field
+    must still yield findings via extract_json_fence(result), not degrade.
+
+    When review_with_retry sees a stdout-json engine, it must run extract_json_fence
+    on the 'result' field (the review text), NOT on raw stdout (the JSON envelope).
+    Running extract_json_fence on the envelope would always fail because the envelope
+    itself is JSON with no markdown fence.
+    """
+    try:
+        from prevue.engines.flow import review_with_retry
+        from prevue.engines.spec import CliEngineSpec
+    except ImportError as exc:
+        pytest.fail(f"prevue.engines.flow or spec not importable: {exc}", pytrace=False)
+
+    # Build a Claude-like spec (stdout-json usage capture, no real secret)
+    from prevue.engines.errors import ClaudeAuthError
+
+    spec = CliEngineSpec(
+        name="claude-code-cli",
+        cli_label="Claude Code CLI",
+        secret_env="ANTHROPIC_API_KEY",
+        auth_error=ClaudeAuthError,
+        validate_secret=lambda t: t,
+        base_argv=("claude", "--bare", "-p"),
+        prompt_delivery="stdin",
+        usage_capture="stdout-json",
+    )
+
+    # A Claude stdout-json envelope whose 'result' contains a fenced JSON review
+    finding_payload = json.dumps(
+        [
+            {
+                "path": "src/app.py",
+                "line": 42,
+                "title": "Null check missing",
+                "body": "Add a null check",
+                "severity": "warning",
+            }
+        ]
+    )  # noqa: E501
+    result_text = f"Review summary here.\n\n```json\n{finding_payload}\n```"
+    envelope = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": result_text,
+            "usage": {
+                "input_tokens": 1500,
+                "output_tokens": 250,
+                "cache_read_input_tokens": 800,
+                "cache_creation_input_tokens": 200,
+            },
+            "total_cost_usd": 0.007125,
+        }
+    )
+
+    from tests.engine_helpers import make_sample_request
+
+    req = make_sample_request()
+
+    result = review_with_retry(
+        req,
+        invoke=lambda _prompt: envelope,
+        secret="fake-key",
+        build_prompt=lambda req, **kw: "Review this diff: ...",
+        max_prompt_bytes=10_000_000,
+        model_label="claude-3-5-sonnet-20241022",
+        spec=spec,
+    )
+
+    # Pitfall 3 assertion: must NOT be degraded — findings extracted successfully
+    assert not result.degraded, (
+        f"Pitfall 3 regression: Claude stdout-json review was degraded. "
+        f"engine_meta={result.engine_meta}"
+    )
+    assert len(result.findings) >= 1, (
+        "Pitfall 3 regression: expected ≥1 finding from fenced result field, got 0"
+    )
+
+    # Bonus: real tokens must be captured (estimated=False)
+    tokens = result.engine_meta["tokens"]
+    assert tokens.get("estimated") is False, "Claude stdout-json must have estimated=False"
+    assert tokens.get("input") == 1500

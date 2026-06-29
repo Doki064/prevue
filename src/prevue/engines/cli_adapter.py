@@ -132,6 +132,10 @@ class CliEngineAdapter(EngineAdapter):
 
     def review(self, req: ReviewRequest) -> ReviewResult:
         token, env = self._build_env(req.model)
+        # Pass spec so flow can capture real per-engine usage (PERF-03, D-04).
+        # For otel-jsonl engines (copilot-cli), flow reads COPILOT_OTEL_FILE_EXPORTER_PATH
+        # from the environment post-invocation (WARNING 3: env is unset until Plan 05
+        # wires it into the workflow — Copilot falls back to bytes/4 until then).
         return flow.review_with_retry(
             req,
             invoke=lambda p: self._invoke(p, env, token, req.budget_seconds, req.model),
@@ -139,6 +143,7 @@ class CliEngineAdapter(EngineAdapter):
             build_prompt=build_prompt,
             max_prompt_bytes=_prompt_module.MAX_PROMPT_BYTES,
             model_label=req.model or "default",
+            spec=self._spec,
         )
 
     def classify(
