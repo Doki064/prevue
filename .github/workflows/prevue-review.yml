@@ -36,6 +36,8 @@ on:
         required: false
       antigravity-api-key:
         required: false
+      gemini-api-key:
+        required: false
 
 # LIFE-04 (resolveReviewThread) requires contents:write — verified live 2026-06 (08-07).
 # pull-requests:write alone returns GraphQL 403 Forbidden on resolveReviewThread.
@@ -142,6 +144,9 @@ jobs:
           # ANTIGRAVITY_API_KEY: gated on engine == 'antigravity-cli'; GEMINI_API_KEY is a
           # documented alias that the spec validator also honors (D-12 / T-10-20).
           ANTIGRAVITY_API_KEY: ${{ inputs.engine == 'antigravity-cli' && secrets.antigravity-api-key || '' }}
+          # D-12: GEMINI_API_KEY alias — consumers who store their key under this name
+          # can pass it as gemini-api-key secret; cli_adapter.py reads it as fallback.
+          GEMINI_API_KEY: ${{ inputs.engine == 'antigravity-cli' && secrets.gemini-api-key || '' }}
           # WARNING 3 (Plan 03 cross-wave): Copilot OTEL log path wired here so that
           # capture_usage(otel-jsonl) in flow.py can read real token counts from the OTEL
           # spans file. Without this env var, capture_usage returns None → estimated=True.
