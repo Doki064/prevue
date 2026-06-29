@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 10-05-PLAN.md
-last_updated: "2026-06-29T11:14:47.624Z"
+status: verifying
+stopped_at: "Checkpoint: Task 3 - live Antigravity sandbox verification (blocking-human)"
+last_updated: "2026-06-29T11:30:05.862Z"
 last_activity: "2026-06-29 -- Phase 10 Plan 02 complete (ENGN-10: spec-driven CliEngineAdapter + auto-populated registry)"
 progress:
   total_phases: 15
-  completed_phases: 9
+  completed_phases: 10
   total_plans: 61
-  completed_plans: 60
-  percent: 60
+  completed_plans: 61
+  percent: 67
 ---
 
 # Project State
@@ -27,7 +27,7 @@ See: .planning/PROJECT.md (updated 2026-06-12)
 
 Phase: 10 (boundary-contracts) — EXECUTING
 Plan: 6 of 6
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-06-29 -- Phase 10 Plan 02 complete (ENGN-10: spec-driven CliEngineAdapter + auto-populated registry)
 
 Progress: [██████████] 6/6 plans complete (Phase 09) — All 9 phases complete; Phase 10: 2/6 plans complete
@@ -118,6 +118,7 @@ Progress: [██████████] 6/6 plans complete (Phase 09) — All
 | Phase 10-boundary-contracts P03 | 13 | 2 tasks | 7 files |
 | Phase 10-boundary-contracts P04 | 6 | 2 tasks | 3 files |
 | Phase 10-boundary-contracts P05 | 7min | 2 tasks | 6 files |
+| Phase 10-boundary-contracts P06 | 10min | - tasks | - files |
 
 ## Accumulated Context
 
@@ -222,6 +223,9 @@ Recent decisions affecting current work:
 - [Phase ?]: OUTPUT_SCHEMA_VERSION='1.0' injected by build_full_output into serialization — NOT added as field on ReviewResult (D-09)
 - [Phase ?]: emit_machine_output: result file write unconditional; GITHUB_OUTPUT write guarded; heredoc form for T-10-13 defense (10-05)
 - [Phase ?]: COPILOT_OTEL_FILE_EXPORTER_PATH scoped to run-review step env (WARNING 3 resolved): Plan 03 real-token capture now functional in CI (10-05)
+- [Phase ?]: pseudo-TTY script -qec wrapper in cli_adapter.py for antigravity-cli (T-10-21)
+- [Phase ?]: update-pricing.yml: human-reviewed PR only, no merge step (D-06b / T-10-18)
+- [Phase ?]: ANTIGRAVITY_API_KEY gated on inputs.engine == antigravity-cli in workflow env (T-10-20)
 
 ### Pending Todos
 
@@ -248,6 +252,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-29T11:14:47.618Z
-Stopped at: Completed 10-05-PLAN.md
+Last session: 2026-06-29T11:30:05.855Z
+Stopped at: Checkpoint: Task 3 - live Antigravity sandbox verification (blocking-human)
 Resume file: None

@@ -22,7 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget (completed 2026-06-14)
 - [x] **Phase 8: Incremental & Stateful Review Lifecycle** - Incremental review scoped to the diff since the last-reviewed SHA, carry-forward/dedupe of prior findings, and auto-resolve of outdated inline threads (LIFE-01/02/04) (completed 2026-06-15)
 - [x] **Phase 9: Classification-aligned skill loading + multi-call review** - Reconcile classify/route with selective skill selection (SKIL-01 gap), and add configurable multi-call review with context-preserving splitting and optional parallel execution (ENGN-05/06/07) (completed 2026-06-21; live UAT deferred by user)
-- [ ] **Phase 10: Boundary Contracts** - Lock the highest-churn boundaries before they ossify: config precedence, real adapter token usage, adapter raw-args + model tiering, structured JSON output (WKFL-05/PERF-03/ENGN-08/09/OUTP-05)
+- [x] **Phase 10: Boundary Contracts** - Lock the highest-churn boundaries before they ossify: config precedence, real adapter token usage, adapter raw-args + model tiering, structured JSON output (WKFL-05/PERF-03/ENGN-08/09/OUTP-05) (completed 2026-06-29)
 - [ ] **Phase 11: Skills as Pinned External Repo** - Extract skills to a dedicated repo consumed as a SHA-pinned submodule = default source, with config-driven skill source and consumer override behind trust gating (SKIL-06/07)
 - [ ] **Phase 12: Cross-File Dependency Context** - Close the tier-2 whole-framework gap: inject unchanged first-party dependencies of changed files as capped, depth-1 reference context (PERF-04)
 - [ ] **Phase 13: Finding Signal Quality** - Confidence/impact scoring + intra-review dedup so a single review emits signal, not near-duplicate noise (QUAL-01)
@@ -265,7 +265,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 7. Customization & Hardening | 7/7 | Complete    | 2026-06-14 |
 | 8. Incremental & Stateful Review Lifecycle | 16/16 | Complete   | 2026-06-16 |
 | 9. Classification-aligned skill loading + multi-call review | 6/6 | Complete   | 2026-06-21 |
-| 10. Boundary Contracts | 5/6 | In Progress|  |
+| 10. Boundary Contracts | 6/6 | Complete   | 2026-06-29 |
 
 ### Phase 8: Incremental & Stateful Review Lifecycle
 
@@ -413,7 +413,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 10-06-PLAN.md — Antigravity install/checksum + secret + scheduled pricing-bump PR + live human-verify checkpoint (Wave 4)
+- [x] 10-06-PLAN.md — Antigravity install/checksum + secret + scheduled pricing-bump PR + live human-verify checkpoint (Wave 4)
 
 ### Phase 11: Skills as Pinned External Repo
 
@@ -481,7 +481,7 @@ _Unsequenced task/spike items mined 2026-06-25 (ai-code-review, claude-code-acti
 
 **Goal:** Measure whether semantic chunking (TreeSitter) and/or Headroom library-mode compression deliver meaningful token savings on Prevue's **diff-only / hunk-level** input — not the whole-codebase input their headline numbers (95%+) are measured on — before PERF-02 becomes a phase. Headroom is a real installable Apache-2.0 local lib (`pip install headroom-ai`), so the spike also measures the **minimal install footprint**: can a code-only/AST path skip the ONNX + HuggingFace `kompress-base` model (prose-only) that the `[all]`/`[ml]` extras pull? Decide adopt vs reject on savings × footprint.
 **Requirements:** Informs PERF-02
-**Plans:** 5/6 plans executed
+**Plans:** 6/6 plans complete
 **Source:** headroomlabs-ai/headroom (AST CodeCompressor, CacheAligner); bobmatnyc/ai-code-review semantic chunking.
 
 Plans:
