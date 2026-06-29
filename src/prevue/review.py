@@ -1383,7 +1383,19 @@ def emit_machine_output(
     # Write the full JSON result file (unconditional — artifact + local runs)
     if output_file is None:
         output_file = os.environ.get("PREVUE_RESULT_FILE", "prevue-result.json")
-    Path(output_file).write_text(full_json, encoding="utf-8")
+    out = Path(output_file)
+    # WR-04: warn when PREVUE_RESULT_FILE is an absolute path outside RUNNER_TEMP.
+    # In production the workflow sets it to ${{ runner.temp }}/prevue-result.json;
+    # a misconfigured or unexpected value gets a diagnostic on stderr rather than
+    # silently writing to an arbitrary location.
+    runner_temp = os.environ.get("RUNNER_TEMP")
+    if runner_temp and out.is_absolute() and not str(out).startswith(runner_temp):
+        print(
+            f"prevue: PREVUE_RESULT_FILE {str(out)!r} is outside RUNNER_TEMP"
+            f" ({runner_temp!r}); proceeding",
+            file=sys.stderr,
+        )
+    out.write_text(full_json, encoding="utf-8")
 
     # Write compact lines to $GITHUB_OUTPUT (guarded — no-op when unset)
     github_output_path = os.environ.get("GITHUB_OUTPUT")
