@@ -868,7 +868,8 @@ def post_inline_review(
         prior_comments = existing.get(key, [])
         if prior_comments:
             prior = prior_comments[0]
-            if _inline_severity_changed(prior.body or "", finding.severity):
+            # Update on any content change, not just severity change
+            if prior.body != body:
                 to_update.append((prior, body, finding))
             if len(prior_comments) > 1:
                 to_delete.extend(prior_comments[1:])
