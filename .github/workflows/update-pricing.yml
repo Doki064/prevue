@@ -30,6 +30,23 @@ jobs:
           curl -fsSL "$PRICING_URL" -o "$DEST"
           echo "Fetched $(wc -c < "$DEST") bytes"
 
+      - name: Validate downloaded pricing JSON
+        run: |
+          python3 -c "
+          import json, sys
+          dest = 'src/prevue/pricing/model_prices.json'
+          with open(dest) as f:
+              data = json.load(f)
+          assert isinstance(data, dict) and len(data) > 50, \
+              f'Suspicious: only {len(data)} entries in pricing snapshot'
+          # Spot-check known models exist and have plausible pricing
+          for model in ['gpt-4o', 'claude-3-5-sonnet-20241022']:
+              if model in data:
+                  cost = data[model].get('input_cost_per_token', 0)
+                  assert 0 < cost < 0.01, f'Implausible input cost for {model}: {cost}'
+          print(f'OK: {len(data)} model entries, spot-check passed')
+          "
+
       - name: Check for pricing changes
         id: diff
         run: |
