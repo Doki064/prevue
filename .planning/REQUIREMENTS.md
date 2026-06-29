@@ -240,26 +240,40 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ENGN-05 | Phase 9 | Complete |
 | ENGN-06 | Phase 9 | Complete |
 | ENGN-07 | Phase 9 | Complete |
-| ENGN-10 | Phase 10 | Planned (first task) |
-| WKFL-05 | Phase 10 | Planned |
-| PERF-03 | Phase 10 | Planned |
-| ENGN-08 | Phase 10 | Planned |
-| ENGN-09 | Phase 10 | Planned |
-| OUTP-05 | Phase 10 | Planned |
+| ENGN-10 | Phase 10 | Complete |
+| WKFL-05 | Phase 10 | Complete |
+| PERF-03 | Phase 10 | Complete |
+| ENGN-08 | Phase 10 | Complete |
+| ENGN-09 | Phase 10 | Complete |
+| OUTP-05 | Phase 10 | Complete |
 | SKIL-06 | Phase 11 | Planned |
 | SKIL-07 | Phase 11 | Planned |
 | PERF-04 | Phase 12 | Planned |
 | QUAL-01 | Phase 13 | Planned |
+| CUST-01 | v2 | Deferred |
+| CUST-02 | v2 | Deferred |
+| CUST-03 | v2 | Superseded → ENGN-04 (Phase 5, Complete) |
+| CUST-04 | v2 | Superseded → ENGN-05/06/07 (Phase 9, Complete) |
+| CUST-05 | v2 | Deferred |
+| CUST-06 | v2 | Deferred |
+| QUAL-02 | v2 | Deferred |
+| PERF-01 | v2 | Deferred |
+| PERF-02 | v2 | Deferred |
+| DESC-01 | v2 | Deferred |
+| OUTP-06 | v2 | Deferred |
+| SKIL-05 | v2 | Deferred |
+| LOCL-01 | v2 | Deferred |
 
 **Coverage:**
 
 - v1 requirements: 43 (33 prior + 9 promoted 2026-06-25 + ENGN-10 adapter consolidation)
-- Mapped to phases: 43 (Phases 1–9 Complete; Phases 10–13 Planned)
+- Mapped to phases: 43 (Phases 1–9 Complete; Phase 10 Complete; Phases 11–13 Planned)
+- v2 deferred: 11 (CUST-01/02/05/06, QUAL-02, PERF-01/02, DESC-01, OUTP-06, SKIL-05, LOCL-01) + 2 superseded (CUST-03/04)
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-12*
-*Last updated: 2026-06-24 — Phase 9 complete; SKIL-01 gap + ENGN-05/06/07 traceability updated to Complete; UAT 14/14 pass*
+*Last updated: 2026-06-29 — Phase 10 complete (ENGN-10/WKFL-05/PERF-03/ENGN-08/ENGN-09/OUTP-05 → Complete); added 13 missing v2 rows to Traceability table (CUST-01/02/03/04/05/06, QUAL-02, PERF-01/02, DESC-01, OUTP-06, SKIL-05, LOCL-01). Phase 9 complete: SKIL-01 gap + ENGN-05/06/07 → Complete; UAT 14/14 pass.*
 *v2 expanded 2026-06-25 — research mining of ai-code-review, claude-code-action, headroom, tokscale: added CUST-06, ENGN-08/09, OUTP-05/06, SKIL-05, WKFL-05, PERF-03 (actual token tracking); folded compression/severity sources into PERF-02 + QUAL-01. Spike + consumer-doc tasks parked in ROADMAP Backlog.*
 *PERF-04 added 2026-06-25 — selective cross-file dependency context (capped-A → symbol-slice ladder, depth-1 first-party); proven a whole-framework (not just incremental) gap via live tier-2 demo on test-sandbox-repo PR #11.*
 *Skills rework 2026-06-25 — added SKIL-06 (skills → dedicated repo as pinned git submodule = default built-in source), SKIL-07 (consumer external skills repo, pin+trust gated), LOCL-01 (interactive slash-command surface); reopened two OOS rows as pinned-not-registry / local-surface. Considered and DROPPED: domain-composite skills + language-axis routing (`/review-web-app`, `--python`) — composites are sugar over existing multi-label routing; not pursued.*
