@@ -180,9 +180,12 @@ def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
                             for a in span.get("attributes", [])
                             if "key" in a
                         }
-                        total_input += int(attrs.get(_OTEL_PROMPT_TOKENS, 0) or 0)
-                        total_output += int(attrs.get(_OTEL_COMPLETION_TOKENS, 0) or 0)
-                        total_cache_read += int(attrs.get(_OTEL_CACHE_READ_TOKENS, 0) or 0)
+                        try:
+                            total_input += int(attrs.get(_OTEL_PROMPT_TOKENS) or 0)
+                            total_output += int(attrs.get(_OTEL_COMPLETION_TOKENS) or 0)
+                            total_cache_read += int(attrs.get(_OTEL_CACHE_READ_TOKENS) or 0)
+                        except (TypeError, ValueError):
+                            continue  # skip malformed span (T-10-07)
 
     except OSError:
         # T-10-07: file I/O error — degrade to None
@@ -196,17 +199,16 @@ def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
     }
 
 
-def _extract_attr_value(attr: dict[str, Any]) -> int | str | float | None:
+def _extract_attr_value(attr: dict[str, Any]) -> int | str | float | bool | None:
     """Extract the scalar value from an OTEL attribute value dict.
 
     OTEL attributes use ``{"key": "...", "value": {"intValue": N}}`` shapes.
+    Use explicit key presence check — ``or`` suppresses falsy values (0, False, "").
     """
     value = attr.get("value", {})
     if not isinstance(value, dict):
         return None
-    return (
-        value.get("intValue")
-        or value.get("doubleValue")
-        or value.get("stringValue")
-        or value.get("boolValue")
-    )
+    for key in ("intValue", "doubleValue", "stringValue", "boolValue"):
+        if key in value:
+            return value[key]
+    return None
