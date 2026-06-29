@@ -1,23 +1,17 @@
 ---
 phase: 10-boundary-contracts
 verified: 2026-06-29T11:56:27Z
-status: gaps_found
-score: 11/13 must-haves verified
+status: human_needed
+score: 12/13 must-haves verified
 overrides_applied: 0
 gaps:
   - truth: "run_review emits a compact machine-readable output (schema_version, conclusion, severity counts, tokens, cost) to $GITHUB_OUTPUT"
-    status: failed
-    reason: "emit_machine_output is defined in review.py but never called from run_review() or any production code path. The prevue review CLI calls run_review(), which does not invoke emit_machine_output. The workflow job outputs (steps.run-review.outputs.*) will be empty at runtime. Plan 05 SUMMARY explicitly acknowledges: 'emit_machine_output call is not yet inserted into run_review() itself.'"
-    artifacts:
-      - path: "src/prevue/review.py"
-        issue: "emit_machine_output defined at line 1352 but never called from run_review() (line 470). grep -n 'emit_machine_output' src/prevue/review.py shows only the definition."
-      - path: "src/prevue/cli.py"
-        issue: "CLI entry point calls run_review() only; no emit_machine_output call anywhere in production code."
-    missing:
-      - "Call emit_machine_output(result, conclusion) inside run_review() after gate is finalized and before publish (as specified in Plan 05 action block: 'Call emit_machine_output near the end of run_review after gate is finalized, alongside the check publish')"
+    status: resolved
+    resolved_by: "fix(10-05): wire emit_machine_output into run_review (OUTP-05) — commit 2b90ab3"
+    reason: "emit_machine_output(result, gate.conclusion) now called at end of run_review() in src/prevue/review.py:1296. All 800 tests pass."
 
   - truth: "A human verifies a live Antigravity review on a sandbox PR before the engine is declared production-functional (token estimate fallback confirmed)"
-    status: failed
+    status: deferred
     reason: "Plan 06 Task 3 is a blocking checkpoint:human-verify that has not been approved. The Plan 06 SUMMARY states: 'Task 3 is blocked on a live human verification of the Antigravity engine on a sandbox PR. This cannot be automated.' The SUMMARY checkpoint section shows the gate open with no approval signal."
     artifacts:
       - path: ".planning/phases/10-boundary-contracts/10-06-SUMMARY.md"
