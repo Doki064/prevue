@@ -1,22 +1,18 @@
-"""Gemini CLI adapter skeleton — registered extension point (D-02)."""
+"""Antigravity CLI auth error — replaces Gemini skeleton (D-12, ENGN-10).
+
+D-12: Gemini CLI replaced by Antigravity CLI (`agy` binary).
+The full adapter is implemented via CliEngineAdapter(spec) in cli_adapter.py.
+This module exists for import stability and AuthError test compatibility.
+
+Risk note: Antigravity's non-TTY stdout-dropping behavior and unstable
+--output-format json (RESEARCH §10-RESEARCH Open Q2) mean token reporting
+cannot be confirmed without a live CI test. Plan 06 handles install plumbing.
+"""
 
 from __future__ import annotations
 
-from prevue.engines.base import EngineAdapter
-from prevue.models import ReviewRequest, ReviewResult
+from prevue.engines.errors import AuthError
 
 
-class GeminiAdapter(EngineAdapter):
-    """Skeleton adapter for future Gemini CLI integration.
-
-    Intended invocation: ``gemini -p "<prompt>" --output-format json``
-    Model via ``-m <model>`` (e.g. gemini-2.5-flash).
-    Auth via ``GEMINI_API_KEY``.
-
-    Functional implementation deferred — see CONTEXT D-02.
-    """
-
-    name = "gemini-cli"
-
-    def review(self, req: ReviewRequest) -> ReviewResult:
-        raise NotImplementedError("Gemini adapter planned — see ENGN-04")
+class AntigravityAuthError(AuthError):
+    """Raised when ANTIGRAVITY_API_KEY is missing."""
