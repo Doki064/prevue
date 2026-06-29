@@ -140,10 +140,17 @@ def test_vendor_argv(
         assert "-f" in cmd
         assert "--force" not in cmd
     elif engine_name == "antigravity-cli":
-        # antigravity: prompt_delivery=argv — prompt appended after base_argv ["agy","-p"]
-        assert cmd[:2] == ["agy", "-p"]
-        # prompt is the last element when no model flag
-        assert len(cmd) == 3  # ["agy", "-p", "<prompt>"]
+        # Pitfall 2 pseudo-TTY wrapper: antigravity runs via `bash -c 'script -qec ...'`
+        # to survive the non-TTY stdout-drop bug in CI (T-10-21).
+        assert cmd[:2] == ["bash", "-c"], (
+            f"Antigravity must invoke via bash -c wrapper for pseudo-TTY; got cmd={cmd}"
+        )
+        # The shell command string must reference the inner agy invocation
+        shell_cmd = cmd[2]
+        assert "agy" in shell_cmd, f"Inner shell command missing 'agy': {shell_cmd}"
+        assert "script -qec" in shell_cmd, (
+            f"Antigravity must use 'script -qec' pseudo-TTY wrapper; got: {shell_cmd}"
+        )
     else:
         pytest.fail(f"Unexpected engine {engine_name!r}")
 

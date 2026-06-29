@@ -236,6 +236,108 @@ def test_otel_env_set_in_run_review_step() -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Plan 06 — Task 1: Antigravity install + secret pass-through + pseudo-TTY
+# ---------------------------------------------------------------------------
+
+
+def test_antigravity_install_case_exists() -> None:
+    """antigravity-cli case must exist in the install script (D-12 / T-10-17)."""
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert "antigravity-cli)" in script, (
+        "install-engine-cli.sh is missing the antigravity-cli) case"
+    )
+
+
+def test_antigravity_install_checksum_gate() -> None:
+    """Antigravity install must include PREVUE_ANTIGRAVITY_INSTALL_SHA256 checksum gate
+    mirroring the Cursor PREVUE_CURSOR_INSTALL_SHA256 pattern (T-10-17 mitigation)."""
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert "PREVUE_ANTIGRAVITY_INSTALL_SHA256" in script, (
+        "Missing PREVUE_ANTIGRAVITY_INSTALL_SHA256 checksum gate for antigravity install"
+    )
+    assert "sha256sum -c" in script, "Missing sha256sum -c verification in install script"
+
+
+def test_antigravity_install_downloads_then_execs() -> None:
+    """Hardening guard: fetch Antigravity installer to a file then exec, never pipe to bash."""
+    script = INSTALL_SCRIPT.read_text(encoding="utf-8")
+    assert "antigravity.google/cli/install.sh" in script, (
+        "Missing antigravity.google/cli/install.sh in install script"
+    )
+    # Must download to a file (not curl | bash)
+    assert "antigravity.google/cli/install.sh -o" in script, (
+        "Antigravity install must use -o to save to a file, not pipe to bash"
+    )
+    assert "antigravity.google/cli/install.sh | bash" not in script, (
+        "Antigravity install must NOT use pipe-to-bash pattern"
+    )
+
+
+def test_antigravity_secret_in_workflow_call_secrets() -> None:
+    """ENGN-10: antigravity-api-key must be declared in workflow_call secrets block."""
+    wf = _load_reusable_workflow()
+    on = wf.get("on") or wf.get(True)
+    secrets = (on or {}).get("workflow_call", {}).get("secrets", {})
+    assert "antigravity-api-key" in secrets, (
+        "antigravity-api-key missing from workflow_call secrets block"
+    )
+    assert secrets["antigravity-api-key"].get("required") is False, (
+        "antigravity-api-key must be required: false (optional secret)"
+    )
+
+
+def test_antigravity_secret_gated_on_engine_input() -> None:
+    """ANTIGRAVITY_API_KEY in Run-review env must be gated on inputs.engine == 'antigravity-cli'
+    (T-10-20: secret not leaked to non-Antigravity runs)."""
+    wf = _load_reusable_workflow()
+    steps = wf["jobs"]["review"]["steps"]
+    run_review_steps = [s for s in steps if s.get("id") == "run-review"]
+    assert run_review_steps, "run-review step not found"
+    env = run_review_steps[0].get("env") or {}
+    assert "ANTIGRAVITY_API_KEY" in env, "ANTIGRAVITY_API_KEY missing from Run-review step env"
+    antigravity_val = str(env["ANTIGRAVITY_API_KEY"])
+    assert "antigravity-cli" in antigravity_val, (
+        "ANTIGRAVITY_API_KEY must be gated on inputs.engine == 'antigravity-cli';"
+        f" got: {antigravity_val}"
+    )
+    assert "antigravity-api-key" in antigravity_val, (
+        "ANTIGRAVITY_API_KEY must reference the antigravity-api-key named secret;"
+        f" got: {antigravity_val}"
+    )
+
+
+def test_antigravity_pseudo_tty_wrapper_present() -> None:
+    """Pitfall 2 / T-10-21: the pseudo-TTY script -qec wrapper must be encoded in the
+    Antigravity invocation path to survive the non-TTY stdout-drop bug in CI."""
+    import subprocess
+
+    # Check cli_adapter.py for the workaround (the canonical location per plan)
+    cli_adapter = (
+        Path(__file__).resolve().parents[1] / "src" / "prevue" / "engines" / "cli_adapter.py"
+    )
+    result = subprocess.run(
+        ["grep", "-l", "script -qec", str(cli_adapter)],
+        capture_output=True,
+        text=True,
+    )
+    found_in_adapter = result.returncode == 0
+
+    # Also accept it in the .github/ tree as a documented wrapper
+    result2 = subprocess.run(
+        ["grep", "-rl", "script -qec", str(Path(__file__).resolve().parents[1] / ".github")],
+        capture_output=True,
+        text=True,
+    )
+    found_in_github = bool(result2.stdout.strip())
+
+    assert found_in_adapter or found_in_github, (
+        "pseudo-TTY wrapper 'script -qec' not found in cli_adapter.py or .github/ — "
+        "Antigravity non-TTY stdout-drop workaround (Pitfall 2) must be encoded somewhere "
+        "in the invocation path"
+    )
+
+
 def test_otel_env_end_to_end_capture(tmp_path) -> None:
     """WARNING 3 end-to-end: with COPILOT_OTEL_FILE_EXPORTER_PATH set and a fixture OTEL log,
     capture_usage returns estimated=False (real tokens, not bytes/4 estimate).

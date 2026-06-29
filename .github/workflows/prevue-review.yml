@@ -34,6 +34,8 @@ on:
         required: false
       cursor-api-key:
         required: false
+      antigravity-api-key:
+        required: false
 
 # LIFE-04 (resolveReviewThread) requires contents:write — verified live 2026-06 (08-07).
 # pull-requests:write alone returns GraphQL 403 Forbidden on resolveReviewThread.
@@ -137,6 +139,9 @@ jobs:
           COPILOT_GITHUB_TOKEN: ${{ inputs.engine == 'copilot-cli' && secrets.copilot-github-token || '' }}
           ANTHROPIC_API_KEY: ${{ inputs.engine == 'claude-code-cli' && secrets.anthropic-api-key || '' }}
           CURSOR_API_KEY: ${{ inputs.engine == 'cursor-cli' && secrets.cursor-api-key || '' }}
+          # ANTIGRAVITY_API_KEY: gated on engine == 'antigravity-cli'; GEMINI_API_KEY is a
+          # documented alias that the spec validator also honors (D-12 / T-10-20).
+          ANTIGRAVITY_API_KEY: ${{ inputs.engine == 'antigravity-cli' && secrets.antigravity-api-key || '' }}
           # WARNING 3 (Plan 03 cross-wave): Copilot OTEL log path wired here so that
           # capture_usage(otel-jsonl) in flow.py can read real token counts from the OTEL
           # spans file. Without this env var, capture_usage returns None → estimated=True.

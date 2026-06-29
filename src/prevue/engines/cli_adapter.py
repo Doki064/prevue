@@ -7,6 +7,7 @@ Adding a CLI engine = one CliEngineSpec data entry in spec.py; no subclass neede
 from __future__ import annotations
 
 import os
+import shlex
 import tempfile
 
 import prevue.engines.prompt as _prompt_module
@@ -141,6 +142,42 @@ class CliEngineAdapter(EngineAdapter):
             # raw_args appended LAST (ENGN-08/D-10)
             if raw_args:
                 cmd.extend(raw_args)
+
+            # Pitfall 2 (D-12 / T-10-21): Antigravity `agy` checks isatty at startup
+            # and silently drops the final response when running under GitHub Actions
+            # (non-TTY). Wrap via `script -qec` to provide a pseudo-TTY, then strip
+            # ANSI escape codes from stdout.
+            #
+            # Implementation: store prompt in env var _AGY_PROMPT and build the inner
+            # shell command string using $var substitution — no shell-quoting of prompt
+            # needed, so the wrapper is safe regardless of prompt content.
+            #
+            # Static assertion target: grep -Rq "script -qec" src/prevue/engines/
+            if spec.name == "antigravity-cli":
+                # Build the inner shell command referencing the prompt via env var
+                inner_parts = list(spec.base_argv)
+                if spec.model_flag == "argv" and model and spec.model_argv_flag:
+                    inner_parts.extend([spec.model_argv_flag, model])
+                inner_parts.append("$_AGY_PROMPT")
+                if raw_args:
+                    inner_parts.extend(raw_args)
+                # Assemble inner_cmd as a shell command string (each part shell-escaped)
+                inner_cmd = " ".join(shlex.quote(p) for p in inner_parts)
+                # Strip ANSI + CR after script output; pipe via shell
+                wrapper_cmd = (
+                    f"script -qec {shlex.quote(inner_cmd)} /dev/null"
+                    " | sed -r 's/\\x1B\\[[0-9;]*[A-Za-z]//g' | tr -d '\\r'"
+                )
+                wrapped_env = {**env, "_AGY_PROMPT": prompt}
+                return invoke_subprocess_text(
+                    ["bash", "-c", wrapper_cmd],
+                    env=wrapped_env,
+                    secret=token,
+                    budget_seconds=budget_seconds,
+                    cli_label=spec.cli_label,
+                    cwd=cwd,
+                )
+
             return invoke_subprocess_text(
                 cmd,
                 env=env,
