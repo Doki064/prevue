@@ -79,6 +79,9 @@ jobs:
           **Requires human review before merge (D-06b).** Pricing data affects cost
           computation and is fetched from an external source; sign-off is required."
 
+          # Ensure labels exist (gh label create --force is idempotent)
+          gh label create "automated" --color "0075ca" --description "Automated change" --force || true
+          gh label create "pricing"   --color "e4e669" --description "Pricing data"     --force || true
           gh pr create \
             --title "$PR_TITLE" \
             --body "$PR_BODY" \
