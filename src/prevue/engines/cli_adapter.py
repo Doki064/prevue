@@ -42,10 +42,16 @@ class CliEngineAdapter(EngineAdapter):
         self.name = spec.name
         # raw_args appended LAST after all framework argv (ENGN-08/D-10: list form only)
         self._raw_args: list[str] = list(raw_args) if raw_args else []
+        # pricing_override: consumer engine.pricing dict (D-06c); None = use vendored table
+        self._pricing_override: dict | None = None
 
     def set_raw_args(self, raw_args: list[str]) -> None:
         """Replace the raw_args list (ENGN-08/D-10: called from review.py after get_adapter)."""
         self._raw_args = list(raw_args)
+
+    def set_pricing_override(self, pricing: dict | None) -> None:
+        """Set the consumer pricing override dict (D-06c: called from review.py after load_config)."""
+        self._pricing_override = pricing
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -216,6 +222,7 @@ class CliEngineAdapter(EngineAdapter):
             max_prompt_bytes=_prompt_module.MAX_PROMPT_BYTES,
             model_label=req.model or "default",
             spec=self._spec,
+            pricing_override=self._pricing_override,
         )
 
     def classify(

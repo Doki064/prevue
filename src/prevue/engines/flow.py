@@ -115,6 +115,7 @@ def review_with_retry(
     max_prompt_bytes: int,
     model_label: str,
     spec: CliEngineSpec | None = None,
+    pricing_override: dict | None = None,
 ) -> ReviewResult:
     """Run the review flow with one optional retry on fence-parse failure.
 
@@ -156,7 +157,7 @@ def review_with_retry(
         captured = capture_usage(spec, raw_stdout, otel_path=otel_path)
         if captured is not None and "cost_usd" not in captured and model_label and model_label != "default":
             from prevue.pricing import compute_cost
-            priced = compute_cost(spec.name, model_label, captured, override=None)
+            priced = compute_cost(spec.name, model_label, captured, override=pricing_override)
             if priced is not None:
                 captured["cost_usd"] = priced
 
@@ -201,7 +202,7 @@ def review_with_retry(
             captured_retry = capture_usage(spec, raw_retry_stdout, otel_path=otel_path)
             if captured_retry is not None and "cost_usd" not in captured_retry and model_label and model_label != "default":
                 from prevue.pricing import compute_cost
-                priced_retry = compute_cost(spec.name, model_label, captured_retry, override=None)
+                priced_retry = compute_cost(spec.name, model_label, captured_retry, override=pricing_override)
                 if priced_retry is not None:
                     captured_retry["cost_usd"] = priced_retry
 

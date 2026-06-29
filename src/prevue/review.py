@@ -575,6 +575,11 @@ def run_review(
     if not adapter and config.engine_config.raw_args and hasattr(engine, "set_raw_args"):
         engine.set_raw_args(config.engine_config.raw_args)
 
+    # Thread pricing override from base-ref engine_config into the adapter (D-06c).
+    # Injected here alongside raw_args so the same base-ref sentinel gate applies.
+    if not adapter and config.engine_config.pricing is not None and hasattr(engine, "set_pricing_override"):
+        engine.set_pricing_override(config.engine_config.pricing)
+
     # Resolve per-role models (ENGN-09/D-11): classify, review, consolidate.
     # Engine-config raw dict used to produce a flat dict for the two active call sites.
     # The consolidate slot resolves but is unused this phase (D-13: Phase 13/QUAL-01 will
