@@ -265,7 +265,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 7. Customization & Hardening | 7/7 | Complete    | 2026-06-14 |
 | 8. Incremental & Stateful Review Lifecycle | 16/16 | Complete   | 2026-06-16 |
 | 9. Classification-aligned skill loading + multi-call review | 6/6 | Complete   | 2026-06-21 |
-| 10. Boundary Contracts | 6/6 | Complete   | 2026-06-29 |
+| 10. Boundary Contracts | 6/6 | Complete    | 2026-06-29 |
 
 ### Phase 8: Incremental & Stateful Review Lifecycle
 
