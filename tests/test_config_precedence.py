@@ -147,7 +147,13 @@ def test_model_precedence_matrix(
 
 
 def test_fallback_model_from_yml(monkeypatch: pytest.MonkeyPatch) -> None:
-    """classification.fallback.model from yml used when no env override."""
+    """_resolve_engine_models only reads the engine block — not classification.fallback.model.
+
+    classification.fallback.model is consumed by review.py at runtime
+    (_effective_classify_model = _classify_model or fallback_cfg.model), not by
+    _resolve_engine_models.  When only the classification block is present, all
+    role keys resolve to None.
+    """
     _require_new_resolvers()
     monkeypatch.delenv("PREVUE_MODEL", raising=False)
     monkeypatch.delenv("COPILOT_MODEL", raising=False)
@@ -155,8 +161,10 @@ def test_fallback_model_from_yml(monkeypatch: pytest.MonkeyPatch) -> None:
     raw = {"classification": {"fallback": {"model": "gpt-4o-mini"}}}
     models = _resolve_engine_models(raw)  # type: ignore[misc]
     assert models is not None
-    # fallback model resolves from yml
-    assert "classify" in models or "fallback" in models or models.get("classify") == "gpt-4o-mini"
+    # _resolve_engine_models does not read classification.fallback.model:
+    # no engine block → all roles resolve to None
+    assert models.get("classify") is None
+    assert models.get("review") is None
 
 
 # ---------------------------------------------------------------------------
