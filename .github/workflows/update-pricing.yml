@@ -1,0 +1,87 @@
+name: Update LiteLLM Pricing Snapshot
+
+# D-06b: Scheduled workflow that curls the latest LiteLLM pricing JSON and opens a PR
+# to bump the vendored snapshot in src/prevue/pricing/model_prices.json.
+# The PR is NEVER merged automatically — the pricing bump is human-reviewed (T-10-18).
+on:
+  schedule:
+    # Run weekly on Mondays at 06:00 UTC — outside peak review traffic.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+# T-10-19: minimal permissions — only what the PR-open step needs.
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump-pricing:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: true
+
+      - name: Fetch latest LiteLLM pricing snapshot
+        run: |
+          PRICING_URL="https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json"
+          DEST="src/prevue/pricing/model_prices.json"
+          curl -fsSL "$PRICING_URL" -o "$DEST"
+          echo "Fetched $(wc -c < "$DEST") bytes"
+
+      - name: Check for pricing changes
+        id: diff
+        run: |
+          if git diff --quiet src/prevue/pricing/model_prices.json; then
+            echo "No changes to the pricing snapshot — nothing to bump."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            ADDED=$(git diff --numstat src/prevue/pricing/model_prices.json | awk '{print $1}')
+            REMOVED=$(git diff --numstat src/prevue/pricing/model_prices.json | awk '{print $2}')
+            echo "Pricing snapshot changed: +${ADDED}/-${REMOVED} lines"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push pricing snapshot update
+        if: steps.diff.outputs.changed == 'true'
+        id: commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="chore/update-pricing-$(date +%Y%m%d)"
+          git checkout -b "$BRANCH"
+          git add src/prevue/pricing/model_prices.json
+          git commit -m "chore: bump LiteLLM pricing snapshot $(date +%Y-%m-%d)"
+          git push origin "$BRANCH"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+
+      # D-06b: Open a PR for human review. The workflow intentionally has no merge step
+      # and no approve step — the PR must be reviewed and merged by a human (T-10-18).
+      - name: Open pull request for human review
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+        run: |
+          TODAY=$(date +%Y-%m-%d)
+          PR_TITLE="chore: bump LiteLLM pricing snapshot ($TODAY)"
+          PR_BODY="## Automated pricing snapshot bump (D-06b)
+
+          Updates \`src/prevue/pricing/model_prices.json\` to the latest LiteLLM snapshot.
+
+          ### Review checklist — required before merge
+
+          - [ ] No unexpected schema changes (field renames, dropped fields)
+          - [ ] Spot-check known models (e.g. gpt-4o, claude-sonnet) for plausible pricing
+          - [ ] No extraneous data injected (supply-chain hygiene, T-10-18)
+
+          **Requires human review before merge (D-06b).** Pricing data affects cost
+          computation and is fetched from an external source; sign-off is required."
+
+          gh pr create \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY" \
+            --head "$BRANCH" \
+            --base main \
+            --label "automated,pricing"
