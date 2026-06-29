@@ -50,6 +50,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           BRANCH="chore/update-pricing-$(date +%Y%m%d)"
+          # Delete stale same-day remote branch if it exists (idempotent re-run)
+          git push origin --delete "$BRANCH" 2>/dev/null || true
           git checkout -b "$BRANCH"
           git add src/prevue/pricing/model_prices.json
           git commit -m "chore: bump LiteLLM pricing snapshot $(date +%Y-%m-%d)"
