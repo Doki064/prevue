@@ -161,15 +161,16 @@ class CliEngineAdapter(EngineAdapter):
             #
             # Static assertion target: grep -Rq "script -qec" src/prevue/engines/
             if spec.name == "antigravity-cli":
-                # Build the inner shell command referencing the prompt via env var
-                inner_parts = list(spec.base_argv)
+                # Build the inner shell command referencing the prompt via env var.
+                # $_AGY_PROMPT must appear UNQUOTED so the shell expands it.
+                # shlex.quote would produce '$_AGY_PROMPT' (single-quoted), which
+                # suppresses expansion and delivers the literal five characters to agy.
+                inner_parts_to_quote = list(spec.base_argv)
                 if spec.model_flag == "argv" and model and spec.model_argv_flag:
-                    inner_parts.extend([spec.model_argv_flag, model])
-                inner_parts.append("$_AGY_PROMPT")
+                    inner_parts_to_quote.extend([spec.model_argv_flag, model])
                 if raw_args:
-                    inner_parts.extend(raw_args)
-                # Assemble inner_cmd as a shell command string (each part shell-escaped)
-                inner_cmd = " ".join(shlex.quote(p) for p in inner_parts)
+                    inner_parts_to_quote.extend(raw_args)
+                inner_cmd = " ".join(shlex.quote(p) for p in inner_parts_to_quote) + " $_AGY_PROMPT"
                 # Strip ANSI + CR after script output; pipe via shell
                 wrapper_cmd = (
                     f"script -qec {shlex.quote(inner_cmd)} /dev/null"
