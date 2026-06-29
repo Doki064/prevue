@@ -572,8 +572,8 @@ def run_review(
     # Injected here (not in get_adapter) so the raw_args are always sourced from the
     # single load_config read — gated by resolve_consumer_config_path's base-ref sentinel
     # (SKIL-04/Pitfall 4: PR-head raw_args is ignored).
-    if not adapter and config.engine_config.raw_args and hasattr(engine, "_raw_args"):
-        engine._raw_args = list(config.engine_config.raw_args)
+    if not adapter and config.engine_config.raw_args and hasattr(engine, "set_raw_args"):
+        engine.set_raw_args(config.engine_config.raw_args)
 
     # Resolve per-role models (ENGN-09/D-11): classify, review, consolidate.
     # Engine-config raw dict used to produce a flat dict for the two active call sites.

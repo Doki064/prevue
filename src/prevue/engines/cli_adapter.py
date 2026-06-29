@@ -43,6 +43,10 @@ class CliEngineAdapter(EngineAdapter):
         # raw_args appended LAST after all framework argv (ENGN-08/D-10: list form only)
         self._raw_args: list[str] = list(raw_args) if raw_args else []
 
+    def set_raw_args(self, raw_args: list[str]) -> None:
+        """Replace the raw_args list (ENGN-08/D-10: called from review.py after get_adapter)."""
+        self._raw_args = list(raw_args)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
