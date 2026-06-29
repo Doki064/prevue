@@ -211,6 +211,8 @@ def _publish_skip(
     published = conclude_skip_check(get_repo(ctx), head_sha, **check_kwargs)
     if not published:
         raise RuntimeError("Failed to publish skip check run")
+    _skip_result = ReviewResult(summary_markdown=reason or "skipped")
+    emit_machine_output(_skip_result, conclusion)
 
 
 def _prior_to_finding(prior: PriorFinding) -> Finding:
@@ -458,6 +460,7 @@ def _finish_noop_review(
     )
     if not check_published:
         raise RuntimeError("Failed to publish review check run")
+    emit_machine_output(noop_result, gate.conclusion)
 
 
 class ForkPrUnsupported(Exception):
