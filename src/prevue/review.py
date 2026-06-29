@@ -1084,6 +1084,7 @@ def run_review(
     # Aggregate engine metadata across all calls (Pitfall 5: per-call breakdown for 09-06)
     per_call_tokens: list[dict] = []
     total_review_tokens = 0
+    total_cost_usd: float | None = None
     any_estimated = False
     all_degraded = False
     all_dropped = 0
@@ -1097,6 +1098,10 @@ def run_review(
             call_tokens["bundle"] = "+".join(_grp_bundles) if _grp_bundles else "call"
         per_call_tokens.append(call_tokens)
         total_review_tokens += call_tokens.get("review", 0)
+        # Aggregate cost_usd across calls so build_compact_output reports total billing (CR-01)
+        call_cost = call_tokens.get("cost_usd")
+        if call_cost is not None:
+            total_cost_usd = (total_cost_usd or 0.0) + call_cost
         if call_tokens.get("estimated"):
             any_estimated = True
         if call_res.degraded:
@@ -1127,6 +1132,7 @@ def run_review(
                     if any(cr.engine_meta.get("tokens") for cr in call_results)
                     else {}
                 ),
+                **({"cost_usd": total_cost_usd} if total_cost_usd is not None else {}),
             },
             "per_call": per_call_tokens,
         },
