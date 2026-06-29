@@ -545,6 +545,14 @@ def render_body(
         if classify_tokens:
             token_line += f" · classify{classify_est} {classify_tokens}"
         metadata += f"\n{token_line}"
+        # PERF-03 / D-05: surface dollar cost alongside tokens.
+        # cost_usd comes from capture_usage (Plan 03): Claude total_cost_usd or
+        # compute_cost formula; None means unknown model (no pricing row).
+        cost_usd = token_meta.get("cost_usd")
+        if cost_usd is not None:
+            # Labeled ~est when tokens were estimated (bytes/4 fallback).
+            cost_est = " ~est" if token_meta.get("review_estimated", legacy_estimated) else ""
+            metadata += f"\nCost:{cost_est} ${cost_usd:.6f}"
         per_call: list[dict] = token_meta.get("per_call", [])  # type: ignore[assignment]
         if len(per_call) >= 2:
             per_call_parts = []

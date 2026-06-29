@@ -22,12 +22,13 @@ import pytest
 from prevue.models import DiffBundle, Finding, ReviewResult
 
 try:
-    from prevue.review import build_compact_output, build_full_output
+    from prevue.review import build_compact_output, build_full_output, emit_machine_output
 
     _IMPORT_ERROR: ImportError | None = None
 except ImportError as exc:
     build_compact_output = None  # type: ignore[assignment]
     build_full_output = None  # type: ignore[assignment]
+    emit_machine_output = None  # type: ignore[assignment]
     _IMPORT_ERROR = exc
 
 
@@ -195,3 +196,38 @@ def test_compact_tokens_field_is_numeric() -> None:
     assert isinstance(compact["tokens"], (int, float)), (
         "tokens in compact output must be a scalar number for $GITHUB_OUTPUT safety"
     )
+
+
+# ---------------------------------------------------------------------------
+# emit_machine_output: result file write + $GITHUB_OUTPUT no-op when unset
+# ---------------------------------------------------------------------------
+
+
+def test_emit_machine_output_writes_result_file(tmp_path) -> None:
+    """emit_machine_output writes valid full JSON to the result file path."""
+    _require_emit_helpers()
+    result = _make_result(findings=[_make_finding("error")])
+    out_file = str(tmp_path / "prevue-result.json")
+
+    emit_machine_output(result, conclusion="failure", output_file=out_file)  # type: ignore[misc]
+
+    content = (tmp_path / "prevue-result.json").read_text(encoding="utf-8")
+    parsed = json.loads(content)
+    assert parsed["schema_version"] == "1.0", "Full JSON must include schema_version='1.0'"
+    assert "findings" in parsed
+    assert len(parsed["findings"]) == 1
+
+
+def test_emit_machine_output_noop_github_output_when_unset(tmp_path, monkeypatch) -> None:
+    """emit_machine_output does NOT raise when GITHUB_OUTPUT is unset (local runs)."""
+    _require_emit_helpers()
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    result = _make_result()
+    out_file = str(tmp_path / "prevue-result.json")
+
+    # Must not raise; must still write the result file
+    emit_machine_output(result, conclusion="success", output_file=out_file)  # type: ignore[misc]
+
+    content = (tmp_path / "prevue-result.json").read_text(encoding="utf-8")
+    parsed = json.loads(content)
+    assert parsed["schema_version"] == "1.0"
