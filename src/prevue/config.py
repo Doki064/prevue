@@ -126,12 +126,23 @@ class EngineConfig(BaseModel):
     @field_validator("raw_args", mode="before")
     @classmethod
     def _validate_raw_args(cls, value: object) -> list[str]:
-        """Reject a string raw_args; list[str] only (D-10: command injection guard)."""
+        """Reject a string raw_args; list[str] only (D-10: command injection guard).
+
+        Also rejects lists with non-string elements (None, int, etc.) — Pydantic v2
+        would silently coerce them (None → "None", 42 → "42"), producing invalid CLI flags.
+        """
         if isinstance(value, str):
             raise ValueError(
                 "engine.raw_args must be a list of strings (D-10: no shell string allowed). "
                 f"Got str: {value!r}"
             )
+        if isinstance(value, list):
+            for i, item in enumerate(value):
+                if not isinstance(item, str):
+                    raise ValueError(
+                        f"engine.raw_args[{i}] must be a string, "
+                        f"got {type(item).__name__!r}: {item!r}"
+                    )
         return value  # type: ignore[return-value]
 
 
