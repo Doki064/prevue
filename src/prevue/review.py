@@ -1293,6 +1293,7 @@ def run_review(
     )
     if not check_published:
         raise RuntimeError("Failed to publish review check run")
+    emit_machine_output(result, gate.conclusion)
 
 
 # ---------------------------------------------------------------------------
