@@ -265,6 +265,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 7. Customization & Hardening | 7/7 | Complete    | 2026-06-14 |
 | 8. Incremental & Stateful Review Lifecycle | 16/16 | Complete   | 2026-06-16 |
 | 9. Classification-aligned skill loading + multi-call review | 6/6 | Complete   | 2026-06-21 |
+| 10. Boundary Contracts | 1/6 | Executing   | — |
 
 ### Phase 8: Incremental & Stateful Review Lifecycle
 
@@ -398,7 +399,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 10-01-PLAN.md — Wave-0 RED test scaffolds + usage/pricing fixtures for all new contracts (Wave 1)
+- [x] 10-01-PLAN.md — Wave-0 RED test scaffolds + usage/pricing fixtures for all new contracts (Wave 1) — COMPLETE 2026-06-29
 - [ ] 10-02-PLAN.md — ENGN-10: spec-driven CliEngineAdapter + auto-populated registry; antigravity replaces gemini (Wave 1, FIRST)
 
 **Wave 2** *(blocked on Wave 1 completion)*
