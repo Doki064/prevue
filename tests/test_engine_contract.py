@@ -84,7 +84,25 @@ def test_bad_then_good_sets_retried(
     calls: list[str | None] = []
 
     def _run(_cmd, input=None, **_kwargs):
-        calls.append(input)
+        # Capture the prompt from the appropriate delivery channel per engine type:
+        #   stdin engines (copilot-cli, claude-code-cli): prompt in `input` kwarg
+        #   tempfile engine (cursor-cli): prompt written to the file at cmd[cmd.index("-f")+1]
+        #   env-var engine (antigravity-cli): prompt in env["_AGY_PROMPT"]
+        if input is not None:
+            prompt_content = input
+        elif "_AGY_PROMPT" in (_kwargs.get("env") or {}):
+            prompt_content = _kwargs["env"]["_AGY_PROMPT"]
+        elif "-f" in list(_cmd):
+            cmd_list = list(_cmd)
+            try:
+                f_idx = cmd_list.index("-f")
+                with open(cmd_list[f_idx + 1], encoding="utf-8") as fh:
+                    prompt_content = fh.read()
+            except (ValueError, IndexError, OSError):
+                prompt_content = None
+        else:
+            prompt_content = None
+        calls.append(prompt_content)
         stdout = PROSE_REVIEW if len(calls) == 1 else stdout_with_fence(payload=[VALID_FINDING])
         return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
@@ -94,6 +112,10 @@ def test_bad_then_good_sets_retried(
     assert result.degraded is False
     assert len(result.findings) == 1
     assert result.engine_meta.get("retried") is True
+    # Both calls must have sent a prompt; the retry call must differ (contains retry context)
+    assert calls[0] is not None, "First call must deliver a prompt"
+    assert calls[1] is not None, "Retry call must deliver a prompt"
+    assert calls[0] != calls[1], "Retry call must send a different (retry) prompt"
 
 
 def test_missing_credential_raises_auth_error(
