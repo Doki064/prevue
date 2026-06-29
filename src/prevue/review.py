@@ -1387,6 +1387,11 @@ def emit_machine_output(
 
     # Write the full JSON result file (unconditional — artifact + local runs)
     if output_file is None:
+        if os.environ.get("GITHUB_ACTIONS") and not os.environ.get("PREVUE_RESULT_FILE"):
+            print(
+                "prevue: PREVUE_RESULT_FILE not set under Actions; writing prevue-result.json to CWD",
+                file=sys.stderr,
+            )
         output_file = os.environ.get("PREVUE_RESULT_FILE", "prevue-result.json")
     out = Path(output_file)
     # WR-04: warn when PREVUE_RESULT_FILE is an absolute path outside RUNNER_TEMP.
