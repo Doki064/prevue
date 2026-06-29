@@ -265,7 +265,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 7. Customization & Hardening | 7/7 | Complete    | 2026-06-14 |
 | 8. Incremental & Stateful Review Lifecycle | 16/16 | Complete   | 2026-06-16 |
 | 9. Classification-aligned skill loading + multi-call review | 6/6 | Complete   | 2026-06-21 |
-| 10. Boundary Contracts | 4/6 | In Progress|  |
+| 10. Boundary Contracts | 5/6 | In Progress|  |
 
 ### Phase 8: Incremental & Stateful Review Lifecycle
 
@@ -409,7 +409,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 10-05-PLAN.md — OUTP-05: versioned compact output + full JSON artifact + sticky cost line + workflow wiring (Wave 3)
+- [x] 10-05-PLAN.md — OUTP-05: versioned compact output + full JSON artifact + sticky cost line + workflow wiring (Wave 3)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -481,7 +481,7 @@ _Unsequenced task/spike items mined 2026-06-25 (ai-code-review, claude-code-acti
 
 **Goal:** Measure whether semantic chunking (TreeSitter) and/or Headroom library-mode compression deliver meaningful token savings on Prevue's **diff-only / hunk-level** input — not the whole-codebase input their headline numbers (95%+) are measured on — before PERF-02 becomes a phase. Headroom is a real installable Apache-2.0 local lib (`pip install headroom-ai`), so the spike also measures the **minimal install footprint**: can a code-only/AST path skip the ONNX + HuggingFace `kompress-base` model (prose-only) that the `[all]`/`[ml]` extras pull? Decide adopt vs reject on savings × footprint.
 **Requirements:** Informs PERF-02
-**Plans:** 4/6 plans executed
+**Plans:** 5/6 plans executed
 **Source:** headroomlabs-ai/headroom (AST CodeCompressor, CacheAligner); bobmatnyc/ai-code-review semantic chunking.
 
 Plans:

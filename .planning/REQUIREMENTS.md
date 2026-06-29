@@ -68,7 +68,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **OUTP-02**: Review posts inline line-level comments via the Reviews API, with finding positions validated against diff hunks (invalid positions fall back to the summary)
 - [x] **OUTP-03**: Review reports pass/fail/neutral status usable as a merge gate (blocking is opt-in via severity threshold)
 - [x] **OUTP-04**: Summary comment includes token/cost transparency: tokens used, skills loaded vs skipped
-- [ ] **OUTP-05** *(Phase 10)*: Structured machine-readable review output — emit the validated findings result (the existing pydantic `ReviewResult`) as a GitHub Actions job `output:` and/or JSON artifact, so consumers can chain automation (merge gates, dashboards) off the review. Cheap, and core to being a framework other repos build on.
+- [x] **OUTP-05** *(Phase 10)*: Structured machine-readable review output — emit the validated findings result (the existing pydantic `ReviewResult`) as a GitHub Actions job `output:` and/or JSON artifact, so consumers can chain automation (merge gates, dashboards) off the review. Cheap, and core to being a framework other repos build on.
   - *Promoted v2 → v1 on 2026-06-25 (Phase 10). Source: anthropics/claude-code-action structured JSON outputs.*
 
 ### Noise Control
