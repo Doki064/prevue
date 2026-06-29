@@ -23,7 +23,7 @@ from prevue.classify.llm_fallback import (
 )
 from prevue.classify.models import CANONICAL_LABEL_ORDER, GENERAL_LABEL
 from prevue.classify.router import route
-from prevue.config import load_config, resolve_consumer_config_path
+from prevue.config import _resolve_engine_models, load_config, resolve_consumer_config_path
 from prevue.dismiss import active_suppressed_fingerprints, parse_dismiss_block
 from prevue.engines.base import EngineAdapter
 from prevue.engines.prompt import (
@@ -564,6 +564,34 @@ def run_review(
         )
         return
 
+    # Thread raw_args from base-ref engine_config into the adapter (ENGN-08/D-10).
+    # Injected here (not in get_adapter) so the raw_args are always sourced from the
+    # single load_config read — gated by resolve_consumer_config_path's base-ref sentinel
+    # (SKIL-04/Pitfall 4: PR-head raw_args is ignored).
+    if not adapter and config.engine_config.raw_args and hasattr(engine, "_raw_args"):
+        engine._raw_args = list(config.engine_config.raw_args)
+
+    # Resolve per-role models (ENGN-09/D-11): classify, review, consolidate.
+    # Engine-config raw dict used to produce a flat dict for the two active call sites.
+    # The consolidate slot resolves but is unused this phase (D-13: Phase 13/QUAL-01 will
+    # consume it for the multicall merge step).
+    _engine_models = _resolve_engine_models(
+        {
+            "engine": {
+                "model": config.engine_config.model,
+                "models": {
+                    "classify": config.engine_config.models.classify,
+                    "review": config.engine_config.models.review,
+                    "consolidate": config.engine_config.models.consolidate,
+                },
+            }
+        }
+    )
+    # Classify model: models.classify > engine.model > env fallback (applied at call-site)
+    _classify_model: str | None = _engine_models.get("classify")
+    # Review model: models.review > engine.model > env (PREVUE_MODEL/COPILOT_MODEL)
+    _review_model_from_config: str | None = _engine_models.get("review")
+
     classification_disclosure: str | None = None
     classify_tokens = 0
     llm_skill_names: set[str] | None = None
@@ -575,10 +603,12 @@ def run_review(
     unmatched_pre_pack = list(result_cls.unmatched)
     if fallback_cfg.enabled and unmatched_pre_pack:
         # LLM fallback on the pre-pack unmatched set.
+        # Classify model: models.classify > engine.model > fallback.model (yml) > env
+        _effective_classify_model = _classify_model or fallback_cfg.model
         fallback_labels, classification_disclosure = llm_classify(
             unmatched_pre_pack,
             engine,
-            model=fallback_cfg.model,
+            model=_effective_classify_model,
         )
         # Only bill classify tokens when classification actually produced usable
         # labels — a fully degraded fallback ({GENERAL_LABEL: FALLBACK_FAILED_GLOB})
@@ -685,13 +715,16 @@ def run_review(
                 _skill_select_tokens = estimate_tokens(
                     build_skill_select_prompt(_escalation_candidates, ("relevant", "irrelevant"))
                 )
+                # Use classify model (models.classify > engine.model > fallback.model > env)
+                _skill_select_model = (
+                    _classify_model
+                    or fallback_cfg.model
+                    or os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
+                )
                 fetched = llm_select_skills(
                     _escalation_candidates,
                     engine,
-                    model=(
-                        fallback_cfg.model
-                        or os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
-                    ),
+                    model=_skill_select_model,
                     paths=_prefetch_paths,
                     diff_text=_prefetch_diff,
                 )
@@ -753,7 +786,14 @@ def run_review(
         )
         return
 
-    _review_model = os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
+    # Review model resolution (ENGN-09/D-11):
+    #   models.review (yml) > engine.model (yml) > PREVUE_MODEL env > COPILOT_MODEL env
+    # _review_model_from_config: resolved per-role model (None if no config override)
+    # Env fallback applied here so the resolution stays compatible with the existing
+    # env-variable-based single-model path (backward compat with callers that set
+    # PREVUE_MODEL or COPILOT_MODEL without a prevue.yml engine block).
+    _env_model = os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
+    _review_model = _review_model_from_config or _env_model
     _hybrid_kwargs: dict = dict(
         skills=skills,
         bundles=result_cls.bundles,
@@ -867,7 +907,8 @@ def run_review(
     # inside max_total_run_tokens.  Projection = per-file token sum across ALL
     # packed files (conservative: one call per file).  When the budget is exceeded,
     # drop lowest-DIFF-03-priority files and disclose how many were dropped.
-    _review_model_str = os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
+    # _review_model already resolved above (models.review > engine.model > env fallback)
+    _review_model_str = _review_model
     _run_budget_reached: bool = False
     not_reviewed_run_budget: int = 0
     instruction_overhead_tokens = estimate_prompt_overhead_tokens(instructions=instructions)

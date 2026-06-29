@@ -29,11 +29,18 @@ class CliEngineAdapter(EngineAdapter):
 
     All CLI engines (copilot, claude-code, cursor, antigravity) share this implementation.
     Per-engine variation is captured declaratively in CliEngineSpec (spec.py).
+
+    raw_args (ENGN-08/D-10): optional list of extra CLI flags appended LAST to every
+    argv.  Set from EngineConfig.raw_args (parsed from the base-ref prevue.yml) by
+    review.py after calling get_adapter().  Default [] means byte-identical behavior
+    to the pre-Plan-04 code when no extra flags are configured.
     """
 
-    def __init__(self, spec: CliEngineSpec) -> None:
+    def __init__(self, spec: CliEngineSpec, raw_args: list[str] | None = None) -> None:
         self._spec = spec
         self.name = spec.name
+        # raw_args appended LAST after all framework argv (ENGN-08/D-10: list form only)
+        self._raw_args: list[str] = list(raw_args) if raw_args else []
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -58,8 +65,16 @@ class CliEngineAdapter(EngineAdapter):
         token: str,
         budget_seconds: int,
         model: str | None,
+        raw_args: list[str] | None = None,
     ) -> str:
-        """Assemble argv + invoke subprocess per spec configuration."""
+        """Assemble argv + invoke subprocess per spec configuration.
+
+        argv order (ENGN-08/D-10):
+          base_argv + prompt-delivery flags + model flag + raw_args (LAST, list form)
+
+        raw_args are appended after all framework-generated argv elements.
+        Never shell-joined; always list form; no shell=True (D-10: command injection guard).
+        """
         spec = self._spec
         cmd = list(spec.base_argv)
 
@@ -75,6 +90,9 @@ class CliEngineAdapter(EngineAdapter):
             # Append model argv flag before invocation (model last for stdin engines)
             if spec.model_flag == "argv" and model and spec.model_argv_flag:
                 cmd.extend([spec.model_argv_flag, model])
+            # raw_args appended LAST (ENGN-08/D-10)
+            if raw_args:
+                cmd.extend(raw_args)
             return invoke_subprocess_text(
                 cmd,
                 env=env,
@@ -87,7 +105,7 @@ class CliEngineAdapter(EngineAdapter):
 
         elif spec.prompt_delivery == "tempfile-arg":
             # Write prompt to a NamedTemporaryFile, pass via tempfile_flag ("-f")
-            # Order: base_argv → tempfile_flag + path → model_argv_flag + model
+            # Order: base_argv → tempfile_flag + path → model_argv_flag + model → raw_args
             # (matches original cursor_cli.py:42-44 order; test_cursor_model_mapping asserts last 2)
             tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
             tmp_path = tmp.name
@@ -98,6 +116,9 @@ class CliEngineAdapter(EngineAdapter):
                     cmd.extend([spec.tempfile_flag, tmp_path])
                 if spec.model_flag == "argv" and model and spec.model_argv_flag:
                     cmd.extend([spec.model_argv_flag, model])
+                # raw_args appended LAST (ENGN-08/D-10)
+                if raw_args:
+                    cmd.extend(raw_args)
                 return invoke_subprocess_text(
                     cmd,
                     env=env,
@@ -113,10 +134,13 @@ class CliEngineAdapter(EngineAdapter):
                     pass
 
         else:  # prompt_delivery == "argv"
-            # Model flag appended first, then prompt as the final element
+            # Model flag appended first, then prompt as the final element, then raw_args
             if spec.model_flag == "argv" and model and spec.model_argv_flag:
                 cmd.extend([spec.model_argv_flag, model])
             cmd.append(prompt)
+            # raw_args appended LAST (ENGN-08/D-10)
+            if raw_args:
+                cmd.extend(raw_args)
             return invoke_subprocess_text(
                 cmd,
                 env=env,
@@ -136,9 +160,12 @@ class CliEngineAdapter(EngineAdapter):
         # For otel-jsonl engines (copilot-cli), flow reads COPILOT_OTEL_FILE_EXPORTER_PATH
         # from the environment post-invocation (WARNING 3: env is unset until Plan 05
         # wires it into the workflow — Copilot falls back to bytes/4 until then).
+        raw_args = self._raw_args  # capture for lambda
         return flow.review_with_retry(
             req,
-            invoke=lambda p: self._invoke(p, env, token, req.budget_seconds, req.model),
+            invoke=lambda p: self._invoke(
+                p, env, token, req.budget_seconds, req.model, raw_args=raw_args
+            ),
             secret=token,
             build_prompt=build_prompt,
             max_prompt_bytes=_prompt_module.MAX_PROMPT_BYTES,
@@ -155,6 +182,7 @@ class CliEngineAdapter(EngineAdapter):
     ) -> dict[str, str]:
         token, env = self._build_env(model)
         prompt = build_classify_prompt(paths, allowed_labels)
+        # raw_args not passed to classify — extra engine flags are review-only (D-10)
         text = self._invoke(prompt, env, token, CLASSIFY_TIMEOUT_SECONDS, model)
         return parse_classify_response(text, paths, allowed_labels)
 
@@ -172,5 +200,6 @@ class CliEngineAdapter(EngineAdapter):
         prompt = build_skill_select_prompt(
             skills, allowed_labels, paths=paths, diff_excerpt=diff_excerpt
         )
+        # raw_args not passed to classify_skills — extra engine flags are review-only (D-10)
         text = self._invoke(prompt, env, token, CLASSIFY_TIMEOUT_SECONDS, model)
         return parse_classify_response(text, names, allowed_labels)
