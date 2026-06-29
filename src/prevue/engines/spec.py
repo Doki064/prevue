@@ -105,10 +105,14 @@ CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
     CliEngineSpec(
         name="claude-code-cli",
         cli_label="Claude Code CLI",
-        secret_env="ANTHROPIC_API_KEY",
+        # CLAUDE_CODE_OAUTH_TOKEN: long-lived token from `claude setup-token`, for CI pipelines.
+        # --bare mode blocks CLAUDE_CODE_OAUTH_TOKEN, so we omit --bare here.
+        # Subscription users (Pro/Max/Team/Enterprise) use this path; ANTHROPIC_API_KEY
+        # is Console-only (pay-per-use API) and belongs to the future direct-API engine.
+        secret_env="CLAUDE_CODE_OAUTH_TOKEN",
         auth_error=ClaudeAuthError,
-        validate_secret=_validate_nonempty_secret(ClaudeAuthError, "ANTHROPIC_API_KEY"),
-        base_argv=("claude", "--bare", "-p", "--output-format", "text"),
+        validate_secret=_validate_nonempty_secret(ClaudeAuthError, "CLAUDE_CODE_OAUTH_TOKEN"),
+        base_argv=("claude", "-p", "--output-format", "text"),
         prompt_delivery="stdin",
         model_flag="argv",
         model_argv_flag="--model",

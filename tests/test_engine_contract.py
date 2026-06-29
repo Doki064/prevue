@@ -23,7 +23,7 @@ FUNCTIONAL = sorted(ENGINES.keys())  # all four engines are now functional (D-12
 
 AUTH_ENV: dict[str, tuple[str, str | None]] = {
     "copilot-cli": ("COPILOT_GITHUB_TOKEN", VALID_TOKEN),
-    "claude-code-cli": ("ANTHROPIC_API_KEY", "sk-ant-test-key"),
+    "claude-code-cli": ("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test-key"),
     "cursor-cli": ("CURSOR_API_KEY", "cur_test_key"),
     "antigravity-cli": ("ANTIGRAVITY_API_KEY", "agy-test-key"),
 }
@@ -133,7 +133,7 @@ def test_vendor_argv(
         assert cmd == ["copilot", "-s", "--no-ask-user"]
         assert captured["input"] is not None
     elif engine_name == "claude-code-cli":
-        assert cmd == ["claude", "--bare", "-p", "--output-format", "text"]
+        assert cmd == ["claude", "-p", "--output-format", "text"]
         assert captured["input"] is not None
     elif engine_name == "cursor-cli":
         assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "text"]
@@ -156,7 +156,7 @@ def test_vendor_argv(
 
 
 def test_claude_model_mapping_on_argv(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test-key")
     captured: dict = {}
 
     def _capture(cmd, input=None, **_kwargs):
@@ -168,7 +168,6 @@ def test_claude_model_mapping_on_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     get_adapter("claude-code-cli").review(req)
     assert captured["cmd"] == [
         "claude",
-        "--bare",
         "-p",
         "--output-format",
         "text",

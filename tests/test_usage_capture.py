@@ -162,10 +162,10 @@ def test_claude_stdout_json_fence_extraction_pitfall3() -> None:
     spec = CliEngineSpec(
         name="claude-code-cli",
         cli_label="Claude Code CLI",
-        secret_env="ANTHROPIC_API_KEY",
+        secret_env="CLAUDE_CODE_OAUTH_TOKEN",
         auth_error=ClaudeAuthError,
         validate_secret=lambda t: t,
-        base_argv=("claude", "--bare", "-p"),
+        base_argv=("claude", "-p"),
         prompt_delivery="stdin",
         usage_capture="stdout-json",
     )

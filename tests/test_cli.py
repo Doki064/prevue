@@ -14,12 +14,12 @@ from prevue.engines.errors import AuthError
 def test_cli_catches_auth_error_subclass_exit_one(capsys: pytest.CaptureFixture[str]) -> None:
     with patch(
         "prevue.cli.run_review",
-        side_effect=ClaudeAuthError("ANTHROPIC_API_KEY is not set."),
+        side_effect=ClaudeAuthError("CLAUDE_CODE_OAUTH_TOKEN is not set."),
     ):
         code = main(["review"])
     assert code == 1
     captured = capsys.readouterr()
-    assert "ANTHROPIC_API_KEY is not set." in captured.err
+    assert "CLAUDE_CODE_OAUTH_TOKEN is not set." in captured.err
 
 
 def test_cli_catches_auth_error_base_exit_one(capsys: pytest.CaptureFixture[str]) -> None:

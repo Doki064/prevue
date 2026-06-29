@@ -30,7 +30,7 @@ on:
     secrets:
       copilot-github-token:
         required: false
-      anthropic-api-key:
+      claude-code-oauth-token:
         required: false
       cursor-api-key:
         required: false
@@ -137,7 +137,7 @@ jobs:
           PREVUE_CONSUMER_ROOT: ${{ github.workspace }}/consumer
           PREVUE_CONFIG_PATH: ${{ inputs.config-path }}
           COPILOT_GITHUB_TOKEN: ${{ inputs.engine == 'copilot-cli' && secrets.copilot-github-token || '' }}
-          ANTHROPIC_API_KEY: ${{ inputs.engine == 'claude-code-cli' && secrets.anthropic-api-key || '' }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.engine == 'claude-code-cli' && secrets.claude-code-oauth-token || '' }}
           CURSOR_API_KEY: ${{ inputs.engine == 'cursor-cli' && secrets.cursor-api-key || '' }}
           # ANTIGRAVITY_API_KEY: gated on engine == 'antigravity-cli'; GEMINI_API_KEY is a
           # documented alias that the spec validator also honors (D-12 / T-10-20).

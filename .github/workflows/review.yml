@@ -116,6 +116,6 @@ jobs:
       seed-consumer-config: true
     secrets:
       copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+      claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
       antigravity-api-key: ${{ secrets.ANTIGRAVITY_API_KEY }}

@@ -39,7 +39,7 @@ class CopilotAuthError(AuthError):
 
 
 class ClaudeAuthError(AuthError):
-    """Raised when ANTHROPIC_API_KEY is missing."""
+    """Raised when CLAUDE_CODE_OAUTH_TOKEN is missing."""
 
 
 class CursorAuthError(AuthError):
