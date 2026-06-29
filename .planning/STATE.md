@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 10-01-PLAN.md
-last_updated: "2026-06-29T10:13:26.000Z"
-last_activity: 2026-06-29 -- Phase 10 Plan 01 complete (RED scaffolds for boundary contracts)
+stopped_at: Completed 10-02-PLAN.md
+last_updated: "2026-06-29T10:32:00.000Z"
+last_activity: 2026-06-29 -- Phase 10 Plan 02 complete (ENGN-10: spec-driven CliEngineAdapter + auto-populated registry)
 progress:
   total_phases: 15
   completed_phases: 9
   total_plans: 61
-  completed_plans: 56
-  percent: 61
+  completed_plans: 57
+  percent: 60
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-12)
 ## Current Position
 
 Phase: 10 (boundary-contracts) — EXECUTING
-Plan: 2 of 6
-Status: Executing Phase 10
-Last activity: 2026-06-29 -- Phase 10 Plan 01 complete (RED scaffolds for boundary contracts)
+Plan: 3 of 6
+Status: Ready to execute
+Last activity: 2026-06-29 -- Phase 10 Plan 02 complete (ENGN-10: spec-driven CliEngineAdapter + auto-populated registry)
 
-Progress: [██████████] 6/6 plans complete (Phase 09) — All 9 phases complete; Phase 10: 1/6 plans complete
+Progress: [██████████] 6/6 plans complete (Phase 09) — All 9 phases complete; Phase 10: 2/6 plans complete
 
 ## Performance Metrics
 
@@ -114,6 +114,7 @@ Progress: [██████████] 6/6 plans complete (Phase 09) — All
 | Phase 09-classification-skill-loading-multi-call-review PP05 | 12 | 3 tasks | 4 files |
 | Phase 09-classification-skill-loading-multi-call-review P06 | 11 | 2 tasks (+ 1 checkpoint) | 6 files |
 | Phase 10-boundary-contracts P01 | 8 | 3 tasks | 11 files |
+| Phase 10-boundary-contracts P02 | 15 | 3 tasks | 11 files |
 
 ## Accumulated Context
 
@@ -211,6 +212,10 @@ Recent decisions affecting current work:
 - [10-01]: RED scaffold pattern via try/except + pytest.fail() (not importorskip) so test modules collect AND fail clearly on missing production symbols
 - [10-01]: Fixture design — claude_envelope.json mirrors Claude --output-format json; copilot_otel.jsonl has 2 deterministic lines summing to known token counts; cursor_envelope.json has no token fields (confirms estimate path)
 - [10-01]: test_model_roles.py merge_findings tests kept GREEN to assert D-13 (merge stays fingerprint-deterministic); per-role resolver tests RED pending Plan 04
+- [10-02]: AuthError subclasses moved to errors.py to break spec←per-engine circular import; per-engine modules re-export for test compat
+- [10-02]: CopilotCliAdapter backward-compat alias kept in copilot_cli.py as CliEngineAdapter subclass for test_registry.py import compat
+- [10-02]: argv order for tempfile-arg: base_argv → tempfile_flag+path → model_argv_flag+model (preserves test assertions)
+- [10-02]: SKELETON_ENGINES removed; functional flag on CliEngineSpec is the D-03 replacement; all 4 CLI engines functional
 
 ### Pending Todos
 
@@ -237,6 +242,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-29T10:13:26Z
+Last session: 2026-06-29T10:35:52.781Z
 Stopped at: Completed 10-01-PLAN.md
 Resume file: None
