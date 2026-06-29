@@ -84,7 +84,7 @@ jobs:
                   exit 0
                   ;;
                 *)
-                  echo "Unknown CI conclusion '${conclusion}'; skipping Prevue review."
+                  echo "::warning::Unknown CI conclusion '${conclusion}'; skipping Prevue review" >&2
                   echo "ci_ok=false" >> "$GITHUB_OUTPUT"
                   exit 0
                   ;;
