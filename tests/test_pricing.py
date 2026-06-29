@@ -95,12 +95,7 @@ def test_cache_aware_formula() -> None:
     cost = compute_cost("anthropic", "claude-3-5-sonnet-20241022", usage, table=table)  # type: ignore[misc]
 
     # claude-3-5-sonnet: input=3e-6, output=1.5e-5, cache_read=3e-7, cache_creation=3.75e-6
-    expected = (
-        1500 * 3e-6
-        + 250 * 1.5e-5
-        + 800 * 3e-7
-        + 200 * 3.75e-6
-    )
+    expected = 1500 * 3e-6 + 250 * 1.5e-5 + 800 * 3e-7 + 200 * 3.75e-6
     assert cost is not None
     assert abs(cost - expected) < 1e-12
 

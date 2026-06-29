@@ -1,24 +1,23 @@
-"""Engine name → adapter registry with fail-closed selection (D-03/D-04)."""
+"""Engine name → adapter registry with fail-closed selection (D-03/D-04/ENGN-10).
+
+The registry auto-populates by iterating CLI_ENGINE_SPECS — adding a CLI engine
+is one CliEngineSpec data entry in spec.py; no manual import+dict edit here (D-01).
+
+API siblings (future): key on name + store a factory; CliEngineAdapter is the
+CLI-family factory. An ApiEngineAdapter can be registered without going through
+CliEngineSpec (D-02). Do not build it here — just keep the name→factory design.
+"""
 
 from __future__ import annotations
 
-from prevue.engines.base import EngineAdapter
-from prevue.engines.claude_code_cli import ClaudeCodeAdapter
-from prevue.engines.copilot_cli import CopilotCliAdapter
-from prevue.engines.cursor_cli import CursorAdapter
-from prevue.engines.gemini_cli import GeminiAdapter
+from prevue.engines.cli_adapter import CliEngineAdapter
+from prevue.engines.spec import CLI_ENGINE_SPECS
 
 DEFAULT_ENGINE = "copilot-cli"
-SKELETON_ENGINES = frozenset({GeminiAdapter.name})
 
-ENGINES: dict[str, type[EngineAdapter]] = {
-    CopilotCliAdapter.name: CopilotCliAdapter,
-    ClaudeCodeAdapter.name: ClaudeCodeAdapter,
-    CursorAdapter.name: CursorAdapter,
-    GeminiAdapter.name: GeminiAdapter,
-}
-
-FUNCTIONAL_ENGINES = frozenset(name for name in ENGINES if name not in SKELETON_ENGINES)
+# name → spec (public symbol; tests import ENGINES)
+# Downstream code calls get_adapter(name) which returns CliEngineAdapter(spec).
+ENGINES: dict[str, object] = {spec.name: spec for spec in CLI_ENGINE_SPECS}
 
 
 class UnknownEngineError(ValueError):
@@ -26,23 +25,39 @@ class UnknownEngineError(ValueError):
 
 
 class NonFunctionalEngineError(ValueError):
-    """Raised when a registered skeleton engine is selected for review."""
+    """Raised when a registered non-functional engine is selected for review."""
 
 
-def get_adapter(name: str) -> EngineAdapter:
-    try:
-        cls = ENGINES[name]
-    except KeyError as e:
+def get_adapter(name: str) -> CliEngineAdapter:
+    """Resolve a CliEngineAdapter for the given engine name.
+
+    Raises UnknownEngineError for unregistered names (fail-closed, D-04).
+    """
+    spec = ENGINES.get(name)
+    if spec is None:
         valid = ", ".join(sorted(ENGINES))
-        raise UnknownEngineError(f"Unknown PREVUE_ENGINE {name!r}; valid engines: {valid}") from e
-    return cls()
+        raise UnknownEngineError(f"Unknown PREVUE_ENGINE {name!r}; valid engines: {valid}")
+    return CliEngineAdapter(spec)  # type: ignore[arg-type]
 
 
-def require_functional_adapter(name: str) -> EngineAdapter:
-    """Resolve an adapter that can run reviews (excludes skeleton engines)."""
-    if name in SKELETON_ENGINES:
-        raise NonFunctionalEngineError(
-            f"Engine {name!r} is registered but not yet functional; "
-            f"choose one of: {', '.join(sorted(FUNCTIONAL_ENGINES))}"
+def require_functional_adapter(name: str) -> CliEngineAdapter:
+    """Resolve an adapter that can run reviews (excludes non-functional specs).
+
+    Raises NonFunctionalEngineError if the spec has functional=False.
+    The mechanism is kept for future API siblings/skeletons (D-02/D-03).
+    """
+    spec = ENGINES.get(name)
+    if spec is None:
+        valid = ", ".join(sorted(ENGINES))
+        raise UnknownEngineError(f"Unknown PREVUE_ENGINE {name!r}; valid engines: {valid}")
+    # spec is a CliEngineSpec; check functional flag (D-03)
+    from prevue.engines.spec import CliEngineSpec  # local import avoids any re-export confusion
+
+    if isinstance(spec, CliEngineSpec) and not spec.functional:
+        functional = ", ".join(
+            n for n, s in ENGINES.items() if not isinstance(s, CliEngineSpec) or s.functional
         )
-    return get_adapter(name)
+        raise NonFunctionalEngineError(
+            f"Engine {name!r} is registered but not yet functional; choose one of: {functional}"
+        )
+    return CliEngineAdapter(spec)  # type: ignore[arg-type]

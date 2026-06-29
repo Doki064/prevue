@@ -272,7 +272,6 @@ def test_classify_missing_credential_raises_auth_error(
     assert not called
 
 
-
 def test_adapter_cli_commands_contain_no_allow_tool_flags() -> None:
     """D-08 regression: no adapter may pass --allow-tool to its CLI subprocess.
     Static source scan only — live tool-posture verification is a separate required

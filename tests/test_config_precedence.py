@@ -17,14 +17,13 @@ from pathlib import Path
 import pytest
 
 from prevue.config import (
-    NO_CONSUMER_CONFIG_SENTINEL,
     _resolve_engine,
     load_config,
 )
 from prevue.engines.registry import DEFAULT_ENGINE
 
 try:
-    from prevue.config import _resolve_model, _resolve_engine_models
+    from prevue.config import _resolve_engine_models, _resolve_model
 
     _IMPORT_ERROR: ImportError | None = None
 except ImportError as exc:
@@ -74,9 +73,9 @@ def test_engine_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize(
     "env_val,yml_name,expected",
     [
-        ("claude-code", "cursor-cli", "claude-code"),   # input beats yml
-        (None, "cursor-cli", "cursor-cli"),              # yml beats default
-        (None, None, DEFAULT_ENGINE),                    # falls back to default
+        ("claude-code", "cursor-cli", "claude-code"),  # input beats yml
+        (None, "cursor-cli", "cursor-cli"),  # yml beats default
+        (None, None, DEFAULT_ENGINE),  # falls back to default
     ],
     ids=["input>yml", "yml>default", "default"],
 )
@@ -107,10 +106,10 @@ def test_engine_precedence_matrix(
 @pytest.mark.parametrize(
     "prevue_model,copilot_model,yml_model,expected",
     [
-        ("gpt-5", "gpt-4o", "gpt-4", "gpt-5"),     # PREVUE_MODEL beats all
-        (None, "gpt-4o", "gpt-4", "gpt-4o"),        # COPILOT_MODEL beats yml
-        (None, None, "gpt-4", "gpt-4"),              # yml beats None
-        (None, None, None, None),                    # no model set -> None
+        ("gpt-5", "gpt-4o", "gpt-4", "gpt-5"),  # PREVUE_MODEL beats all
+        (None, "gpt-4o", "gpt-4", "gpt-4o"),  # COPILOT_MODEL beats yml
+        (None, None, "gpt-4", "gpt-4"),  # yml beats None
+        (None, None, None, None),  # no model set -> None
     ],
     ids=["PREVUE_MODEL>all", "COPILOT_MODEL>yml", "yml>none", "none"],
 )

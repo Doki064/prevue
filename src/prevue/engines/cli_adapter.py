@@ -9,9 +9,9 @@ from __future__ import annotations
 import os
 import tempfile
 
+import prevue.engines.prompt as _prompt_module
 from prevue.engines import flow
 from prevue.engines.base import EngineAdapter
-import prevue.engines.prompt as _prompt_module
 from prevue.engines.prompt import (
     CLASSIFY_TIMEOUT_SECONDS,
     build_classify_prompt,

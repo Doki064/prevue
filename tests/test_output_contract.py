@@ -16,11 +16,9 @@ Contract (from 10-RESEARCH.md § Pattern 4: Versioned both-form output):
 from __future__ import annotations
 
 import json
-import re
 
 import pytest
 
-from prevue.gate import ReviewConfig
 from prevue.models import DiffBundle, Finding, ReviewResult
 
 try:

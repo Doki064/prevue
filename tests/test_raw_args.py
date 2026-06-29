@@ -11,7 +11,6 @@ Contract (D-10):
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import pytest
@@ -35,7 +34,8 @@ def _require_engine_config() -> None:
     """Fail clearly if EngineConfig is not importable."""
     if _IMPORT_ERROR is not None:
         pytest.fail(
-            f"prevue.config.EngineConfig does not exist yet (Plan 04 will create it): {_IMPORT_ERROR}",
+            f"prevue.config.EngineConfig does not exist yet "
+            f"(Plan 04 will create it): {_IMPORT_ERROR}",
             pytrace=False,
         )
 
@@ -116,12 +116,7 @@ def test_raw_args_from_base_ref_yml(tmp_path: Path) -> None:
     _require_engine_config()
     cfg_file = tmp_path / "prevue.yml"
     cfg_file.write_text(
-        "engine:\n"
-        "  name: copilot-cli\n"
-        "  raw_args:\n"
-        "    - --verbose\n"
-        "    - --timeout\n"
-        "    - '30'\n"
+        "engine:\n  name: copilot-cli\n  raw_args:\n    - --verbose\n    - --timeout\n    - '30'\n"
     )
     cfg = load_config(str(cfg_file))
     # The loaded config must expose raw_args from the engine block

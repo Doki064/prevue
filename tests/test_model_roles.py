@@ -79,7 +79,7 @@ def test_single_model_fallback_when_role_unset() -> None:
     }
     models = _resolve_engine_models(raw)  # type: ignore[misc]
     assert models["review"] == "gpt-5-turbo"
-    assert models["classify"] == "gpt-5"     # fallback to engine.model
+    assert models["classify"] == "gpt-5"  # fallback to engine.model
     assert models["consolidate"] == "gpt-5"  # fallback to engine.model
 
 

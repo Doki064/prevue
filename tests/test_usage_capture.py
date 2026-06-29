@@ -101,9 +101,7 @@ def test_fallback_estimated_antigravity() -> None:
 
     result = capture_usage(spec, stdout=text)  # type: ignore[misc]
 
-    assert result is None, (
-        "capture_usage must return None for 'none' strategy on plain text output"
-    )
+    assert result is None, "capture_usage must return None for 'none' strategy on plain text output"
 
 
 def test_copilot_otel(tmp_path: Path) -> None:
