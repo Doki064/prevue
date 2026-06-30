@@ -395,7 +395,7 @@ Plans:
   5. Adapters support per-role model selection (cheap classify / strong review / cheap consolidate) (ENGN-09)
   6. The validated `ReviewResult` is emitted as a GitHub Actions job output (and/or JSON artifact) that consumers can chain automation on (OUTP-05)
 
-**Plans**: 6 plans (4 waves)
+**Plans**: 7 plans (4 waves + gap closure)
 Plans:
 **Wave 1**
 
@@ -414,6 +414,10 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 10-06-PLAN.md — Antigravity install/checksum + secret + scheduled pricing-bump PR + live human-verify checkpoint (Wave 4)
+
+**Gap closure** *(from 10-UAT.md — live sandbox verification surfaced 2 unresolved gaps)*
+
+- [ ] 10-07-PLAN.md — Gap A: cursor-cli requests/parses real JSON envelope (confirmed no token fields, fixed wrong output-format bug); Gap B: antigravity-cli flipped functional=False (confirmed no headless auth exists per official docs)
 
 ### Phase 11: Skills as Pinned External Repo
 
