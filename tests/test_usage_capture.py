@@ -81,15 +81,19 @@ def test_claude_stdout_json_prefers_total_cost_usd() -> None:
 
 
 def test_fallback_estimated_cursor() -> None:
-    """Cursor stdout-json has no token fields: capture returns None (caller uses bytes/4)."""
+    """Cursor's real JSON envelope (confirmed schema) has no usage block: capture
+    routes through the stdout-json envelope-unwrap path (Gap A, 10-07) and still
+    returns None (caller uses bytes/4) — verified-correct degrade, not a
+    disconnected 'none' strategy."""
     _require_import()
-    spec = _FakeSpec("none")
+    spec = _FakeSpec("stdout-json")
     envelope = (FIXTURES_DIR / "cursor_envelope.json").read_text()
 
     result = capture_usage(spec, stdout=envelope)  # type: ignore[misc]
 
     assert result is None, (
-        "capture_usage must return None for 'none' strategy so caller falls back to estimate"
+        "capture_usage must return None when the stdout-json envelope has no "
+        "usage block, so caller falls back to estimate"
     )
 
 

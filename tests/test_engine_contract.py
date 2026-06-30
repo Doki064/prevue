@@ -158,7 +158,7 @@ def test_vendor_argv(
         assert cmd == ["claude", "-p", "--output-format", "json"]
         assert captured["input"] is not None
     elif engine_name == "cursor-cli":
-        assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "text"]
+        assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "json"]
         assert "-f" in cmd
         assert "--force" not in cmd
     elif engine_name == "antigravity-cli":
@@ -213,7 +213,7 @@ def test_cursor_model_mapping_and_prompt_file(monkeypatch: pytest.MonkeyPatch) -
     req = make_sample_request().model_copy(update={"model": "sonnet-4"})
     get_adapter("cursor-cli").review(req)
     cmd = captured["cmd"]
-    assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "text"]
+    assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "json"]
     assert ["-m", "sonnet-4"] == cmd[-2:]
     assert "src/main.py" in captured["prompt"]
 
@@ -252,6 +252,37 @@ def test_cursor_invoked_with_none_cwd_when_env_unset(
     monkeypatch.setattr(subprocess, "run", _capture)
     get_adapter("cursor-cli").review(make_sample_request())
     assert captured["cwd"] is None
+
+
+def test_cursor_json_envelope_unwraps_result_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gap A (10-07): cursor-cli now requests --output-format json, and its envelope's
+    'result' field must be unwrapped before fence parsing — the same envelope-unwrap
+    path already proven for claude-code-cli (usage_capture='stdout-json')."""
+    monkeypatch.setenv("CURSOR_API_KEY", "cur_test_key")
+
+    fenced_result = stdout_with_fence(payload=[VALID_FINDING])
+    envelope = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "duration_ms": 8900,
+            "session_id": "sess-cursor-xyz789",
+            "result": fenced_result,
+        }
+    )
+
+    def _success(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout=envelope, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _success)
+    result = get_adapter("cursor-cli").review(make_sample_request())
+
+    assert result.degraded is False, (
+        f"Cursor JSON envelope was not unwrapped before fence parsing: {result.engine_meta}"
+    )
+    assert len(result.findings) == 1
+    assert result.summary_markdown == PROSE_REVIEW
 
 
 def test_classify_valid_json_returns_label_map(
