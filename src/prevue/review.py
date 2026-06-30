@@ -24,7 +24,12 @@ from prevue.classify.llm_fallback import (
 )
 from prevue.classify.models import CANONICAL_LABEL_ORDER, GENERAL_LABEL
 from prevue.classify.router import route
-from prevue.config import _resolve_engine_models, load_config, resolve_consumer_config_path
+from prevue.config import (
+    _resolve_engine_models,
+    load_config,
+    resolve_consumer_config_path,
+    resolve_review_model,
+)
 from prevue.dismiss import active_suppressed_fingerprints, parse_dismiss_block
 from prevue.engines.base import EngineAdapter
 from prevue.engines.prompt import (
@@ -799,14 +804,11 @@ def run_review(
         )
         return
 
-    # Review model resolution (ENGN-09/D-11):
-    #   models.review (yml) > engine.model (yml) > PREVUE_MODEL env > COPILOT_MODEL env
-    # _review_model_from_config: resolved per-role model (None if no config override)
-    # Env fallback applied here so the resolution stays compatible with the existing
-    # env-variable-based single-model path (backward compat with callers that set
-    # PREVUE_MODEL or COPILOT_MODEL without a prevue.yml engine block).
+    # Review model resolution (ENGN-09/D-11, T-02 fix — 10-THERMOS):
+    #   PREVUE_MODEL env > COPILOT_MODEL env > models.review (yml) > engine.model (yml)
+    # Matches CONFIG_PRECEDENCE (config.py knob 2): env always wins over yml.
     _env_model = os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
-    _review_model = _review_model_from_config or _env_model
+    _review_model = resolve_review_model(_review_model_from_config, _env_model)
     _hybrid_kwargs: dict = dict(
         skills=skills,
         bundles=result_cls.bundles,

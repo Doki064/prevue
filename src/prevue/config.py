@@ -294,6 +294,18 @@ def _resolve_engine_models(raw: dict) -> dict[str, str | None]:
     }
 
 
+def resolve_review_model(review_model_from_config: str | None, env_model: str | None) -> str | None:
+    """Apply the env-override layer to the per-role review model (T-02 fix — 10-THERMOS).
+
+    Precedence: PREVUE_MODEL/COPILOT_MODEL env > models.review/engine.model (yml).
+    Matches CONFIG_PRECEDENCE (knob 2) — env always wins over yml. Extracted as its
+    own function so the operand order is unit-testable independent of review.py's
+    1400-line review() body (_resolve_engine_models() deliberately omits env; this
+    is the call-site env layer it defers to).
+    """
+    return env_model or review_model_from_config
+
+
 def _build_engine_config(raw: dict) -> EngineConfig:
     """Parse the engine block from an already-loaded config dict (no second file read)."""
     engine_block = raw.get("engine") or {}

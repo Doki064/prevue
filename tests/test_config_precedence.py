@@ -168,6 +168,36 @@ def test_fallback_model_from_yml(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# T-02 (10-THERMOS): review.py's env-override layer on top of per-role config
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_review_model_env_beats_config() -> None:
+    """PREVUE_MODEL/COPILOT_MODEL env must win over models.review/engine.model yml.
+
+    Regression for T-02: review.py previously computed
+    `_review_model_from_config or _env_model` (yml wins, inverted vs
+    CONFIG_PRECEDENCE). resolve_review_model() is the extracted, testable
+    call-site env layer that _resolve_engine_models() defers to.
+    """
+    from prevue.config import resolve_review_model
+
+    assert resolve_review_model("yml-model", "env-model") == "env-model"
+
+
+def test_resolve_review_model_falls_back_to_config_when_no_env() -> None:
+    from prevue.config import resolve_review_model
+
+    assert resolve_review_model("yml-model", None) == "yml-model"
+
+
+def test_resolve_review_model_none_when_neither_set() -> None:
+    from prevue.config import resolve_review_model
+
+    assert resolve_review_model(None, None) is None
+
+
+# ---------------------------------------------------------------------------
 # Integration: load_config exposes resolved engine
 # ---------------------------------------------------------------------------
 
