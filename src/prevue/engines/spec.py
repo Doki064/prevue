@@ -119,19 +119,31 @@ CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
         usage_capture="stdout-json",
         functional=True,
     ),
+    # Gap A (10-07 gap closure, T-10-07-G): official Cursor CLI docs
+    # (cursor.com/docs/cli/reference/output-format) confirm the --output-format
+    # json envelope schema is {type, subtype, is_error, duration_ms,
+    # duration_api_ms, result, session_id, request_id} — no token/usage/cost
+    # fields exist. junhoyeo/tokscale (cited as "Cursor is definitely possible")
+    # reads Cursor's authenticated web billing API via a manually-extracted
+    # session cookie, NOT cursor-agent stdout — out of scope for an engine
+    # adapter. usage_capture="stdout-json" is reused purely for its JSON
+    # envelope-unwrap + graceful-no-usage-block degrade (identical to how
+    # _parse_stdout_json already returns None when no "usage" dict is present);
+    # cursor-cli's token usage remains estimated=True, now via the verified-
+    # correct code path instead of a disconnected "none" strategy.
     CliEngineSpec(
         name="cursor-cli",
         cli_label="Cursor CLI",
         secret_env="CURSOR_API_KEY",
         auth_error=CursorAuthError,
         validate_secret=_validate_nonempty_secret(CursorAuthError, "CURSOR_API_KEY"),
-        base_argv=("cursor-agent", "-p", "--output-format", "text"),
+        base_argv=("cursor-agent", "-p", "--output-format", "json"),
         prompt_delivery="tempfile-arg",
         tempfile_flag="-f",
         model_flag="argv",
         model_argv_flag="-m",
         use_consumer_cwd=True,
-        usage_capture="none",
+        usage_capture="stdout-json",
         functional=True,
     ),
     CliEngineSpec(
