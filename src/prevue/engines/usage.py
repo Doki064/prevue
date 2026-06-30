@@ -168,6 +168,12 @@ def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
 
     T-10-07: wraps all I/O and JSON parsing in try/except.
 
+    T-01 (10-THERMOS): ``otel_path`` may be a directory (Copilot's file
+    exporter writes one or more ``*.jsonl`` files under the configured
+    path rather than treating it as a single file). When ``otel_path`` is
+    a directory, glob and sum spans across every ``*.jsonl`` file inside
+    it; when it is a file, read it directly (prior behavior unchanged).
+
     Returns:
         dict with summed ``input``, ``output``, ``cache_read``,
         and ``estimated=False``.
@@ -181,46 +187,52 @@ def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
     if not path.exists():
         return None
 
+    if path.is_dir():
+        jsonl_files = sorted(path.glob("*.jsonl"))
+    else:
+        jsonl_files = [path]
+
     total_input = 0
     total_output = 0
     total_cache_read = 0
 
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except (json.JSONDecodeError, ValueError):
-                # Skip malformed lines (T-10-07)
-                continue
+        for jsonl_file in jsonl_files:
+            for line in jsonl_file.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    # Skip malformed lines (T-10-07)
+                    continue
 
-            if not isinstance(record, dict):
-                # T-10-07: non-dict top-level JSON value — skip, don't crash
-                continue
+                if not isinstance(record, dict):
+                    # T-10-07: non-dict top-level JSON value — skip, don't crash
+                    continue
 
-            # Walk resourceSpans → scopeSpans → spans → attributes
-            for resource_span in record.get("resourceSpans", []):
-                if not isinstance(resource_span, dict):
-                    continue  # T-10-07: malformed resourceSpans element
-                for scope_span in resource_span.get("scopeSpans", []):
-                    if not isinstance(scope_span, dict):
-                        continue  # T-10-07: malformed scopeSpans element
-                    for span in scope_span.get("spans", []):
-                        if not isinstance(span, dict):
-                            continue  # T-10-07: malformed spans element
-                        attrs = {
-                            a["key"]: _extract_attr_value(a)
-                            for a in span.get("attributes", [])
-                            if isinstance(a, dict) and "key" in a
-                        }
-                        try:
-                            total_input += int(attrs.get(_OTEL_PROMPT_TOKENS) or 0)
-                            total_output += int(attrs.get(_OTEL_COMPLETION_TOKENS) or 0)
-                            total_cache_read += int(attrs.get(_OTEL_CACHE_READ_TOKENS) or 0)
-                        except (TypeError, ValueError):
-                            continue  # skip malformed span (T-10-07)
+                # Walk resourceSpans → scopeSpans → spans → attributes
+                for resource_span in record.get("resourceSpans", []):
+                    if not isinstance(resource_span, dict):
+                        continue  # T-10-07: malformed resourceSpans element
+                    for scope_span in resource_span.get("scopeSpans", []):
+                        if not isinstance(scope_span, dict):
+                            continue  # T-10-07: malformed scopeSpans element
+                        for span in scope_span.get("spans", []):
+                            if not isinstance(span, dict):
+                                continue  # T-10-07: malformed spans element
+                            attrs = {
+                                a["key"]: _extract_attr_value(a)
+                                for a in span.get("attributes", [])
+                                if isinstance(a, dict) and "key" in a
+                            }
+                            try:
+                                total_input += int(attrs.get(_OTEL_PROMPT_TOKENS) or 0)
+                                total_output += int(attrs.get(_OTEL_COMPLETION_TOKENS) or 0)
+                                total_cache_read += int(attrs.get(_OTEL_CACHE_READ_TOKENS) or 0)
+                            except (TypeError, ValueError):
+                                continue  # skip malformed span (T-10-07)
 
     except OSError:
         # T-10-07: file I/O error — degrade to None

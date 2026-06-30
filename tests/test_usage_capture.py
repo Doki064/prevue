@@ -130,6 +130,29 @@ def test_copilot_otel(tmp_path: Path) -> None:
     assert result["cache_read"] == 1050
 
 
+def test_copilot_otel_directory_path_globs_jsonl_files(tmp_path: Path) -> None:
+    """T-01 (10-THERMOS): when otel_path is a directory (Copilot's file exporter
+    writes *.jsonl files under the configured path, not a single file at it),
+    sum spans across every *.jsonl file inside it instead of degrading to None."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_dir = tmp_path / "copilot-otel"
+    otel_dir.mkdir()
+    otel_fixture = FIXTURES_DIR / "copilot_otel.jsonl"
+    # Fixture has 2 lines; split across 2 files to prove multi-file glob+sum.
+    lines = otel_fixture.read_text().splitlines()
+    (otel_dir / "part-1.jsonl").write_text(lines[0] + "\n")
+    (otel_dir / "part-2.jsonl").write_text(lines[1] + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_dir))  # type: ignore[misc]
+
+    assert result is not None, "Directory otel_path must still yield a usage dict, not None"
+    assert result["estimated"] is False
+    assert result["input"] == 2100
+    assert result["output"] == 300
+    assert result["cache_read"] == 1050
+
+
 def test_otel_missing_path_returns_none() -> None:
     """If OTEL path is missing/None for otel-jsonl strategy, capture gracefully returns None."""
     _require_import()
