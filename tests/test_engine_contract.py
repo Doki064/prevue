@@ -158,7 +158,7 @@ def test_vendor_argv(
         assert cmd == ["copilot", "-s", "--no-ask-user"]
         assert captured["input"] is not None
     elif engine_name == "claude-code-cli":
-        assert cmd == ["claude", "-p", "--output-format", "json"]
+        assert cmd == ["claude", "--safe-mode", "-p", "--output-format", "json"]
         assert captured["input"] is not None
     elif engine_name == "cursor-cli":
         assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "json"]
@@ -193,6 +193,7 @@ def test_claude_model_mapping_on_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     get_adapter("claude-code-cli").review(req)
     assert captured["cmd"] == [
         "claude",
+        "--safe-mode",
         "-p",
         "--output-format",
         "json",
