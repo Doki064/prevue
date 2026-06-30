@@ -137,6 +137,48 @@ def test_otel_missing_path_returns_none() -> None:
 
 
 # ---------------------------------------------------------------------------
+# CR-01 regression (iteration 3): non-dict-shaped decoded JSONL must not crash
+# _parse_copilot_otel with an uncaught AttributeError. Per T-10-07, malformed
+# (but JSON-decodable) lines must degrade gracefully, same as a JSON decode
+# failure.
+# ---------------------------------------------------------------------------
+
+
+def test_copilot_otel_non_dict_top_level_line_skipped(tmp_path: Path) -> None:
+    """A JSONL line that decodes to a non-dict top-level value (e.g. a bare
+    array) must be skipped, not raise AttributeError."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    otel_path.write_text(json.dumps([1, 2, 3]) + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is not None, "Valid-but-empty OTEL parse must still return a zeroed dict"
+    assert result["estimated"] is False
+    assert result["input"] == 0
+    assert result["output"] == 0
+    assert result["cache_read"] == 0
+
+
+def test_copilot_otel_non_dict_resource_span_element_skipped(tmp_path: Path) -> None:
+    """A resourceSpans array containing a non-dict element must be skipped,
+    not raise AttributeError when walking scopeSpans/spans/attributes."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    otel_path.write_text(json.dumps({"resourceSpans": ["not-a-dict"]}) + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is not None, "Malformed resourceSpans element must degrade, not raise"
+    assert result["estimated"] is False
+    assert result["input"] == 0
+    assert result["output"] == 0
+    assert result["cache_read"] == 0
+
+
+# ---------------------------------------------------------------------------
 # Pitfall 3 regression: Claude stdout-json envelope must not break fence extraction
 # ---------------------------------------------------------------------------
 

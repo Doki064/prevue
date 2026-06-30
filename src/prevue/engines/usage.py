@@ -196,14 +196,24 @@ def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
                 # Skip malformed lines (T-10-07)
                 continue
 
+            if not isinstance(record, dict):
+                # T-10-07: non-dict top-level JSON value — skip, don't crash
+                continue
+
             # Walk resourceSpans → scopeSpans → spans → attributes
             for resource_span in record.get("resourceSpans", []):
+                if not isinstance(resource_span, dict):
+                    continue  # T-10-07: malformed resourceSpans element
                 for scope_span in resource_span.get("scopeSpans", []):
+                    if not isinstance(scope_span, dict):
+                        continue  # T-10-07: malformed scopeSpans element
                     for span in scope_span.get("spans", []):
+                        if not isinstance(span, dict):
+                            continue  # T-10-07: malformed spans element
                         attrs = {
                             a["key"]: _extract_attr_value(a)
                             for a in span.get("attributes", [])
-                            if "key" in a
+                            if isinstance(a, dict) and "key" in a
                         }
                         try:
                             total_input += int(attrs.get(_OTEL_PROMPT_TOKENS) or 0)
