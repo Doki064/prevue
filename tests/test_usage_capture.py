@@ -163,6 +163,20 @@ def test_otel_missing_path_returns_none() -> None:
     assert result is None, "Missing OTEL path must degrade gracefully to None"
 
 
+def test_otel_empty_file_returns_none(tmp_path: Path) -> None:
+    """T-09 (10-THERMOS): an existing-but-empty OTEL file must degrade to None
+    (estimated=True via caller fallback), not report a misleading
+    estimated=False zeroed dict."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    otel_path.write_text("")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is None, "Empty OTEL file must degrade to None, not estimated=False zeros"
+
+
 # ---------------------------------------------------------------------------
 # CR-01 regression (iteration 3): non-dict-shaped decoded JSONL must not crash
 # _parse_copilot_otel with an uncaught AttributeError. Per T-10-07, malformed
@@ -173,7 +187,13 @@ def test_otel_missing_path_returns_none() -> None:
 
 def test_copilot_otel_non_dict_top_level_line_skipped(tmp_path: Path) -> None:
     """A JSONL line that decodes to a non-dict top-level value (e.g. a bare
-    array) must be skipped, not raise AttributeError."""
+    array) must be skipped, not raise AttributeError.
+
+    T-09 (10-THERMOS): no real span was ever found in this file, so the
+    parser now degrades to None (caller falls back to bytes/4 estimate)
+    instead of reporting a misleading estimated=False zeroed dict. The
+    original crash-prevention intent (no AttributeError) is unchanged.
+    """
     _require_import()
     spec = _FakeSpec("otel-jsonl")
     otel_path = tmp_path / "copilot-usage.jsonl"
@@ -181,16 +201,17 @@ def test_copilot_otel_non_dict_top_level_line_skipped(tmp_path: Path) -> None:
 
     result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
 
-    assert result is not None, "Valid-but-empty OTEL parse must still return a zeroed dict"
-    assert result["estimated"] is False
-    assert result["input"] == 0
-    assert result["output"] == 0
-    assert result["cache_read"] == 0
+    assert result is None, "No real span found — must degrade to None, not a fake zeroed dict"
 
 
 def test_copilot_otel_non_dict_resource_span_element_skipped(tmp_path: Path) -> None:
     """A resourceSpans array containing a non-dict element must be skipped,
-    not raise AttributeError when walking scopeSpans/spans/attributes."""
+    not raise AttributeError when walking scopeSpans/spans/attributes.
+
+    T-09 (10-THERMOS): no real span was ever found, so this degrades to
+    None (caller falls back to bytes/4 estimate) instead of a misleading
+    estimated=False zeroed dict. The crash-prevention intent is unchanged.
+    """
     _require_import()
     spec = _FakeSpec("otel-jsonl")
     otel_path = tmp_path / "copilot-usage.jsonl"
@@ -198,11 +219,7 @@ def test_copilot_otel_non_dict_resource_span_element_skipped(tmp_path: Path) -> 
 
     result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
 
-    assert result is not None, "Malformed resourceSpans element must degrade, not raise"
-    assert result["estimated"] is False
-    assert result["input"] == 0
-    assert result["output"] == 0
-    assert result["cache_read"] == 0
+    assert result is None, "No real span found — must degrade to None, not raise or fake zeros"
 
 
 # ---------------------------------------------------------------------------

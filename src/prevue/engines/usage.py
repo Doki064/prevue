@@ -195,6 +195,8 @@ def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
     total_input = 0
     total_output = 0
     total_cache_read = 0
+    span_count = 0  # T-09 (10-THERMOS): distinguishes "no real spans found" from a
+    # genuine zero-token span — only the latter should report estimated=False.
 
     try:
         for jsonl_file in jsonl_files:
@@ -222,6 +224,7 @@ def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
                         for span in scope_span.get("spans", []):
                             if not isinstance(span, dict):
                                 continue  # T-10-07: malformed spans element
+                            span_count += 1
                             attrs = {
                                 a["key"]: _extract_attr_value(a)
                                 for a in span.get("attributes", [])
@@ -236,6 +239,13 @@ def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
 
     except OSError:
         # T-10-07: file I/O error — degrade to None
+        return None
+
+    if span_count == 0:
+        # T-09 (10-THERMOS): empty file / all lines malformed / no resourceSpans
+        # matched — there is no real usage data here, so degrade to None (caller
+        # falls back to bytes/4 estimate) rather than reporting a misleading
+        # estimated=False zeroed dict.
         return None
 
     return {
