@@ -231,3 +231,24 @@ def test_emit_machine_output_noop_github_output_when_unset(tmp_path, monkeypatch
     content = (tmp_path / "prevue-result.json").read_text(encoding="utf-8")
     parsed = json.loads(content)
     assert parsed["schema_version"] == "1.0"
+
+
+def test_emit_machine_output_logs_github_output_write_failure(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """T-06 (10-THERMOS): a GITHUB_OUTPUT write failure (e.g. path is a directory,
+    permission denied) must not raise — but must be logged to stderr, not silently
+    swallowed, so consumers can debug why job outputs are empty."""
+    _require_emit_helpers()
+    bad_github_output = tmp_path / "github_output_dir"
+    bad_github_output.mkdir()  # opening a directory for append raises OSError
+    monkeypatch.setenv("GITHUB_OUTPUT", str(bad_github_output))
+    result = _make_result()
+    out_file = str(tmp_path / "prevue-result.json")
+
+    # Must not raise; result file still written
+    emit_machine_output(result, conclusion="success", output_file=out_file)  # type: ignore[misc]
+
+    assert (tmp_path / "prevue-result.json").exists()
+    err = capsys.readouterr().err
+    assert "GITHUB_OUTPUT" in err and str(bad_github_output) in err

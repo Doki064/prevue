@@ -1427,5 +1427,12 @@ def emit_machine_output(
                 # we use it unconditionally as belt-and-suspenders.
                 delimiter = f"PREVUE_DELIM_{key.upper()}"
                 fh.write(f"{key}<<{delimiter}\n{value_str}\n{delimiter}\n")
-    except OSError:
-        pass  # non-fatal — GITHUB_OUTPUT write errors must not abort the review
+    except OSError as exc:
+        # T-06 (10-THERMOS): non-fatal — GITHUB_OUTPUT write errors must not abort
+        # the review — but a silent `pass` made consumer-side debugging impossible
+        # (job outputs just look empty with no clue why). Log to stderr instead,
+        # matching the PREVUE_RESULT_FILE diagnostic pattern above.
+        print(
+            f"prevue: failed to write $GITHUB_OUTPUT ({github_output_path!r}): {exc}",
+            file=sys.stderr,
+        )
