@@ -147,8 +147,7 @@ class EngineConfig(BaseModel):
         for i, item in enumerate(value):
             if not isinstance(item, str):
                 raise ValueError(
-                    f"engine.raw_args[{i}] must be a string, "
-                    f"got {type(item).__name__!r}: {item!r}"
+                    f"engine.raw_args[{i}] must be a string, got {type(item).__name__!r}: {item!r}"
                 )
         return value
 

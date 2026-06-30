@@ -577,7 +577,11 @@ def run_review(
 
     # Thread pricing override from base-ref engine_config into the adapter (D-06c).
     # Injected here alongside raw_args so the same base-ref sentinel gate applies.
-    if not adapter and config.engine_config.pricing is not None and hasattr(engine, "set_pricing_override"):
+    if (
+        not adapter
+        and config.engine_config.pricing is not None
+        and hasattr(engine, "set_pricing_override")
+    ):
         engine.set_pricing_override(config.engine_config.pricing)
 
     # Resolve per-role models (ENGN-09/D-11): classify, review, consolidate.
@@ -1389,7 +1393,8 @@ def emit_machine_output(
     if output_file is None:
         if os.environ.get("GITHUB_ACTIONS") and not os.environ.get("PREVUE_RESULT_FILE"):
             print(
-                "prevue: PREVUE_RESULT_FILE not set under Actions; writing prevue-result.json to CWD",
+                "prevue: PREVUE_RESULT_FILE not set under Actions; "
+                "writing prevue-result.json to CWD",
                 file=sys.stderr,
             )
         output_file = os.environ.get("PREVUE_RESULT_FILE", "prevue-result.json")

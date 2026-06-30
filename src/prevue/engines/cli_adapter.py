@@ -50,7 +50,8 @@ class CliEngineAdapter(EngineAdapter):
         self._raw_args = list(raw_args)
 
     def set_pricing_override(self, pricing: dict | None) -> None:
-        """Set the consumer pricing override dict (D-06c: called from review.py after load_config)."""
+        """Set the consumer pricing override dict (D-06c: called from review.py after
+        load_config)."""
         self._pricing_override = pricing
 
     # ------------------------------------------------------------------
@@ -177,7 +178,9 @@ class CliEngineAdapter(EngineAdapter):
                     inner_parts_to_quote.extend([spec.model_argv_flag, model])
                 if raw_args:
                     inner_parts_to_quote.extend(raw_args)
-                inner_cmd = " ".join(shlex.quote(p) for p in inner_parts_to_quote) + ' "$_AGY_PROMPT"'
+                inner_cmd = (
+                    " ".join(shlex.quote(p) for p in inner_parts_to_quote) + ' "$_AGY_PROMPT"'
+                )
                 # Strip ANSI + CR after script output; pipe via shell
                 wrapper_cmd = (
                     f"script -qec {shlex.quote(inner_cmd)} /dev/null"
