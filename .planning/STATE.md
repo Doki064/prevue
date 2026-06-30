@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: "Checkpoint: Task 3 - live Antigravity sandbox verification (blocking-human)"
-last_updated: "2026-06-29T15:58:32.074Z"
-last_activity: 2026-06-29
+status: executing
+stopped_at: Completed 10-07-PLAN.md
+last_updated: "2026-06-30T11:44:04.531Z"
+last_activity: 2026-06-30 -- Phase 10 execution started
 progress:
   total_phases: 15
   completed_phases: 10
-  total_plans: 61
-  completed_plans: 61
+  total_plans: 62
+  completed_plans: 62
   percent: 67
 ---
 
@@ -25,12 +25,12 @@ See: .planning/PROJECT.md (updated 2026-06-12)
 
 ## Current Position
 
-Phase: 11
-Plan: Not started
-Status: Phase complete — ready for verification
-Last activity: 2026-06-29
+Phase: 10 (boundary-contracts) — COMPLETE
+Plan: 7 of 7
+Status: All plans executed; 2 UAT gaps closed via 10-07 gap-closure plan
+Last activity: 2026-06-30 -- Phase 10 execution complete (10-07 gap closure: cursor-cli JSON envelope, antigravity-cli fail-closed)
 
-Progress: [██████████] 6/6 plans complete (Phase 09) — All 9 phases complete; Phase 10: 2/6 plans complete
+Progress: [██████████] 7/7 plans complete (Phase 10) — All 10 phases complete
 
 ## Performance Metrics
 
@@ -120,6 +120,7 @@ Progress: [██████████] 6/6 plans complete (Phase 09) — All
 | Phase 10-boundary-contracts P04 | 6 | 2 tasks | 3 files |
 | Phase 10-boundary-contracts P05 | 7min | 2 tasks | 6 files |
 | Phase 10-boundary-contracts P06 | 10min | - tasks | - files |
+| Phase 10-boundary-contracts P07 | 5min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -227,6 +228,8 @@ Recent decisions affecting current work:
 - [Phase ?]: pseudo-TTY script -qec wrapper in cli_adapter.py for antigravity-cli (T-10-21)
 - [Phase ?]: update-pricing.yml: human-reviewed PR only, no merge step (D-06b / T-10-18)
 - [Phase ?]: ANTIGRAVITY_API_KEY gated on inputs.engine == antigravity-cli in workflow env (T-10-20)
+- [Phase 10-07]: cursor-cli requests --output-format json + usage_capture=stdout-json reusing Claude envelope-unwrap path (still estimated=True, now verified-correct)
+- [Phase 10-07]: antigravity-cli functional=False — fails closed via NonFunctionalEngineError; registry lookup/install/invoke unaffected
 
 ### Pending Todos
 
@@ -253,6 +256,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-29T11:30:05.855Z
-Stopped at: Checkpoint: Task 3 - live Antigravity sandbox verification (blocking-human)
+Last session: 2026-06-30T11:44:04.525Z
+Stopped at: Completed 10-07-PLAN.md
 Resume file: None
