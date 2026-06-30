@@ -88,16 +88,16 @@ Command-driven reviews (`/prevue review`, `/prevue dismiss`, `/prevue resolve`) 
 | `ReviewConfig` / `GateResult` / `PlacedFinding` | `src/prevue/gate.py` | Severity thresholds, inline caps, multi-call token budgets, check conclusion, and per-finding placement decisions |
 | `CallGroup` | `src/prevue/multicall.py` | Files and bundle label set for one `engine.review()` call |
 | `PrContext` | `src/prevue/github/client.py` | Repo and PR identity loaded from `GITHUB_EVENT_PATH`; no git checkout required |
-| Engine registry | `src/prevue/engines/registry.py` | Name → adapter class map; `require_functional_adapter()` excludes skeleton engines and raises `NonFunctionalEngineError` |
+| Engine registry | `src/prevue/engines/registry.py` | Name → `CliEngineSpec` map; `require_functional_adapter()` excludes `functional=False` specs and raises `NonFunctionalEngineError` |
 
-**Engine adapters** (all registered in `registry.py`):
+**Engine adapters** (all driven by one generic `CliEngineAdapter(spec)`, parameterized by a `CliEngineSpec` in `spec.py` — registered in `registry.py`):
 
-| Adapter name | Class | Status |
+| Engine name | `functional` | Status |
 |---|---|---|
-| `copilot-cli` | `CopilotCliAdapter` | Functional (default) |
-| `claude-code-cli` | `ClaudeCodeAdapter` | Functional |
-| `cursor-cli` | `CursorAdapter` | Functional |
-| `gemini-cli` | `GeminiAdapter` | Skeleton (`SKELETON_ENGINES`) |
+| `copilot-cli` | `True` | Functional (default) |
+| `claude-code-cli` | `True` | Functional |
+| `cursor-cli` | `True` | Functional |
+| `antigravity-cli` | `False` | Skeleton — auth resolves, but `require_functional_adapter()` rejects it until headless auth ships |
 
 **Canonical label order** (determines classification priority and file packing weight):
 
@@ -184,11 +184,13 @@ prevue/
 │   │   └── security/                 # Built-in security skill SKILL.md files
 │   ├── engines/
 │   │   ├── base.py                   # EngineAdapter ABC: review(), classify(), classify_skills()
-│   │   ├── registry.py               # Name → adapter class; DEFAULT_ENGINE, SKELETON_ENGINES
-│   │   ├── copilot_cli.py            # GitHub Copilot CLI adapter (headless subprocess)
-│   │   ├── claude_code_cli.py        # Anthropic Claude Code CLI adapter
-│   │   ├── cursor_cli.py             # Cursor CLI adapter
-│   │   ├── gemini_cli.py             # Gemini CLI adapter (skeleton)
+│   │   ├── registry.py               # Name → CliEngineSpec; DEFAULT_ENGINE, require_functional_adapter()
+│   │   ├── spec.py                   # CliEngineSpec table — one declarative entry per CLI engine
+│   │   ├── cli_adapter.py            # CliEngineAdapter(spec) — single generic adapter for all CLI engines
+│   │   ├── copilot_cli.py            # Re-export shim (test compat) — real spec lives in spec.py
+│   │   ├── claude_code_cli.py        # Re-export shim (test compat) — real spec lives in spec.py
+│   │   ├── cursor_cli.py             # Re-export shim (test compat) — real spec lives in spec.py
+│   │   ├── gemini_cli.py             # Re-export shim (test compat) — engine removed, antigravity-cli is the skeleton
 │   │   ├── flow.py                   # review_with_retry(): parse failure retry + degrade
 │   │   ├── prompt.py                 # _build_prompt(), OUTPUT_CONTRACT, untrusted-data fencing
 │   │   ├── parsing.py                # extract_json_fence(), validate_findings()

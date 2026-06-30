@@ -87,7 +87,7 @@ jobs:
           PREVUE_CONFIG_PATH: .github/prevue.yml
           COPILOT_GITHUB_TOKEN: >-
             ${{ github.event.client_payload.engine == 'copilot-cli' && secrets.COPILOT_GITHUB_TOKEN || '' }}
-          ANTHROPIC_API_KEY: >-
-            ${{ github.event.client_payload.engine == 'claude-code-cli' && secrets.ANTHROPIC_API_KEY || '' }}
+          CLAUDE_CODE_OAUTH_TOKEN: >-
+            ${{ github.event.client_payload.engine == 'claude-code-cli' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           CURSOR_API_KEY: >-
             ${{ github.event.client_payload.engine == 'cursor-cli' && secrets.CURSOR_API_KEY || '' }}

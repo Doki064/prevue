@@ -120,7 +120,7 @@ Pass only the secret for the engine you use — never `secrets: inherit`.
 | Engine | Workflow secret | Environment variable |
 |--------|-----------------|----------------------|
 | `copilot-cli` | `copilot-github-token` | `COPILOT_GITHUB_TOKEN` |
-| `claude-code-cli` | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
+| `claude-code-cli` | `claude-code-oauth-token` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cursor-cli` | `cursor-api-key` | `CURSOR_API_KEY` |
 
 Copilot CLI requires a **fine-grained, user-owned PAT** with **Copilot Requests** permission (prefix `github_pat_`), not the Actions `GITHUB_TOKEN`. Details in [docs/consumer-setup.md](docs/consumer-setup.md).

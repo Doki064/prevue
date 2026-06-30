@@ -251,7 +251,7 @@ Treat this as **mandatory, not optional**, when enabling merge gates.
 | Engine | Secret name | Maps to |
 |--------|-------------|---------|
 | `copilot-cli` | `copilot-github-token` | `COPILOT_GITHUB_TOKEN` |
-| `claude-code-cli` | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
+| `claude-code-cli` | `claude-code-oauth-token` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cursor-cli` | `cursor-api-key` | `CURSOR_API_KEY` |
 
 ### Cursor CLI supply-chain note
@@ -267,7 +267,7 @@ jobs:
     with:
       engine: claude-code-cli
     secrets:
-      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+      claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
 ## Skip ≠ auto-merge

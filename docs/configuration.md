@@ -240,7 +240,7 @@ engine:
 | Engine name | Status | Required secret | Auth env var |
 |-------------|--------|-----------------|-------------|
 | `copilot-cli` | Functional (default) | `copilot-github-token` | `COPILOT_GITHUB_TOKEN` — must be a fine-grained user-owned PAT (`github_pat_…`) with Copilot Requests permission |
-| `claude-code-cli` | Functional | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
+| `claude-code-cli` | Functional | `claude-code-oauth-token` | `CLAUDE_CODE_OAUTH_TOKEN` — long-lived token from `claude setup-token` |
 | `cursor-cli` | Functional | `cursor-api-key` | `CURSOR_API_KEY` |
 | `antigravity-cli` | Registered, not functional — no headless/non-interactive auth exists for the `agy` CLI per official docs; review attempts fail closed with a clear error | — | `ANTIGRAVITY_API_KEY` |
 
@@ -274,7 +274,7 @@ The reusable workflow (`prevue-review.yml`) exposes these `workflow_call` inputs
 | Secret | Required | Engine | Description |
 |--------|----------|--------|-------------|
 | `copilot-github-token` | No | `copilot-cli` | Fine-grained user PAT (`github_pat_…`) with Copilot Requests permission. Maps to `COPILOT_GITHUB_TOKEN` |
-| `anthropic-api-key` | No | `claude-code-cli` | Anthropic API key. Maps to `ANTHROPIC_API_KEY` |
+| `claude-code-oauth-token` | No | `claude-code-cli` | Long-lived OAuth token (`claude setup-token`). Maps to `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cursor-api-key` | No | `cursor-cli` | Cursor API key. Maps to `CURSOR_API_KEY` |
 
 Pass only the secret for your chosen engine. Do **not** use `secrets: inherit`.
@@ -309,7 +309,7 @@ Workflow/runtime variables that affect config resolution (not set in `prevue.yml
 | `PREVUE_MODEL` | Optional | — | Review engine model; `COPILOT_MODEL` is the Copilot adapter fallback |
 | `COPILOT_MODEL` | Optional | — | Copilot-specific model override; superseded by `PREVUE_MODEL` if both set |
 | `COPILOT_GITHUB_TOKEN` | Engine-dependent | — | Fine-grained PAT (`github_pat_…`) for `copilot-cli` |
-| `ANTHROPIC_API_KEY` | Engine-dependent | — | API key for `claude-code-cli` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Engine-dependent | — | OAuth token for `claude-code-cli` (`claude setup-token`) |
 | `CURSOR_API_KEY` | Engine-dependent | — | API key for `cursor-cli` |
 
 ## Validation

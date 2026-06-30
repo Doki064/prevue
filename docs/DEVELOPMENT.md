@@ -300,7 +300,7 @@ Engines implement the `EngineAdapter` port in `src/prevue/engines/base.py`. The 
    }
    ```
 
-   If the adapter is not yet functional, add its name to `SKELETON_ENGINES` (same as `gemini-cli`) so `require_functional_adapter()` rejects it at review time with a clear error.
+   If the adapter is not yet functional, set `functional=False` on its `CliEngineSpec` (same as `antigravity-cli`) so `require_functional_adapter()` rejects it at review time with a clear error.
 
 3. **Wire CLI install** — add a `case` branch in `.github/scripts/install-engine-cli.sh` with a **pinned** package version:
 
@@ -424,7 +424,7 @@ There is no local CLI shortcut that replaces the full Actions environment. To ru
 
    ```bash
    export GITHUB_TOKEN="github_pat_..."     # read PR data + post comments
-   export COPILOT_GITHUB_TOKEN="github_pat_..."  # or ANTHROPIC_API_KEY / CURSOR_API_KEY
+   export COPILOT_GITHUB_TOKEN="github_pat_..."  # or CLAUDE_CODE_OAUTH_TOKEN / CURSOR_API_KEY
    export PREVUE_ENGINE="copilot-cli"        # or claude-code-cli, cursor-cli
    export GITHUB_REPOSITORY="owner/repo"
    export GITHUB_EVENT_PATH="/path/to/event.json"   # pull_request event payload

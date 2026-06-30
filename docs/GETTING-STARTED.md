@@ -21,7 +21,7 @@ Pick one engine. You only need the secret for the engine you choose.
 | Engine | Workflow input | Secret name | How to get it |
 |--------|---------------|-------------|---------------|
 | `copilot-cli` (default) | `engine: copilot-cli` | `COPILOT_GITHUB_TOKEN` | Fine-grained user-owned PAT with **Copilot Requests** permission (prefix `github_pat_`) — not the Actions `GITHUB_TOKEN` |
-| `claude-code-cli` | `engine: claude-code-cli` | `ANTHROPIC_API_KEY` | Anthropic API key |
+| `claude-code-cli` | `engine: claude-code-cli` | `CLAUDE_CODE_OAUTH_TOKEN` | Long-lived token from `claude setup-token` |
 | `cursor-cli` | `engine: cursor-cli` | `CURSOR_API_KEY` | Cursor API key |
 
 ## Step 1 — Add the caller workflow
@@ -66,7 +66,7 @@ jobs:
     with:
       engine: claude-code-cli
     secrets:
-      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+      claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
 
 ## Step 2 — Add the secret to your repository
@@ -76,7 +76,7 @@ Go to **Settings → Secrets and variables → Actions → New repository secret
 | Engine | Secret name |
 |--------|-------------|
 | `copilot-cli` | `COPILOT_GITHUB_TOKEN` |
-| `claude-code-cli` | `ANTHROPIC_API_KEY` |
+| `claude-code-cli` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cursor-cli` | `CURSOR_API_KEY` |
 
 The secret name in your repository settings must match the name in the `secrets:` block of your caller workflow exactly.
