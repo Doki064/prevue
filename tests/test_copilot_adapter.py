@@ -218,6 +218,25 @@ class TestFailurePaths:
         assert VALID_TOKEN not in str(exc_info.value)
         assert len(str(exc_info.value)) < len(long_stderr)
 
+    def test_nonzero_exit_includes_stdout_in_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _fail(*_args, **_kwargs):
+            return SimpleNamespace(returncode=1, stdout="engine error: bad request", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fail)
+        adapter = CopilotCliAdapter()
+        with pytest.raises(EngineFailure, match="engine error: bad request"):
+            adapter.review(_sample_request())
+
+    def test_nonzero_exit_redacts_token_from_stdout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _fail(*_args, **_kwargs):
+            return SimpleNamespace(returncode=1, stdout=f"leaked: {VALID_TOKEN}", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fail)
+        adapter = CopilotCliAdapter()
+        with pytest.raises(EngineFailure) as exc_info:
+            adapter.review(_sample_request())
+        assert VALID_TOKEN not in str(exc_info.value)
+
     def test_empty_stdout_raises_engine_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def _empty(*_args, **_kwargs):
             return SimpleNamespace(returncode=0, stdout="   ", stderr="")
