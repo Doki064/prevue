@@ -1,72 +1,79 @@
 ---
 phase: 10-boundary-contracts
-fixed_at: 2026-06-29T00:00:00Z
+fixed_at: 2026-06-30T10:30:00Z
 review_path: .planning/phases/10-boundary-contracts/10-REVIEW.md
 iteration: 3
-findings_in_scope: 5
-fixed: 5
+findings_in_scope: 1
+fixed: 1
 skipped: 0
 status: all_fixed
 ---
 
 # Phase 10: Code Review Fix Report
 
-**Fixed at:** 2026-06-29T00:00:00Z
+**Fixed at:** 2026-06-30T10:30:00Z
 **Source review:** .planning/phases/10-boundary-contracts/10-REVIEW.md
 **Iteration:** 3
 
 **Summary:**
-- Findings in scope: 5 (2 Critical + 3 Warning; Info excluded by fix_scope=critical_warning)
-- Fixed: 5
+- Findings in scope: 1 (fix_scope: critical_warning — CR-01 only; REVIEW.md reports 0
+  Warning findings, and IN-01/IN-02/IN-03 are Info-tier, out of scope)
+- Fixed: 1
 - Skipped: 0
 
 ## Fixed Issues
 
-### CR-01: Antigravity CLI always receives literal `$_AGY_PROMPT` instead of the review prompt
+### CR-01: `_parse_copilot_otel` crashes with uncaught `AttributeError` on non-dict-shaped OTEL JSONL records, violating the documented T-10-07 graceful-degradation contract
 
-**Files modified:** `src/prevue/engines/cli_adapter.py`
-**Commit:** 2bdab92
-**Applied fix:** Replaced the single loop `" ".join(shlex.quote(p) for p in inner_parts)` (which quoted `"$_AGY_PROMPT"` into `'$_AGY_PROMPT'`, suppressing shell expansion) with a two-step approach: shell-quote only the non-variable parts (`inner_parts_to_quote`) and concatenate `" $_AGY_PROMPT"` unquoted at the end. The env-var reference now reaches `bash -c` as a bare token, so the shell expands it to the actual prompt text before passing it to `agy`.
-
----
-
-### CR-02: Consumer `engine.pricing` override (D-06c) is parsed but never applied
-
-**Files modified:** `src/prevue/engines/flow.py`, `src/prevue/engines/cli_adapter.py`, `src/prevue/review.py`
-**Commit:** 8c6f903
+**Files modified:** `src/prevue/engines/usage.py`, `tests/test_usage_capture.py`
+**Commit:** `ee60605` (made on temp branch `gsd-reviewfix/10-19890`, fast-forwarded into `gsd/phase-10-boundary-contracts`)
 **Applied fix:**
-1. Added `pricing_override: dict | None = None` parameter to `review_with_retry` in `flow.py`.
-2. Threaded `pricing_override` into both `compute_cost()` calls (first invocation and retry) replacing the hard-coded `override=None`.
-3. Added `_pricing_override: dict | None = None` field and `set_pricing_override()` method to `CliEngineAdapter`, analogous to `set_raw_args()`.
-4. Passed `pricing_override=self._pricing_override` into the `flow.review_with_retry()` call in `CliEngineAdapter.review()`.
-5. In `review.py`, added a block after the existing `set_raw_args` injection that calls `engine.set_pricing_override(config.engine_config.pricing)` when the adapter supports it, sourcing the dict from the base-ref-gated `load_config` read.
+
+`_parse_copilot_otel` decoded each JSONL line with `json.loads()` (wrapped in
+`except (json.JSONDecodeError, ValueError)`) but then called `.get()` on the decoded
+value, and on each nested `resourceSpans`/`scopeSpans`/`spans` element, without
+verifying dict-ness. A JSON-decodable-but-wrong-shaped line (e.g. a bare array, or a
+non-dict element inside `resourceSpans`) raised an uncaught `AttributeError` that
+propagated out of `capture_usage()` and crashed the whole review run, instead of
+degrading to the documented bytes/4 fallback.
+
+Read the actual source at the cited line range (188-217) and confirmed it matched the
+review's description exactly — no drift. Added `isinstance(..., dict)` guards at all
+four nesting levels (the top-level decoded record, each `resourceSpans` element, each
+`scopeSpans` element, each `spans` element), plus an `isinstance(a, dict)` guard on the
+attribute-list comprehension, per the fix suggested in REVIEW.md. Non-dict values at
+any level now `continue` to the next line/element (same degrade-don't-crash behavior
+as a JSON decode failure) rather than raising.
+
+Verified both repros from REVIEW.md no longer raise and instead return a zeroed
+usage dict (`{"input": 0, "output": 0, "cache_read": 0, "estimated": False}`):
+- A JSONL line that decodes to a bare list (`[1, 2, 3]`)
+- A JSONL line decoding to `{"resourceSpans": ["not-a-dict"]}`
+
+Added two regression tests to `tests/test_usage_capture.py`:
+- `test_copilot_otel_non_dict_top_level_line_skipped` — non-dict top-level decoded line
+- `test_copilot_otel_non_dict_resource_span_element_skipped` — non-dict `resourceSpans`
+  element
+
+**Verification:**
+- Tier 1: re-read modified sections in both files, fix text present, surrounding code
+  intact.
+- Tier 2: `python3 -c "import ast; ast.parse(...)"` passed for both files.
+- Full suite: `uv run pytest -q` → **802 passed** (800 baseline + 2 new regression
+  tests, no regressions).
+- `uv run ruff check .` → `All checks passed!`
+- `uv run ruff format --check .` → `105 files already formatted`
+
+## Skipped Issues
+
+None — the single in-scope finding (CR-01) was fixed.
+
+_Note: IN-01, IN-02, IN-03 are Info-tier findings, explicitly out of scope for this run
+(fix_scope: critical_warning). They remain documented in `10-REVIEW.md`, unaddressed,
+for a future `--all` pass if desired._
 
 ---
 
-### WR-01: `review.yml` (dogfood) omits `gemini-api-key` secret pass-through
-
-**Files modified:** `.github/workflows/review.yml`
-**Commit:** 4044c30
-**Applied fix:** Added `gemini-api-key: ${{ secrets.GEMINI_API_KEY }}` to the `secrets:` block of the `review` job's `uses: ./.github/workflows/prevue-review.yml` call, matching the optional secret declared in `prevue-review.yml`.
-
----
-
-### WR-02: `emit_machine_output` writes result file without warning when `PREVUE_RESULT_FILE` is unset under Actions
-
-**Files modified:** `src/prevue/review.py`
-**Commit:** 9f4248e
-**Applied fix:** Added a diagnostic `print(..., file=sys.stderr)` inside `emit_machine_output` that fires when `GITHUB_ACTIONS` is set and `PREVUE_RESULT_FILE` is not set (and no `output_file` kwarg was injected). The warning makes the default CWD fallback explicit so misconfigured step environments are immediately visible in the workflow log.
-
----
-
-### WR-03: `EngineConfig.raw_args` validator does not reject non-string list elements
-
-**Files modified:** `src/prevue/config.py`
-**Commit:** f647fbe
-**Applied fix:** Extended `_validate_raw_args` to iterate over list elements and raise `ValueError` for any element that is not a `str` (e.g., `None`, `int`). Added an inline docstring explaining that Pydantic v2 would otherwise silently coerce those values to strings, producing invalid CLI flags with no error.
-
----
-
-_Fixed: 2026-06-29T00:00:00Z_
+_Fixed: 2026-06-30T10:30:00Z_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 3_
