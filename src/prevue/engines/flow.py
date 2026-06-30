@@ -17,26 +17,66 @@ if TYPE_CHECKING:
     from prevue.engines.spec import CliEngineSpec
 
 
+def _estimated_cost_usd(
+    input_tokens: int,
+    output_tokens: int,
+    spec: CliEngineSpec | None,
+    model_label: str | None,
+    pricing_override: dict | None,
+) -> float | None:
+    """Best-effort ~est cost for engines with no real usage capture (T-07 — 10-THERMOS).
+
+    cursor-cli / antigravity-cli (``usage_capture == "none"``) never return a
+    real ``captured`` dict, so cost_usd was never computed for them — tokens
+    showed in the sticky comment but cost silently didn't, an inconsistent UX.
+    Feeds the bytes/4 estimate split (prompt ≈ input, stdout ≈ output) into the
+    same ``compute_cost`` pricing table used for real captures; the caller
+    labels the result ``~est`` via the existing ``estimated`` flag.
+
+    Returns None when spec/model are unknown or the model has no pricing row
+    (same "unknown model → no cost" contract as ``compute_cost``).
+    """
+    if spec is None or not model_label or model_label == "default":
+        return None
+    from prevue.pricing import compute_cost
+
+    return compute_cost(
+        spec.name,
+        model_label,
+        {"input": input_tokens, "output": output_tokens},
+        override=pricing_override,
+    )
+
+
 def _token_meta(
     prompt: str,
     stdout: str = "",
     captured: dict[str, Any] | None = None,
+    *,
+    spec: CliEngineSpec | None = None,
+    model_label: str | None = None,
+    pricing_override: dict | None = None,
 ) -> dict[str, int | bool]:
     """Build the token-meta dict for a single-invocation (no retry) flow.
 
     When *captured* is provided (from capture_usage), the real token counts are
     embedded and ``estimated`` is taken from the capture.  When None, falls back
-    to bytes/4 with ``estimated=True`` (labeled fallback — D-04).
+    to bytes/4 with ``estimated=True`` (labeled fallback — D-04); T-07 also
+    attaches a best-effort ``~est`` cost_usd via _estimated_cost_usd when
+    *spec*/*model_label* are known (e.g. cursor-cli, antigravity-cli).
     """
-    review_tokens = estimate_tokens(prompt) + estimate_tokens(stdout)
+    prompt_tokens = estimate_tokens(prompt)
+    stdout_tokens = estimate_tokens(stdout)
+    review_tokens = prompt_tokens + stdout_tokens
     if captured is not None:
         meta: dict[str, Any] = {"review": review_tokens}
         meta.update(_pick_real_token_fields(captured))
         return meta
-    return {
-        "review": review_tokens,
-        "estimated": True,
-    }
+    meta = {"review": review_tokens, "estimated": True}
+    cost = _estimated_cost_usd(prompt_tokens, stdout_tokens, spec, model_label, pricing_override)
+    if cost is not None:
+        meta["cost_usd"] = cost
+    return meta
 
 
 def _retry_token_meta(
@@ -46,18 +86,21 @@ def _retry_token_meta(
     retry_stdout: str,
     captured: dict[str, Any] | None = None,
     captured_retry: dict[str, Any] | None = None,
+    *,
+    spec: CliEngineSpec | None = None,
+    model_label: str | None = None,
+    pricing_override: dict | None = None,
 ) -> dict[str, int | bool]:
     """Sum both invocations without double-counting the embedded original prompt.
 
     When capture dicts are provided, real token counts are used; otherwise the
-    bytes/4 fallback applies (``estimated=True``).  Per-engine flag — not global.
+    bytes/4 fallback applies (``estimated=True``); T-07 also attaches a
+    best-effort ``~est`` cost_usd when *spec*/*model_label* are known.
+    Per-engine flag — not global.
     """
-    review_tokens = (
-        estimate_tokens(prompt)
-        + estimate_tokens(first_stdout)
-        + estimate_tokens(retry_prompt)
-        + estimate_tokens(retry_stdout)
-    )
+    prompt_tokens = estimate_tokens(prompt) + estimate_tokens(retry_prompt)
+    output_tokens = estimate_tokens(first_stdout) + estimate_tokens(retry_stdout)
+    review_tokens = prompt_tokens + output_tokens
     # T-04 (10-THERMOS): sum both invocations' real captures instead of picking
     # one — `captured_retry or captured` previously discarded the first call's
     # real input/output/cache/cost when both invocations succeeded, silently
@@ -66,10 +109,11 @@ def _retry_token_meta(
         meta: dict[str, Any] = {"review": review_tokens}
         meta.update(_sum_real_token_fields(captured, captured_retry))
         return meta
-    return {
-        "review": review_tokens,
-        "estimated": True,
-    }
+    meta = {"review": review_tokens, "estimated": True}
+    cost = _estimated_cost_usd(prompt_tokens, output_tokens, spec, model_label, pricing_override)
+    if cost is not None:
+        meta["cost_usd"] = cost
+    return meta
 
 
 def _pick_real_token_fields(captured: dict[str, Any]) -> dict[str, Any]:
@@ -210,7 +254,14 @@ def review_with_retry(
                 start,
                 retried=False,
                 model_label=model_label,
-                tokens=_token_meta(prompt, first_stdout, captured),
+                tokens=_token_meta(
+                    prompt,
+                    first_stdout,
+                    captured,
+                    spec=spec,
+                    model_label=model_label,
+                    pricing_override=pricing_override,
+                ),
             )
 
         retried = True
@@ -225,7 +276,16 @@ def review_with_retry(
                 start,
                 retried=True,
                 model_label=model_label,
-                tokens=_retry_token_meta(prompt, retry_prompt, first_stdout, "", captured),
+                tokens=_retry_token_meta(
+                    prompt,
+                    retry_prompt,
+                    first_stdout,
+                    "",
+                    captured,
+                    spec=spec,
+                    model_label=model_label,
+                    pricing_override=pricing_override,
+                ),
             )
 
         # Capture usage for retry invocation too
@@ -259,20 +319,43 @@ def review_with_retry(
                 retried=True,
                 model_label=model_label,
                 tokens=_retry_token_meta(
-                    prompt, retry_prompt, first_stdout, retry_stdout, captured, captured_retry
+                    prompt,
+                    retry_prompt,
+                    first_stdout,
+                    retry_stdout,
+                    captured,
+                    captured_retry,
+                    spec=spec,
+                    model_label=model_label,
+                    pricing_override=pricing_override,
                 ),
             )
 
         def _tokens() -> dict[str, int | bool]:
             return _retry_token_meta(
-                prompt, retry_prompt, first_stdout, retry_stdout, captured, captured_retry
+                prompt,
+                retry_prompt,
+                first_stdout,
+                retry_stdout,
+                captured,
+                captured_retry,
+                spec=spec,
+                model_label=model_label,
+                pricing_override=pricing_override,
             )
 
     else:
         retry_stdout = ""
 
         def _tokens() -> dict[str, int | bool]:
-            return _token_meta(prompt, first_stdout, captured)
+            return _token_meta(
+                prompt,
+                first_stdout,
+                captured,
+                spec=spec,
+                model_label=model_label,
+                pricing_override=pricing_override,
+            )
 
     valid, dropped = validate_findings(payload or [])
     if payload and not valid:
