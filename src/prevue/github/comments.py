@@ -868,8 +868,19 @@ def post_inline_review(
         prior_comments = existing.get(key, [])
         if prior_comments:
             prior = prior_comments[0]
-            # Update on any content change, not just severity change
-            if prior.body != body:
+            prior_title = _parse_title_from_inline_body(prior.body or "")
+            same_fingerprint = prior_title is not None and fingerprint(
+                finding.path, prior_title
+            ) == fingerprint(finding.path, finding.title)
+            if same_fingerprint:
+                # Same logical finding re-emitted: refresh on any content change
+                # (CR-03 intent — e.g. suggestion/body text edits for the SAME finding).
+                if prior.body != body:
+                    to_update.append((prior, body, finding))
+            elif _inline_severity_changed(prior.body or "", finding.severity):
+                # Rephrase-at-same-line (D-06): different fingerprint, same location.
+                # Only refresh on severity escalation/de-escalation; otherwise leave
+                # the live comment alone so sticky and inline stay consistent.
                 to_update.append((prior, body, finding))
             if len(prior_comments) > 1:
                 to_delete.extend(prior_comments[1:])
