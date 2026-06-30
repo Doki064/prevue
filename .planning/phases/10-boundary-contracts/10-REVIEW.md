@@ -1,6 +1,6 @@
 ---
 phase: 10-boundary-contracts
-reviewed: 2026-06-30T00:00:00Z
+reviewed: 2026-06-30T12:00:00Z
 depth: standard
 files_reviewed: 31
 files_reviewed_list:
@@ -42,219 +42,229 @@ files_reviewed_list:
   - tests/test_usage_capture.py
 findings:
   critical: 1
-  warning: 2
-  info: 2
-  total: 5
+  warning: 0
+  info: 3
+  total: 4
 status: issues_found
 ---
 
 # Phase 10: Code Review Report
 
-**Reviewed:** 2026-06-30T00:00:00Z
+**Reviewed:** 2026-06-30T12:00:00Z
 **Depth:** standard
 **Files Reviewed:** 31
 **Status:** issues_found
 
 ## Summary
 
-Re-verified all 5 findings from the prior review cycle (CR-01 antigravity
-`$_AGY_PROMPT` quoting, CR-02 pricing_override threading, WR-01 missing `gemini-api-key`
-secret, WR-02 stderr warning for unset `PREVUE_RESULT_FILE`, WR-03 raw_args non-string
-validation). All five hold up under direct testing: the antigravity shell-quoting fix was
-verified with a live injection attempt against a mock `agy` binary (no command
-substitution executes, prompt delivered as a literal argument); `EngineConfig.raw_args`
-was verified at runtime to reject `None`/int list elements with `ValidationError`;
-`pricing_override` is now threaded end-to-end from `config.engine_config.pricing` through
-`CliEngineAdapter.set_pricing_override` into both `compute_cost` call sites in `flow.py`;
-the dogfood `review.yml` now forwards `gemini-api-key`; and `emit_machine_output` now warns
-to stderr when `PREVUE_RESULT_FILE` is unset under Actions.
+Iteration 3 final pass. First, independently re-verified (not trusted from the fix
+report) that the iteration-2 CR-01 lint/format regression is actually resolved:
+`uv run ruff check .` reports `All checks passed!`, `uv run ruff format --check .`
+reports `105 files already formatted`, and `uv run pytest -q` is green at `800 passed`.
+All three gates are clean on the current tree — this is a genuine fix, confirmed by
+direct command execution, not by reading the diff.
 
-A fresh full-suite run (`uv run pytest -q`) surfaced one currently-failing test that is a
-genuine new regression, not a stale/pre-existing failure: commit `85c97fe` ("CR-03 refresh
-inline comment body on any content change", itself part of this review cycle's fix batch)
-replaced the severity-gated inline-comment update check in `post_inline_review` with an
-unconditional body-diff comparison. That silently breaks the documented D-06
-"rephrase-at-same-line" contract that `review.py`'s `_open_set_findings` depends on to keep
-the sticky summary table and the live GitHub inline comment in sync. This is a BLOCKER —
-the suite is red (1 failed, 799 passed) and the underlying behavior is a real correctness
-bug, not just a stale test assertion. Two WARNING-level robustness/clarity gaps and two
-INFO-level quality notes round out the rest of the pass; no new security issues were found
-beyond what the prior cycle already remediated.
+With the lint/test gates clean, this iteration did a fresh adversarial pass across the
+full 31-file scope rather than re-checking only the files iteration 2 touched. That pass
+surfaced one new, previously-undetected **BLOCKER**: `usage._parse_copilot_otel`
+(`src/prevue/engines/usage.py`) violates its own documented T-10-07 contract
+("all JSON/JSONL parsing is wrapped in try/except — any parse error returns None").
+The function only catches `json.JSONDecodeError`/`ValueError` around `json.loads(line)`
+and `OSError` around file I/O, but does not validate that the *decoded* JSON value is a
+dict before calling `.get()` on it at four separate nesting levels (the JSONL record
+itself, each `resourceSpans` element, each `scopeSpans` element, each `spans` element).
+A structurally-valid-but-wrong-shaped JSON line (e.g. a bare array, string, or number —
+plausible from a truncated write, a future Copilot OTEL exporter format change, or
+corrupted OTEL export content) raises an uncaught `AttributeError` that propagates out of
+`capture_usage` and crashes the entire review run, rather than degrading gracefully to
+the bytes/4 estimate as documented and as every other malformed-input path in this module
+does. This was reproduced directly (not just read) with two independent minimal repros
+below. No existing test in `test_usage_capture.py` exercises a non-dict-shaped decoded
+JSONL line, so the gap evaded both the test suite and the prior two review iterations.
+
+Three Info-tier items remain: two carried-forward items the user flagged as known and out
+of fix-scope (`_sanitize_stderr` private alias in `copilot_cli.py`/`errors.py`;
+`update-pricing.yml`'s pricing spot-check assumes dict-shaped model entries — same
+root-cause class as the new CR-01 finding, just in a different file/context and lower
+severity since it only affects a human-reviewed scheduled bump PR, not the live review
+path), plus one new Info item: the WR-01 raw_args exhaustive scalar-rejection fix has no
+committed regression test — its correctness was verified by ad hoc `uv run python` repros
+across iter2/iter3/this pass, not by a test that prevents future regression.
 
 ## Critical Issues
 
-### CR-01: `post_inline_review` violates the documented D-06 rephrase-at-same-line contract, breaking `test_rephrase_at_same_line_keeps_inline_unchanged`
+### CR-01: `_parse_copilot_otel` crashes with uncaught `AttributeError` on non-dict-shaped OTEL JSONL records, violating the documented T-10-07 graceful-degradation contract
 
-**File:** `src/prevue/github/comments.py:871-873`
+**File:** `src/prevue/engines/usage.py:188-217`
 **Issue:**
 
-Commit `85c97fe` ("fix(10): CR-03 refresh inline comment body on any content change", part
-of this same review cycle) replaced:
+The module docstring (lines 20-22) and the function's own docstring (line 169) both
+state: "T-10-07 (DoS / malformed stdout): all JSON/JSONL parsing is wrapped in
+try/except — any parse error returns None (graceful fallback to bytes/4) rather than
+raising and crashing the review." The implementation only honors this for the
+`json.loads()` call itself:
 
 ```python
-if _inline_severity_changed(prior.body or "", finding.severity):
-    to_update.append((prior, body, finding))
+try:
+    record = json.loads(line)
+except (json.JSONDecodeError, ValueError):
+    # Skip malformed lines (T-10-07)
+    continue
 ```
 
-with:
+But `record`, and every nested element walked afterward, is used with `.get(...)`
+without an `isinstance(..., dict)` (or list, for the inner loops) guard:
 
 ```python
-# Update on any content change, not just severity change
-if prior.body != body:
-    to_update.append((prior, body, finding))
+for resource_span in record.get("resourceSpans", []):
+    for scope_span in resource_span.get("scopeSpans", []):
+        for span in scope_span.get("spans", []):
+            attrs = {
+                a["key"]: _extract_attr_value(a)
+                for a in span.get("attributes", [])
+                if "key" in a
+            }
 ```
 
-This makes `_inline_severity_changed` (still defined at `comments.py:322-332`, with a
-docstring explicitly describing the D-06 contract: *"keeps the existing comment as-is per
-D-06 rather than churning it unconditionally on every run"*) dead code — it is no longer
-called anywhere in `post_inline_review`.
+If a JSONL line decodes successfully but to a non-dict top-level value (e.g. `[1,2,3]`,
+`"a string"`, `42`), `record.get(...)` raises `AttributeError: '...' object has no
+attribute 'get'`. The same applies if `resourceSpans`/`scopeSpans`/`spans` contains a
+non-dict element. This `AttributeError` is not caught by the inner
+`except (json.JSONDecodeError, ValueError)` (wrong exception type) nor by the outer
+`except OSError` (also the wrong exception type — `OSError` only wraps the
+read/iteration, not the per-line `.get()` chain). The crash propagates through
+`capture_usage()` → `flow.review_with_retry()` → the top-level review entrypoint,
+crashing the whole review run for what was a recoverable, documented-as-tolerated
+malformed-input case.
 
-The change directly contradicts `review.py`'s `_open_set_findings` (lines 252-302), which
-implements the "rephrase-at-same-line" rule on purpose: when a carried prior at
-`(path, line, side)` has a *different* fingerprint than the current engine finding at the
-same location (engine rephrased the title) but severity is unchanged, the **sticky**
-Findings table is built to keep showing the OLD (prior) title — by design, so the sticky
-table and the live inline GitHub PR comment stay consistent (see the long comment at
-`review.py:251-259` and `review.py:285-297`). With the current `comments.py` code,
-`post_inline_review` now overwrites the live inline comment body with the **new**
-rephrased title on every run, even though the sticky table still shows the old title for
-that same finding. The two surfaces silently diverge on every PR where an LLM engine
-produces a slightly different title for the same underlying issue across runs (a common
-occurrence with non-deterministic LLM output) — undermining the consistency guarantee the
-gate logic was specifically built to provide.
-
-This is independently confirmed by the test suite, which is **currently failing on this
-branch**:
+Reproduced directly:
 
 ```
-$ uv run pytest tests/test_comments.py::TestPostInlineReview::test_rephrase_at_same_line_keeps_inline_unchanged -q
-FAILED tests/test_comments.py::TestPostInlineReview::test_rephrase_at_same_line_keeps_inline_unchanged
-AssertionError: Expected 'edit' to not have been called. Called 1 times.
+>>> from prevue.engines.usage import _parse_copilot_otel
+>>> import tempfile, json
+>>> with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+...     f.write(json.dumps([1, 2, 3]) + "\n")
+...     path = f.name
+>>> _parse_copilot_otel(path)
+Traceback (most recent call last):
+  ...
+AttributeError: 'list' object has no attribute 'get'
 ```
 
-`uv run pytest -q` across the whole repo shows exactly this 1 failure (799 passed, 1
-failed) — not a pre-existing/unrelated failure.
+```
+>>> with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
+...     f.write(json.dumps({"resourceSpans": ["not-a-dict"]}) + "\n")
+...     path = f.name
+>>> _parse_copilot_otel(path)
+Traceback (most recent call last):
+  ...
+AttributeError: 'str' object has no attribute 'get'
+```
 
-**Fix:** Restore the severity-gated update check so D-06 rephrase-at-same-line is honored,
-while still fixing the original CR-03 problem (a pure severity-string comparison missed
-legitimate body-only refreshes for the *same* fingerprint, e.g. suggestion-text edits). The
-correct fix is to gate on whether the new finding's fingerprint matches what the prior
-comment encodes, not merely on raw body bytes:
+No test in `tests/test_usage_capture.py` exercises a non-dict-decoded JSONL line at any
+of the four nesting levels — only `json.JSONDecodeError`-triggering malformed JSON
+(line 195's path) and the well-formed fixture (`test_copilot_otel`) are covered, so this
+gap was never caught by CI.
+
+**Fix:** Guard each `.get()` call with an `isinstance` check (or wrap the per-line body
+in a broader `try/except (AttributeError, TypeError)` consistent with the function's
+documented degrade-on-any-parse-error contract):
 
 ```python
-from prevue.fingerprint import fingerprint
+try:
+    record = json.loads(line)
+except (json.JSONDecodeError, ValueError):
+    continue
+if not isinstance(record, dict):
+    continue  # T-10-07: non-dict JSON line — skip, don't crash
 
-for finding in gate.inline:
-    body = render_inline_comment(finding)
-    key = inline_location_key(finding.path, finding.line, finding.side)
-    prior_comments = existing.get(key, [])
-    if prior_comments:
-        prior = prior_comments[0]
-        prior_title = _parse_title_from_inline_body(prior.body or "")
-        same_fingerprint = (
-            prior_title is not None
-            and fingerprint(finding.path, prior_title) == fingerprint(finding.path, finding.title)
-        )
-        if same_fingerprint:
-            # Same logical finding re-emitted: refresh on any content change (CR-03
-            # intent — e.g. suggestion/body text edits for the SAME finding).
-            if prior.body != body:
-                to_update.append((prior, body, finding))
-        elif _inline_severity_changed(prior.body or "", finding.severity):
-            # Rephrase-at-same-line (D-06): different fingerprint, same location.
-            # Only refresh on severity escalation/de-escalation; otherwise leave the
-            # live comment alone so sticky and inline stay consistent.
-            to_update.append((prior, body, finding))
-        if len(prior_comments) > 1:
-            to_delete.extend(prior_comments[1:])
+for resource_span in record.get("resourceSpans", []):
+    if not isinstance(resource_span, dict):
         continue
-    to_create.append({...})
+    for scope_span in resource_span.get("scopeSpans", []):
+        if not isinstance(scope_span, dict):
+            continue
+        for span in scope_span.get("spans", []):
+            if not isinstance(span, dict):
+                continue
+            attrs = {
+                a["key"]: _extract_attr_value(a)
+                for a in span.get("attributes", [])
+                if isinstance(a, dict) and "key" in a
+            }
+            try:
+                total_input += int(attrs.get(_OTEL_PROMPT_TOKENS) or 0)
+                total_output += int(attrs.get(_OTEL_COMPLETION_TOKENS) or 0)
+                total_cache_read += int(attrs.get(_OTEL_CACHE_READ_TOKENS) or 0)
+            except (TypeError, ValueError):
+                continue
 ```
 
-At minimum, re-run `uv run pytest tests/test_comments.py -q` and confirm
-`test_rephrase_at_same_line_keeps_inline_unchanged` passes alongside the rest of
-`TestPostInlineReview` before merging.
-
-## Warnings
-
-### WR-01: `_validate_raw_args` falls through silently for non-list, non-string scalar types
-
-**File:** `src/prevue/config.py:126-146`
-**Issue:** The validator correctly rejects a bare string and rejects a list containing
-non-string elements (the WR-03 fix from the prior cycle, re-verified working in this pass).
-However, if `engine.raw_args` in `prevue.yml` is some other scalar type — e.g. an int,
-float, bool, or a nested dict — none of the `isinstance(value, str)` /
-`isinstance(value, list)` branches match, and the function falls through to `return value`
-unchanged at line 146. Pydantic then attempts to coerce that value against the outer
-`list[str]` field type, which does raise (Pydantic v2 doesn't silently coerce `42` into a
-list), so the request still fails — but with a generic Pydantic type-mismatch message
-rather than the clean, actionable D-10 error the rest of the validator produces for the
-str/list-of-non-str cases.
-**Fix:** Make the validator exhaustive — reject anything that is not a `list` explicitly:
-
-```python
-@field_validator("raw_args", mode="before")
-@classmethod
-def _validate_raw_args(cls, value: object) -> list[str]:
-    if isinstance(value, str):
-        raise ValueError(
-            "engine.raw_args must be a list of strings (D-10: no shell string allowed). "
-            f"Got str: {value!r}"
-        )
-    if not isinstance(value, list):
-        raise ValueError(
-            f"engine.raw_args must be a list of strings, got {type(value).__name__!r}: {value!r}"
-        )
-    for i, item in enumerate(value):
-        if not isinstance(item, str):
-            raise ValueError(
-                f"engine.raw_args[{i}] must be a string, got {type(item).__name__!r}: {item!r}"
-            )
-    return value
-```
-
-### WR-02: `_resolve_fence_source` independently re-parses the Claude JSON envelope that `capture_usage` already parsed
-
-**File:** `src/prevue/engines/flow.py:166, 266-288` and `src/prevue/engines/usage.py:77-130`
-**Issue:** For `stdout-json` engines, `review_with_retry` calls `capture_usage(spec,
-raw_stdout, ...)` (which internally does `json.loads(stdout)` inside
-`_parse_stdout_json`), then immediately calls `_resolve_fence_source(spec, raw_stdout)`,
-which performs its own *second*, independent parse of the same string via
-`__import__("json").loads(raw_stdout)`. The two parsers also diverge slightly in
-philosophy: `_parse_stdout_json` returns `None` whenever `usage` is missing or not a
-dict, even if `result` parsed fine, while `_resolve_fence_source` ignores `usage`
-entirely and only cares about `result`. That divergence is actually the desired behavior
-today (fence extraction should not depend on usage metadata being present), so this is not
-a live correctness bug — but the duplicated JSON-parsing logic, living in two different
-modules with two different error-handling styles (one uses `except (json.JSONDecodeError,
-ValueError)`, the other uses a bare `except (ValueError, AttributeError)` around a
-dynamically imported `json` module), is a maintenance hazard: a future tightening or
-loosening of one parser's tolerance could silently desync the two paths without any test
-catching it, since both currently happen to agree on all known fixtures.
-**Fix:** Factor a single `_parse_envelope(stdout: str) -> dict | None` helper (returning
-the raw parsed dict, or `None` on any parse failure) shared by both
-`usage._parse_stdout_json` and `flow._resolve_fence_source`, so there is exactly one
-JSON-parsing code path for the Claude envelope format. Also replace the dynamic
-`__import__("json")` in `_resolve_fence_source` with a normal top-level `import json` in
-`flow.py` — there is no functional reason to defer that import, and it makes the function
-harder to read for no benefit.
+Add regression tests covering: a JSONL line that decodes to a non-dict top-level value
+(list/string/number), and a line whose `resourceSpans`/`scopeSpans`/`spans` array
+contains a non-dict element — both should return the same result as if that line were
+absent (or `None`/zero totals if it's the only line), not raise.
 
 ## Info
 
-### IN-01: `update-pricing.yml`'s pricing spot-check assumes every model entry is a dict
+### IN-01: WR-01 exhaustive `raw_args` scalar rejection has no committed regression test
+
+**File:** `tests/test_raw_args.py`
+**Issue:** `EngineConfig._validate_raw_args` (config.py:126-152) rejects non-list,
+non-str scalars (`int`, `float`, `bool`, `dict`, `None`) passed as `raw_args`, per the
+WR-01 fix from iteration 2 (commit `5e0994e`). This behavior has been manually verified
+correct across at least three review iterations via ad hoc `uv run python` REPL checks
+(including this one), but `test_raw_args.py` only tests the string-rejection and
+list-of-strings-acceptance paths — there is no `pytest.mark.parametrize` over
+`(42, 3.14, True, {"a": 1}, None)` asserting each raises `ValidationError`. A future
+refactor of `_validate_raw_args` could silently regress this path (e.g. accidentally
+returning early before the per-item loop) with no test catching it.
+**Fix:**
+```python
+@pytest.mark.parametrize("bad_value", [42, 3.14, True, {"a": 1}, None])
+def test_raw_args_non_list_scalar_rejected(bad_value) -> None:
+    _require_engine_config()
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        EngineConfig(name="copilot-cli", raw_args=bad_value)  # type: ignore[misc]
+
+
+def test_raw_args_non_string_element_rejected() -> None:
+    _require_engine_config()
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match=r"raw_args\[1\]"):
+        EngineConfig(name="copilot-cli", raw_args=["--flag", 42])  # type: ignore[misc]
+```
+
+### IN-02: `_sanitize_stderr` private alias exists only for back-compat import
+
+**File:** `src/prevue/engines/copilot_cli.py:42`, `src/prevue/engines/errors.py:28`
+**Issue:** `_sanitize_stderr = sanitize_stderr` is a module-level alias whose only
+purpose, per the docstring, is so `test_copilot_adapter.py` can `import _sanitize_stderr`
+directly. The public name `sanitize_stderr` already exists and is the canonical symbol;
+the underscore-prefixed alias is dead production surface that exists solely to satisfy a
+test import path. Carried forward unaddressed across all three review iterations of this
+cycle — confirmed still present and still Info-tier (not a correctness issue, purely a
+naming/dead-surface quality note).
+**Fix:** Either update `test_copilot_adapter.py` to import `sanitize_stderr` (drop the
+alias), or, if back-compat with external consumers genuinely matters, leave as-is with a
+clearer comment that it is a permanent compatibility shim rather than transitional.
+
+### IN-03: `update-pricing.yml`'s pricing spot-check assumes every model entry is a dict
 
 **File:** `.github/workflows/update-pricing.yml:43-46`
 **Issue:** `data[model].get('input_cost_per_token', 0)` assumes every value in the
-top-level pricing JSON is itself a dict. The vendored `model_prices.json` already contains
-at least one non-model entry in the current snapshot (`"sample_spec"`), so the upstream
-schema is not guaranteed to be uniform across all keys. If a future LiteLLM snapshot
-changes `gpt-4o` or `claude-3-5-sonnet-20241022`'s value to a non-dict, or those exact keys
-are renamed/removed upstream (which already silently no-ops the `if model in data:` guard
-today), the workflow either silently skips the spot-check (key renamed) or throws an
-unhandled `AttributeError` traceback instead of the intended clean assertion message.
-Either way the workflow still fails closed overall (no auto-merge; D-06b requires human
-review of the resulting PR regardless), so this is informational rather than a real risk —
-a clearer failure mode would just speed up triage when the scheduled job breaks.
+top-level pricing JSON is itself a dict — the same unguarded-`.get()`-on-untyped-JSON
+pattern as CR-01 above, but in the scheduled pricing-bump workflow rather than the live
+review path, and gated by human review before merge (the PR is never auto-merged), so
+the blast radius is a workflow-step failure with a clear traceback, not a silent
+miscategorization or live-review crash. If a future LiteLLM snapshot changes the shape of
+`gpt-4o` or `claude-3-5-sonnet-20241022`'s entry to a non-dict, this throws an unhandled
+`AttributeError` instead of a clean assertion message. Carried forward unaddressed across
+all three review iterations — not touched by any of this cycle's fixes, still accurate as
+written today.
 **Fix:**
 ```python
 for model in ['gpt-4o', 'claude-3-5-sonnet-20241022']:
@@ -265,24 +275,8 @@ for model in ['gpt-4o', 'claude-3-5-sonnet-20241022']:
         assert 0 < cost < 0.01, f'Implausible input cost for {model}: {cost}'
 ```
 
-### IN-02: `EngineModels` role resolution treats an explicit empty string the same as "unset"
-
-**File:** `src/prevue/config.py:278-282`
-**Issue:** `_resolve_engine_models._role()` uses `if val:` to decide whether
-`models.<role>` overrides `engine.model`. A consumer who writes
-`engine.models.classify: ""` in `prevue.yml` (e.g. attempting to explicitly force the bare
-engine default for one role) gets silently overridden back to `engine.model` instead, with
-no warning. This matches the existing falsy-check idiom used elsewhere in the same module
-(`_resolve_model`, `_resolve_engine`), so it is consistent project style rather than an
-isolated mistake, and the practical impact is low since an empty model string is a YAML
-authoring mistake either way. Noting for awareness only — not required for this phase.
-**Fix:** Optional — if explicit "no override" support is ever wanted, distinguish `None`
-(YAML key absent) from `""` (YAML key present but empty) using `role in models_block`
-instead of truthiness on `models_block.get(role)`, or add a config-level validation error
-for an empty string model name.
-
 ---
 
-_Reviewed: 2026-06-30T00:00:00Z_
+_Reviewed: 2026-06-30T12:00:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
