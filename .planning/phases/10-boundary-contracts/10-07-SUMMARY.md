@@ -134,3 +134,11 @@ None - no external service configuration required.
 ---
 *Phase: 10-boundary-contracts*
 *Completed: 2026-06-30*
+
+## Self-Check: PASSED
+
+- FOUND: .planning/phases/10-boundary-contracts/10-07-SUMMARY.md
+- FOUND: 9f34db1 (test RED)
+- FOUND: 432d1c7 (feat GREEN)
+- FOUND: 8b45576 (fix Task 2)
+- FOUND: 919be7f (docs SUMMARY)
