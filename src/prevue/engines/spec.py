@@ -107,15 +107,17 @@ CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
         cli_label="Claude Code CLI",
         # CLAUDE_CODE_OAUTH_TOKEN: long-lived token from `claude setup-token`, for CI pipelines.
         # --bare mode blocks CLAUDE_CODE_OAUTH_TOKEN (OAuth/keychain never read in --bare),
-        # so we omit --bare here. --safe-mode is used instead: it disables the same
-        # startup-heavy machinery (CLAUDE.md, skills, plugins, hooks, MCP servers) without
-        # restricting auth to ANTHROPIC_API_KEY, so OAuth token auth still works.
+        # so we omit --bare here (T-08 / 10-THERMOS — see SECURITY.md for the tradeoff:
+        # tried --safe-mode as a "fast + OAuth-compatible" middle ground, but measured
+        # CI run showed the 283s/300s budget usage was real Claude generation time on a
+        # large diff, not --bare-vs-unflagged startup overhead — so budget was raised
+        # instead; --safe-mode added no measurable benefit and was reverted).
         # Subscription users (Pro/Max/Team/Enterprise) use this path; ANTHROPIC_API_KEY
         # is Console-only (pay-per-use API) and belongs to the future direct-API engine.
         secret_env="CLAUDE_CODE_OAUTH_TOKEN",
         auth_error=ClaudeAuthError,
         validate_secret=_validate_nonempty_secret(ClaudeAuthError, "CLAUDE_CODE_OAUTH_TOKEN"),
-        base_argv=("claude", "--safe-mode", "-p", "--output-format", "json"),
+        base_argv=("claude", "-p", "--output-format", "json"),
         prompt_delivery="stdin",
         model_flag="argv",
         model_argv_flag="--model",

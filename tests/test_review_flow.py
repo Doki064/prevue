@@ -192,7 +192,7 @@ def test_run_review_happy_path_calls_upsert_once(fake_engine) -> None:
     assert [f.path for f in req.diff.files] == [f.path for f in sample_diff.files]
     assert req.instructions.startswith(BASELINE_INSTRUCTIONS)
     assert "## Skill:" in req.instructions
-    assert req.budget_seconds == 300
+    assert req.budget_seconds == 600
 
     loaded = mock_upsert.call_args.kwargs.get("loaded_skills")
     assert loaded

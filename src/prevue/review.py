@@ -1031,7 +1031,7 @@ def run_review(
             ReviewRequest(
                 diff=group_diff,
                 instructions=instructions,  # shared instructions (full skill union)
-                budget_seconds=300,
+                budget_seconds=600,  # 10-THERMOS T-08 — see ReviewRequest.budget_seconds
                 model=_review_model_str,
                 known_issues=known_items,
                 max_known_issues=review_cfg.max_known_issues,
