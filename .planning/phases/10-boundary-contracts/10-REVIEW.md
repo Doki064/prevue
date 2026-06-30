@@ -1,13 +1,15 @@
 ---
 phase: 10-boundary-contracts
-reviewed: 2026-06-30T12:00:00Z
+reviewed: 2026-06-30T11:51:13Z
 depth: standard
-files_reviewed: 31
+files_reviewed: 39
 files_reviewed_list:
   - .github/scripts/install-engine-cli.sh
   - .github/workflows/prevue-review.yml
   - .github/workflows/review.yml
   - .github/workflows/update-pricing.yml
+  - SECURITY.md
+  - docs/configuration.md
   - src/prevue/config.py
   - src/prevue/engines/claude_code_cli.py
   - src/prevue/engines/cli_adapter.py
@@ -24,11 +26,13 @@ files_reviewed_list:
   - src/prevue/pricing/__init__.py
   - src/prevue/pricing/model_prices.json
   - src/prevue/review.py
+  - tests/conftest.py
   - tests/fixtures/pricing/sample_prices.json
   - tests/fixtures/usage/antigravity_text.txt
   - tests/fixtures/usage/claude_envelope.json
   - tests/fixtures/usage/copilot_otel.jsonl
   - tests/fixtures/usage/cursor_envelope.json
+  - tests/test_cli.py
   - tests/test_comments.py
   - tests/test_config_precedence.py
   - tests/test_copilot_adapter.py
@@ -40,243 +44,224 @@ files_reviewed_list:
   - tests/test_registry.py
   - tests/test_reusable_workflow_yaml.py
   - tests/test_usage_capture.py
+  - tests/test_workflow_yaml.py
 findings:
   critical: 1
-  warning: 0
-  info: 3
-  total: 4
+  warning: 3
+  info: 2
+  total: 6
 status: issues_found
 ---
 
 # Phase 10: Code Review Report
 
-**Reviewed:** 2026-06-30T12:00:00Z
+**Reviewed:** 2026-06-30T11:51:13Z
 **Depth:** standard
-**Files Reviewed:** 31
+**Files Reviewed:** 39
 **Status:** issues_found
 
 ## Summary
 
-Iteration 3 final pass. First, independently re-verified (not trusted from the fix
-report) that the iteration-2 CR-01 lint/format regression is actually resolved:
-`uv run ruff check .` reports `All checks passed!`, `uv run ruff format --check .`
-reports `105 files already formatted`, and `uv run pytest -q` is green at `800 passed`.
-All three gates are clean on the current tree — this is a genuine fix, confirmed by
-direct command execution, not by reading the diff.
+This is the fourth review iteration of phase 10 (boundary contracts), following the
+10-07 gap closure that (a) switched `cursor-cli` to `--output-format json` and routed
+it through the `stdout-json` envelope-unwrap path, and (b) flipped `antigravity-cli` to
+`functional=False`. Both of those specific changes are implemented correctly and are
+well covered by tests: `_resolve_fence_source`/`capture_usage` correctly share the
+Claude envelope parser for Cursor (`usage` block absent → graceful `None` → bytes/4
+estimate, not a crash), `require_functional_adapter` correctly blocks antigravity-cli
+from `run_review`, and the registry/contract test suites exercise both paths
+end-to-end. The full test suite (795 tests) and `ruff check` both pass clean.
 
-With the lint/test gates clean, this iteration did a fresh adversarial pass across the
-full 31-file scope rather than re-checking only the files iteration 2 touched. That pass
-surfaced one new, previously-undetected **BLOCKER**: `usage._parse_copilot_otel`
-(`src/prevue/engines/usage.py`) violates its own documented T-10-07 contract
-("all JSON/JSONL parsing is wrapped in try/except — any parse error returns None").
-The function only catches `json.JSONDecodeError`/`ValueError` around `json.loads(line)`
-and `OSError` around file I/O, but does not validate that the *decoded* JSON value is a
-dict before calling `.get()` on it at four separate nesting levels (the JSONL record
-itself, each `resourceSpans` element, each `scopeSpans` element, each `spans` element).
-A structurally-valid-but-wrong-shaped JSON line (e.g. a bare array, string, or number —
-plausible from a truncated write, a future Copilot OTEL exporter format change, or
-corrupted OTEL export content) raises an uncaught `AttributeError` that propagates out of
-`capture_usage` and crashes the entire review run, rather than degrading gracefully to
-the bytes/4 estimate as documented and as every other malformed-input path in this module
-does. This was reproduced directly (not just read) with two independent minimal repros
-below. No existing test in `test_usage_capture.py` exercises a non-dict-shaped decoded
-JSONL line, so the gap evaded both the test suite and the prior two review iterations.
-
-Three Info-tier items remain: two carried-forward items the user flagged as known and out
-of fix-scope (`_sanitize_stderr` private alias in `copilot_cli.py`/`errors.py`;
-`update-pricing.yml`'s pricing spot-check assumes dict-shaped model entries — same
-root-cause class as the new CR-01 finding, just in a different file/context and lower
-severity since it only affects a human-reviewed scheduled bump PR, not the live review
-path), plus one new Info item: the WR-01 raw_args exhaustive scalar-rejection fix has no
-committed regression test — its correctness was verified by ad hoc `uv run python` repros
-across iter2/iter3/this pass, not by a test that prevents future regression.
+The defect found in this iteration is **not** in the gap-closure code itself, but in
+documentation that the gap-closure work (and an earlier commit in the same phase,
+`4e683b5`) silently desynced from the implementation. `SECURITY.md`'s D-08 trust-boundary
+row and `docs/configuration.md`'s engine/secrets tables both describe stale CLI
+invocations and a stale secret name for `claude-code-cli`, and `SECURITY.md` additionally
+documents the pre-10-07 Cursor invocation. Because `SECURITY.md` is the canonical
+document operators are told to consult before enabling merge-gate workflows (per its own
+D-08 text and the `test_security_md_documents_d08_live_verification` test), shipping it
+with incorrect invocation strings undermines the exact pre-production verification
+process it exists to support.
 
 ## Critical Issues
 
-### CR-01: `_parse_copilot_otel` crashes with uncaught `AttributeError` on non-dict-shaped OTEL JSONL records, violating the documented T-10-07 graceful-degradation contract
+### CR-01: SECURITY.md and docs/configuration.md document a secret name that does not exist in the workflow, breaking claude-code-cli for consumers who follow the docs
 
-**File:** `src/prevue/engines/usage.py:188-217`
+**File:** `SECURITY.md:25`, `docs/configuration.md:243,277,312`
 **Issue:**
-
-The module docstring (lines 20-22) and the function's own docstring (line 169) both
-state: "T-10-07 (DoS / malformed stdout): all JSON/JSONL parsing is wrapped in
-try/except — any parse error returns None (graceful fallback to bytes/4) rather than
-raising and crashing the review." The implementation only honors this for the
-`json.loads()` call itself:
-
-```python
-try:
-    record = json.loads(line)
-except (json.JSONDecodeError, ValueError):
-    # Skip malformed lines (T-10-07)
-    continue
-```
-
-But `record`, and every nested element walked afterward, is used with `.get(...)`
-without an `isinstance(..., dict)` (or list, for the inner loops) guard:
-
-```python
-for resource_span in record.get("resourceSpans", []):
-    for scope_span in resource_span.get("scopeSpans", []):
-        for span in scope_span.get("spans", []):
-            attrs = {
-                a["key"]: _extract_attr_value(a)
-                for a in span.get("attributes", [])
-                if "key" in a
-            }
-```
-
-If a JSONL line decodes successfully but to a non-dict top-level value (e.g. `[1,2,3]`,
-`"a string"`, `42`), `record.get(...)` raises `AttributeError: '...' object has no
-attribute 'get'`. The same applies if `resourceSpans`/`scopeSpans`/`spans` contains a
-non-dict element. This `AttributeError` is not caught by the inner
-`except (json.JSONDecodeError, ValueError)` (wrong exception type) nor by the outer
-`except OSError` (also the wrong exception type — `OSError` only wraps the
-read/iteration, not the per-line `.get()` chain). The crash propagates through
-`capture_usage()` → `flow.review_with_retry()` → the top-level review entrypoint,
-crashing the whole review run for what was a recoverable, documented-as-tolerated
-malformed-input case.
-
-Reproduced directly:
+Both documents tell consumers that `claude-code-cli` requires `ANTHROPIC_API_KEY` /
+`anthropic-api-key`:
 
 ```
->>> from prevue.engines.usage import _parse_copilot_otel
->>> import tempfile, json
->>> with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-...     f.write(json.dumps([1, 2, 3]) + "\n")
-...     path = f.name
->>> _parse_copilot_otel(path)
-Traceback (most recent call last):
-  ...
-AttributeError: 'list' object has no attribute 'get'
+docs/configuration.md:243: | `claude-code-cli` | Functional | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
+docs/configuration.md:277: | `anthropic-api-key` | No | `claude-code-cli` | Anthropic API key. Maps to `ANTHROPIC_API_KEY` |
+docs/configuration.md:312: | `ANTHROPIC_API_KEY` | Engine-dependent | — | API key for `claude-code-cli` |
+SECURITY.md:25: ... Claude: `claude --bare -p --output-format text`. ...
 ```
 
+But the actual reusable workflow only declares and wires `claude-code-oauth-token` /
+`CLAUDE_CODE_OAUTH_TOKEN`:
+
 ```
->>> with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
-...     f.write(json.dumps({"resourceSpans": ["not-a-dict"]}) + "\n")
-...     path = f.name
->>> _parse_copilot_otel(path)
-Traceback (most recent call last):
-  ...
-AttributeError: 'str' object has no attribute 'get'
+.github/workflows/prevue-review.yml:33:   claude-code-oauth-token:
+.github/workflows/prevue-review.yml:142:  CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.engine == 'claude-code-cli' && secrets.claude-code-oauth-token || '' }}
 ```
 
-No test in `tests/test_usage_capture.py` exercises a non-dict-decoded JSONL line at any
-of the four nesting levels — only `json.JSONDecodeError`-triggering malformed JSON
-(line 195's path) and the well-formed fixture (`test_copilot_otel`) are covered, so this
-gap was never caught by CI.
+and `src/prevue/engines/spec.py:112` reads `secret_env="CLAUDE_CODE_OAUTH_TOKEN"`. There
+is no `anthropic-api-key` input anywhere in `prevue-review.yml`'s `workflow_call.secrets`
+block, and no `ANTHROPIC_API_KEY` env var is ever set for the review step. A consumer who
+follows the documented table and passes `secrets.anthropic-api-key: ...` to the reusable
+workflow will get a silent no-op (the unknown secret name is simply not forwarded) and
+`claude-code-cli` will always raise `ClaudeAuthError("CLAUDE_CODE_OAUTH_TOKEN is not
+set.")` at review time — a hard failure for every PR using that engine.
 
-**Fix:** Guard each `.get()` call with an `isinstance` check (or wrap the per-line body
-in a broader `try/except (AttributeError, TypeError)` consistent with the function's
-documented degrade-on-any-parse-error contract):
+This is a regression introduced within phase 10 itself: commit `4e683b5`
+("fix(10-06): replace ANTHROPIC_API_KEY with CLAUDE_CODE_OAUTH_TOKEN for claude-code-cli")
+updated the workflows, `spec.py`, `errors.py`, and 5 test files, but never touched
+`docs/configuration.md` or `SECURITY.md`. The same root-cause bug also exists in
+`.github/workflows/prevue-command-run.yml:91` (`ANTHROPIC_API_KEY: ... secrets.ANTHROPIC_API_KEY`),
+which is outside this review's explicit file list but confirms the slash-command path
+(`/prevue review`) is also broken for claude-code-cli, not just the docs.
 
-```python
-try:
-    record = json.loads(line)
-except (json.JSONDecodeError, ValueError):
-    continue
-if not isinstance(record, dict):
-    continue  # T-10-07: non-dict JSON line — skip, don't crash
+Additionally, `SECURITY.md:25`'s Claude invocation string is stale on two counts: it says
+`claude --bare -p --output-format text`, but the code (changed in the same `4e683b5`
+commit) dropped `--bare` (which blocks `CLAUDE_CODE_OAUTH_TOKEN`) and now passes
+`--output-format json` (`spec.py:115`: `base_argv=("claude", "-p", "--output-format", "json")`).
 
-for resource_span in record.get("resourceSpans", []):
-    if not isinstance(resource_span, dict):
-        continue
-    for scope_span in resource_span.get("scopeSpans", []):
-        if not isinstance(scope_span, dict):
-            continue
-        for span in scope_span.get("spans", []):
-            if not isinstance(span, dict):
-                continue
-            attrs = {
-                a["key"]: _extract_attr_value(a)
-                for a in span.get("attributes", [])
-                if isinstance(a, dict) and "key" in a
-            }
-            try:
-                total_input += int(attrs.get(_OTEL_PROMPT_TOKENS) or 0)
-                total_output += int(attrs.get(_OTEL_COMPLETION_TOKENS) or 0)
-                total_cache_read += int(attrs.get(_OTEL_CACHE_READ_TOKENS) or 0)
-            except (TypeError, ValueError):
-                continue
+**Fix:**
+Update `docs/configuration.md` (3 locations) to read `claude-code-oauth-token` /
+`CLAUDE_CODE_OAUTH_TOKEN`:
+```diff
+- | `claude-code-cli` | Functional | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
++ | `claude-code-cli` | Functional | `claude-code-oauth-token` | `CLAUDE_CODE_OAUTH_TOKEN` — long-lived token from `claude setup-token` |
+```
+```diff
+- | `anthropic-api-key` | No | `claude-code-cli` | Anthropic API key. Maps to `ANTHROPIC_API_KEY` |
++ | `claude-code-oauth-token` | No | `claude-code-cli` | Long-lived OAuth token (`claude setup-token`). Maps to `CLAUDE_CODE_OAUTH_TOKEN` |
+```
+```diff
+- | `ANTHROPIC_API_KEY` | Engine-dependent | — | API key for `claude-code-cli` |
++ | `CLAUDE_CODE_OAUTH_TOKEN` | Engine-dependent | — | OAuth token for `claude-code-cli` (`claude setup-token`) |
+```
+Update `SECURITY.md:25` to match the current invocation strings for both Claude and
+Cursor (see WR-01 below — fix together since they're in the same sentence), and fix
+`prevue-command-run.yml:90-91` to set `CLAUDE_CODE_OAUTH_TOKEN` from
+`secrets.CLAUDE_CODE_OAUTH_TOKEN` (note: this file is outside this review's explicit
+scope but shares the identical defect and should be fixed in the same pass).
+
+## Warnings
+
+### WR-01: SECURITY.md's D-08 trust-boundary row documents the pre-gap-closure Cursor invocation
+
+**File:** `SECURITY.md:25`
+**Issue:**
+The D-08 vector table row states:
+
+```
+Cursor: `cursor-agent -p --output-format text -f`.
 ```
 
-Add regression tests covering: a JSONL line that decodes to a non-dict top-level value
-(list/string/number), and a line whose `resourceSpans`/`scopeSpans`/`spans` array
-contains a non-dict element — both should return the same result as if that line were
-absent (or `None`/zero totals if it's the only line), not raise.
+But the 10-07 gap closure (commit `432d1c7`, "feat(10-07): request real cursor-cli JSON
+envelope (Gap A)") changed this to `--output-format json`
+(`src/prevue/engines/spec.py:140`: `base_argv=("cursor-agent", "-p", "--output-format", "json")`).
+This row is the canonical place SECURITY.md tells operators to verify against before a
+live D-08 tool-posture check (per its own text: "**Live engine tool-posture verify
+(D-08) is a required pre-production checkpoint** — run each adapter in a sandbox PR and
+confirm no unexpected tool calls occur"). An operator following the documented string
+would not be checking the actual flags the adapter sends.
+
+The same row also says "Gemini adapter is a v1 skeleton (not invoked)" — Gemini was
+replaced by Antigravity per D-12 (confirmed by `tests/test_registry.py::test_skeleton_engines_removed`
+and `test_antigravity_cli_is_registered_but_not_functional`), so this sentence is also
+stale and should instead describe Antigravity's `functional=False` status and the
+`script -qec` pseudo-TTY wrapper it actually uses (`cli_adapter.py:160-197`).
+
+**Fix:**
+```diff
+- Claude: `claude --bare -p --output-format text`. Cursor: `cursor-agent -p --output-format text -f`. Gemini adapter is a v1 skeleton (not invoked).
++ Claude: `claude -p --output-format json`. Cursor: `cursor-agent -p --output-format json -f`. Antigravity (`agy -p`) is registered but `functional=False` — `require_functional_adapter` rejects it before any subprocess runs; when it does run (future), invocation goes through a `script -qec` pseudo-TTY wrapper (see cli_adapter.py).
+```
+
+### WR-02: Cursor and Antigravity never get a computed cost even when bytes/4 estimation is available
+
+**File:** `src/prevue/engines/flow.py:154-168, 205-221`
+**Issue:**
+`compute_cost` is only invoked inside the `if spec is not None:` branch that follows a
+*successful* `capture_usage` call (`captured is not None`). For `cursor-cli`
+(`usage_capture="stdout-json"` but no `usage` block in its real envelope) and
+`antigravity-cli` (`usage_capture="none"`), `capture_usage` always returns `None`, so
+`captured` stays `None` and the `compute_cost` block is skipped entirely — `cost_usd`
+is never set, even though `_token_meta`'s bytes/4 `review_tokens` estimate could be fed
+into `compute_cost` to give consumers an approximate dollar figure (labeled `~est`, the
+same pattern already used for tokens). The sticky comment's `Cost:` line
+(`comments.py:551-555`) silently omits cost for these two engines while still showing
+estimated token counts, which is an inconsistent user-facing signal (tokens shown but
+cost absent, with no stated reason).
+
+This is pre-existing behavior, not introduced by the 10-07 gap closure, but the gap
+closure is exactly what made Cursor's real-world behavior (`captured=None`) permanent
+and confirmed/tested — the right moment to flag it.
+
+**Fix:**
+In `_token_meta`/`_retry_token_meta`, when `captured is None` but `model_label` is a
+real model, call `compute_cost` with the bytes/4 `review_tokens` as `input`
+(or document explicitly in the sticky output why Cursor/Antigravity cost is omitted, to
+avoid an unexplained gap between the token and cost lines).
+
+### WR-03: `docs/configuration.md`'s "Engine install versions" table omits antigravity-cli
+
+**File:** `docs/configuration.md:249-255`
+**Issue:**
+The table lists only `copilot-cli`, `claude-code-cli`, and `cursor-cli`, but
+`.github/scripts/install-engine-cli.sh:24-36` has a real, fully-implemented
+`antigravity-cli)` install case (curl-fetched installer with optional SHA-256 pin). A
+reader trying to understand what gets installed for `antigravity-cli` (e.g. to set
+`PREVUE_ANTIGRAVITY_INSTALL_SHA256`, which is correctly documented elsewhere in
+SECURITY.md) has to cross-reference the install script directly since this table is
+silent on it.
+
+**Fix:**
+Add a row:
+```diff
+| `cursor-cli` | Official shell installer (`https://cursor.com/install`) | Not version-pinned — supply-chain risk; prefer `copilot-cli` or `claude-code-cli` where pinning matters |
++| `antigravity-cli` | Official shell installer (`https://antigravity.google/cli/install.sh`) | Not version-pinned; registered but `functional=False` — install only matters for future use |
+```
 
 ## Info
 
-### IN-01: WR-01 exhaustive `raw_args` scalar rejection has no committed regression test
+### IN-01: `gemini_cli.py` filename no longer matches its content
 
-**File:** `tests/test_raw_args.py`
-**Issue:** `EngineConfig._validate_raw_args` (config.py:126-152) rejects non-list,
-non-str scalars (`int`, `float`, `bool`, `dict`, `None`) passed as `raw_args`, per the
-WR-01 fix from iteration 2 (commit `5e0994e`). This behavior has been manually verified
-correct across at least three review iterations via ad hoc `uv run python` REPL checks
-(including this one), but `test_raw_args.py` only tests the string-rejection and
-list-of-strings-acceptance paths — there is no `pytest.mark.parametrize` over
-`(42, 3.14, True, {"a": 1}, None)` asserting each raises `ValidationError`. A future
-refactor of `_validate_raw_args` could silently regress this path (e.g. accidentally
-returning early before the per-item loop) with no test catching it.
-**Fix:**
-```python
-@pytest.mark.parametrize("bad_value", [42, 3.14, True, {"a": 1}, None])
-def test_raw_args_non_list_scalar_rejected(bad_value) -> None:
-    _require_engine_config()
-    from pydantic import ValidationError
+**File:** `src/prevue/engines/gemini_cli.py:1-16`
+**Issue:**
+The module's only content is `AntigravityAuthError` re-exported "for import stability,"
+with a docstring explaining "D-12: Gemini CLI replaced by Antigravity CLI." Keeping the
+re-export for backward compatibility is reasonable, but the file's name (`gemini_cli.py`)
+is itself confusing/misleading documentation debt — a reader searching for the Antigravity
+adapter source would not find it under this filename, and `docs/ARCHITECTURE.md:100,191`
+and `docs/DEVELOPMENT.md:179,303` (outside this review's explicit scope, but worth noting)
+still reference `gemini_cli.py` / `GeminiAdapter` / `SKELETON_ENGINES`, all of which are
+gone per `tests/test_registry.py::test_skeleton_engines_removed`.
 
-    with pytest.raises(ValidationError):
-        EngineConfig(name="copilot-cli", raw_args=bad_value)  # type: ignore[misc]
+**Fix:** Consider renaming to `antigravity_cli.py` with a deprecated re-export shim at
+the old path only if any external consumer is known to import it directly (grep shows no
+internal imports of `prevue.engines.gemini_cli` by name in `src/` or `tests/`), and update
+`docs/ARCHITECTURE.md`/`docs/DEVELOPMENT.md` to drop `SKELETON_ENGINES`/Gemini references.
 
+### IN-02: `EngineModels.consolidate` "reserved for Phase 13" comment is duplicated near-verbatim three times
 
-def test_raw_args_non_string_element_rejected() -> None:
-    _require_engine_config()
-    from pydantic import ValidationError
+**File:** `src/prevue/config.py:104, 266, 293`
+**Issue:**
+Not a defect, but the comment is duplicated nearly verbatim at the class docstring, the
+function docstring, and the inline `_role("consolidate")` call site
+(`# D-13: reserved; Phase 13 (QUAL-01) will consume it` /
+`# D-13: reserved; consumed in Phase 13`). Minor duplication; if Phase 13 changes the
+plan, three places need updating in lockstep instead of one.
 
-    with pytest.raises(ValidationError, match=r"raw_args\[1\]"):
-        EngineConfig(name="copilot-cli", raw_args=["--flag", 42])  # type: ignore[misc]
-```
-
-### IN-02: `_sanitize_stderr` private alias exists only for back-compat import
-
-**File:** `src/prevue/engines/copilot_cli.py:42`, `src/prevue/engines/errors.py:28`
-**Issue:** `_sanitize_stderr = sanitize_stderr` is a module-level alias whose only
-purpose, per the docstring, is so `test_copilot_adapter.py` can `import _sanitize_stderr`
-directly. The public name `sanitize_stderr` already exists and is the canonical symbol;
-the underscore-prefixed alias is dead production surface that exists solely to satisfy a
-test import path. Carried forward unaddressed across all three review iterations of this
-cycle — confirmed still present and still Info-tier (not a correctness issue, purely a
-naming/dead-surface quality note).
-**Fix:** Either update `test_copilot_adapter.py` to import `sanitize_stderr` (drop the
-alias), or, if back-compat with external consumers genuinely matters, leave as-is with a
-clearer comment that it is a permanent compatibility shim rather than transitional.
-
-### IN-03: `update-pricing.yml`'s pricing spot-check assumes every model entry is a dict
-
-**File:** `.github/workflows/update-pricing.yml:43-46`
-**Issue:** `data[model].get('input_cost_per_token', 0)` assumes every value in the
-top-level pricing JSON is itself a dict — the same unguarded-`.get()`-on-untyped-JSON
-pattern as CR-01 above, but in the scheduled pricing-bump workflow rather than the live
-review path, and gated by human review before merge (the PR is never auto-merged), so
-the blast radius is a workflow-step failure with a clear traceback, not a silent
-miscategorization or live-review crash. If a future LiteLLM snapshot changes the shape of
-`gpt-4o` or `claude-3-5-sonnet-20241022`'s entry to a non-dict, this throws an unhandled
-`AttributeError` instead of a clean assertion message. Carried forward unaddressed across
-all three review iterations — not touched by any of this cycle's fixes, still accurate as
-written today.
-**Fix:**
-```python
-for model in ['gpt-4o', 'claude-3-5-sonnet-20241022']:
-    if model in data:
-        row = data[model]
-        assert isinstance(row, dict), f'{model} entry is not an object: {type(row).__name__}'
-        cost = row.get('input_cost_per_token', 0)
-        assert 0 < cost < 0.01, f'Implausible input cost for {model}: {cost}'
-```
+**Fix:** Consolidate to a single docstring reference (e.g. only on the class) and have
+the other two sites refer back to it (`# see EngineModels docstring`).
 
 ---
 
-_Reviewed: 2026-06-30T12:00:00Z_
+_Reviewed: 2026-06-30T11:51:13Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
