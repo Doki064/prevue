@@ -3,12 +3,12 @@ status: partial
 phase: 10-boundary-contracts
 source: [10-VERIFICATION.md]
 started: 2026-06-29T12:00:00Z
-updated: 2026-06-30T11:10:00Z
+updated: 2026-06-30T11:57:37Z
 ---
 
 ## Current Test
 
-[testing complete — 1 blocked test (no COPILOT_GITHUB_TOKEN) keeps status partial]
+[testing complete — gaps 1 and 4 resolved by gap-closure plan 10-07; 1 blocked test (no COPILOT_GITHUB_TOKEN) keeps status partial]
 
 ## Tests
 
@@ -17,7 +17,7 @@ expected: |
   In sandbox, set engine: antigravity-cli, provide ANTIGRAVITY_API_KEY. Open a test PR.
   Confirm: sticky summary posted with findings, ~est token label, cost line renders,
   prevue-result.json artifact uploaded, compact job outputs populated.
-result: issue
+result: resolved
 reported: "Per official Antigravity CLI docs (antigravity.google/docs/cli/install), no
   API-key / non-interactive auth mode exists. spec.py declares secret_env=ANTIGRAVITY_API_KEY
   (validate_secret checks it nonempty, AntigravityAuthError raised if absent) based on a
@@ -28,6 +28,7 @@ reported: "Per official Antigravity CLI docs (antigravity.google/docs/cli/instal
   as needing checkpoint:human-verify; no credential fixes it if the auth mechanism itself
   doesn't exist."
 severity: major
+resolution: "Gap-closure plan 10-07 flipped antigravity-cli to functional=False — require_functional_adapter now fails closed with NonFunctionalEngineError instead of shipping the unconfirmed headless-auth assumption as functional=true. get_adapter still resolves it (no install/invoke regression). Verified live in 10-VERIFICATION.md re-verification (commits 9f34db1..4dbe3b1)."
 
 ### 2. Copilot OTEL WARNING-3 real-token spot-check
 expected: |
@@ -68,26 +69,30 @@ expected: |
   (_parse_stdout_json). 10-RESEARCH.md's finding ("Cursor's --output-format json
   returns no token fields — open feature request") was taken as final and never
   re-verified against the installed cursor-cli version before being locked into spec.py.
-result: issue
+result: resolved
 reported: "User: 'I also said I want real token usage for all possible engines, and
   cursor is definitely possible (if not, look at Tokscale). This is absolutely a gap
   and need to be logged immediately.' No _parse_cursor_json function exists; cursor-cli
   always reports estimated=True regardless of CLI capability."
 severity: major
+resolution: "Gap-closure plan 10-07 fixed the confirmed bug: cursor-cli now requests --output-format json (was text) and routes through usage_capture=stdout-json, reusing the proven Claude envelope-unwrap path. The token-fields claim is now a verified fact (official Cursor CLI docs confirm the json envelope has no usage fields) — estimated=True remains correct, but via the now-correct code path instead of the disconnected none strategy. junhoyeo/tokscale reads Cursor's web billing API via a manual session-cookie export, not cursor-agent stdout, so no further gap exists. Verified live in 10-VERIFICATION.md re-verification (commits 9f34db1..4dbe3b1)."
 
 ## Summary
 
 total: 4
 passed: 1
-issues: 2
+issues: 0
+resolved: 2
 pending: 0
 skipped: 0
 blocked: 1
 
 ## Gaps
 
+Both gaps below are resolved by gap-closure plan 10-07 (commits 9f34db1..4dbe3b1); kept for audit trail.
+
 - truth: "Antigravity CLI authenticates headlessly via ANTIGRAVITY_API_KEY/GEMINI_API_KEY in CI"
-  status: failed
+  status: resolved
   reason: "Official docs indicate no non-interactive auth mode exists; spec.py's secret_env assumption (A1, low-confidence citation) may be structurally wrong"
   root_cause: |
     spec.py's secret_env="ANTIGRAVITY_API_KEY" + GEMINI_API_KEY alias fallback (cli_adapter.py
@@ -107,7 +112,7 @@ blocked: 1
     - "Startup smoke-test (e.g. agy --version / dry-run) to fail fast with actionable error before full review invocation"
 
 - truth: "cursor-cli reports real (non-estimated) token usage when the CLI exposes it"
-  status: failed
+  status: resolved
   reason: "usage_capture hardcoded to 'none' in spec.py with no Cursor envelope parser implemented; stale research finding never re-verified against installed CLI version"
   root_cause: |
     Two-layer issue. (1) Confirmed bug independent of CLI capability: spec.py:128 invokes
