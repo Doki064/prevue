@@ -130,20 +130,27 @@ class EngineConfig(BaseModel):
 
         Also rejects lists with non-string elements (None, int, etc.) — Pydantic v2
         would silently coerce them (None → "None", 42 → "42"), producing invalid CLI flags.
+        Exhaustive: any non-list, non-str scalar (int, float, bool, dict) is rejected here
+        too, so callers always get the clean D-10 message instead of a generic Pydantic
+        type-mismatch error.
         """
         if isinstance(value, str):
             raise ValueError(
                 "engine.raw_args must be a list of strings (D-10: no shell string allowed). "
                 f"Got str: {value!r}"
             )
-        if isinstance(value, list):
-            for i, item in enumerate(value):
-                if not isinstance(item, str):
-                    raise ValueError(
-                        f"engine.raw_args[{i}] must be a string, "
-                        f"got {type(item).__name__!r}: {item!r}"
-                    )
-        return value  # type: ignore[return-value]
+        if not isinstance(value, list):
+            raise ValueError(
+                f"engine.raw_args must be a list of strings, "
+                f"got {type(value).__name__!r}: {value!r}"
+            )
+        for i, item in enumerate(value):
+            if not isinstance(item, str):
+                raise ValueError(
+                    f"engine.raw_args[{i}] must be a string, "
+                    f"got {type(item).__name__!r}: {item!r}"
+                )
+        return value
 
 
 class PrevueConfig(BaseModel):
