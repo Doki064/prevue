@@ -272,17 +272,21 @@ def _resolve_fence_source(spec: CliEngineSpec | None, raw_stdout: str) -> str:
 
     Guard: if raw_stdout cannot be parsed as JSON or has no ``result`` field,
     fall back to raw_stdout so the normal degraded path fires gracefully.
+
+    Shares the single envelope-parsing code path (``usage.parse_envelope``)
+    with ``usage._parse_stdout_json`` so the two call sites cannot silently
+    desync on JSON-parse tolerance (WR-02).
     """
     if spec is None or spec.usage_capture != "stdout-json":
         return raw_stdout
 
-    try:
-        envelope = __import__("json").loads(raw_stdout)
+    from prevue.engines.usage import parse_envelope
+
+    envelope = parse_envelope(raw_stdout)
+    if envelope is not None:
         result_text = envelope.get("result")
         if isinstance(result_text, str):
             return result_text
-    except (ValueError, AttributeError):
-        pass
 
     # Guard: non-JSON stdout or missing result → degrade via raw path
     return raw_stdout

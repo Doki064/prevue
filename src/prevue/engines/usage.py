@@ -74,6 +74,31 @@ def capture_usage(
         return None
 
 
+def parse_envelope(stdout: str) -> dict[str, Any] | None:
+    """Parse the Claude ``--output-format json`` envelope into a raw dict.
+
+    Single shared JSON-parsing code path for the Claude envelope format, used
+    by both ``_parse_stdout_json`` (token/cost extraction from ``usage``) and
+    ``flow._resolve_fence_source`` (review-text extraction from ``result``).
+    Keeping one parser avoids the two call sites silently desyncing on
+    tolerance/error-handling as the envelope format evolves.
+
+    T-10-07: wraps json.loads in try/except — returns None on any parse
+    failure (malformed/non-JSON stdout) rather than raising.
+
+    Returns:
+        dict: the parsed envelope, whatever shape it has.
+        None: stdout is not valid JSON, or does not decode to a dict.
+    """
+    try:
+        envelope = json.loads(stdout)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(envelope, dict):
+        return None
+    return envelope
+
+
 def _parse_stdout_json(stdout: str) -> dict[str, Any] | None:
     """Parse Claude's ``--output-format json`` envelope for real token counts.
 
@@ -97,16 +122,16 @@ def _parse_stdout_json(stdout: str) -> dict[str, Any] | None:
     This function returns the parsed envelope dict; the caller (flow.py) is
     responsible for extracting review text from ``result``.
 
-    T-10-07: wraps json.loads in try/except — returns None on any parse failure.
+    T-10-07: wraps json.loads in try/except (via ``parse_envelope``) — returns
+    None on any parse failure.
 
     Returns:
         dict with ``input``, ``output``, ``cache_read``, ``cache_creation``,
         optional ``cost_usd``, and ``estimated=False``.
         None on parse failure (falls back to bytes/4 estimate).
     """
-    try:
-        envelope = json.loads(stdout)
-    except (json.JSONDecodeError, ValueError):
+    envelope = parse_envelope(stdout)
+    if envelope is None:
         # T-10-07: malformed stdout — degrade gracefully
         return None
 
