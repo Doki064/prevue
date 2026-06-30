@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from prevue.engines.flow import review_with_retry
+import pytest
+
+from prevue.engines.flow import _retry_token_meta, review_with_retry
 from prevue.engines.prompt import _build_retry_prompt
 from prevue.engines.tokens import estimate_tokens
 from tests.engine_helpers import PROSE_REVIEW, VALID_FINDING, make_sample_request, stdout_with_fence
@@ -53,3 +55,46 @@ def test_retry_review_tokens_count_each_invocation_once() -> None:
     # Sanity: the retry prompt embeds the original, so per-invocation summing equals
     # the engine's true input (original sent standalone + re-sent inside the retry).
     assert _build_retry_prompt(prompt, "x").startswith(prompt)
+
+
+def test_retry_token_meta_sums_both_real_captures() -> None:
+    """T-04 (10-THERMOS): when both the original and retry invocations return real
+    captures, their input/output/cache/cost must be summed, not one discarded.
+
+    Regression for `best_capture = captured_retry or captured`, which silently
+    dropped the first invocation's real tokens whenever both calls succeeded.
+    """
+    captured = {
+        "input": 1000,
+        "output": 200,
+        "cache_read": 50,
+        "cost_usd": 0.01,
+        "estimated": False,
+    }
+    captured_retry = {
+        "input": 300,
+        "output": 80,
+        "cache_read": 10,
+        "cost_usd": 0.004,
+        "estimated": False,
+    }
+
+    meta = _retry_token_meta("p", "rp", "out1", "out2", captured, captured_retry)
+
+    assert meta["estimated"] is False
+    assert meta["input"] == 1300
+    assert meta["output"] == 280
+    assert meta["cache_read"] == 60
+    assert meta["cost_usd"] == pytest.approx(0.014)
+
+
+def test_retry_token_meta_uses_single_capture_when_only_one_present() -> None:
+    """If only one invocation has a real capture (the other returned None), the
+    single capture's values pass through unsummed (no phantom zero-padding bugs)."""
+    captured = {"input": 1000, "output": 200, "estimated": False}
+
+    meta = _retry_token_meta("p", "rp", "out1", "out2", captured, None)
+
+    assert meta["estimated"] is False
+    assert meta["input"] == 1000
+    assert meta["output"] == 200

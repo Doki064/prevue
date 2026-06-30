@@ -58,11 +58,13 @@ def _retry_token_meta(
         + estimate_tokens(retry_prompt)
         + estimate_tokens(retry_stdout)
     )
-    # Prefer captured real tokens from the first invocation (or retry if first absent)
-    best_capture = captured_retry or captured
-    if best_capture is not None:
+    # T-04 (10-THERMOS): sum both invocations' real captures instead of picking
+    # one — `captured_retry or captured` previously discarded the first call's
+    # real input/output/cache/cost when both invocations succeeded, silently
+    # under-reporting ~50% of actual usage on any retried review.
+    if captured is not None or captured_retry is not None:
         meta: dict[str, Any] = {"review": review_tokens}
-        meta.update(_pick_real_token_fields(best_capture))
+        meta.update(_sum_real_token_fields(captured, captured_retry))
         return meta
     return {
         "review": review_tokens,
@@ -76,6 +78,30 @@ def _pick_real_token_fields(captured: dict[str, Any]) -> dict[str, Any]:
     for key in ("input", "output", "cache_read", "cache_creation", "cost_usd"):
         if key in captured:
             result[key] = captured[key]
+    return result
+
+
+def _sum_real_token_fields(
+    captured: dict[str, Any] | None,
+    captured_retry: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Sum real-token fields across both retry invocations (T-04 — 10-THERMOS).
+
+    Unlike ``_pick_real_token_fields`` (single capture), this combines both
+    captures so a retried review reports its true total usage/cost instead of
+    only one invocation's numbers. A field is summed when present in either
+    capture. Caller guarantees at least one capture is not None, so
+    ``estimated`` is always False here (capture_usage never returns a dict
+    with ``estimated=True`` — that value is synthesized only by the
+    no-capture-at-all fallback in the caller).
+    """
+    result: dict[str, Any] = {"estimated": False}
+    for key in ("input", "output", "cache_read", "cache_creation", "cost_usd"):
+        v1 = (captured or {}).get(key)
+        v2 = (captured_retry or {}).get(key)
+        if v1 is None and v2 is None:
+            continue
+        result[key] = (v1 or 0) + (v2 or 0)
     return result
 
 
