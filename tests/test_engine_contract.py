@@ -19,7 +19,10 @@ from tests.engine_helpers import (
     stdout_with_fence,
 )
 
-FUNCTIONAL = sorted(ENGINES.keys())  # all four engines are now functional (D-12/D-03)
+# Gap B (10-07): antigravity-cli is registered-but-not-functional (no headless
+# auth mode exists for agy per official docs) — only the three engines with a
+# confirmed headless auth path are exercised by the parametrized contract suite.
+FUNCTIONAL = sorted(name for name, spec in ENGINES.items() if spec.functional)
 
 AUTH_ENV: dict[str, tuple[str, str | None]] = {
     "copilot-cli": ("COPILOT_GITHUB_TOKEN", VALID_TOKEN),

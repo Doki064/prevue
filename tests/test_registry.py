@@ -41,18 +41,30 @@ def test_all_four_engines_registered() -> None:
     assert "antigravity-cli" in ENGINES
 
 
-def test_antigravity_cli_is_functional() -> None:
-    """antigravity-cli replaced the gemini skeleton and is now functional (D-12)."""
+def test_antigravity_cli_is_registered_but_not_functional() -> None:
+    """antigravity-cli replaced the gemini skeleton and registry lookup still
+    resolves it, but functional=False (Gap B, 10-07): official Antigravity CLI
+    docs confirm no headless/non-interactive auth mode exists for `agy`."""
     adapter = get_adapter("antigravity-cli")
     assert isinstance(adapter, CliEngineAdapter)
     assert adapter.name == "antigravity-cli"
+    assert ENGINES["antigravity-cli"].functional is False
 
 
-def test_require_functional_adapter_resolves_antigravity() -> None:
-    """require_functional_adapter returns antigravity-cli (functional=True, D-12/D-03)."""
-    adapter = require_functional_adapter("antigravity-cli")
-    assert isinstance(adapter, CliEngineAdapter)
-    assert adapter.name == "antigravity-cli"
+def test_require_functional_adapter_rejects_antigravity() -> None:
+    """require_functional_adapter raises NonFunctionalEngineError for antigravity-cli
+    (Gap B, 10-07) and lists only the still-functional engines."""
+    from prevue.engines.registry import NonFunctionalEngineError
+
+    with pytest.raises(NonFunctionalEngineError) as exc_info:
+        require_functional_adapter("antigravity-cli")
+    message = str(exc_info.value)
+    functional_list = message.split("choose one of:", 1)[1]
+    for name in ("copilot-cli", "claude-code-cli", "cursor-cli"):
+        assert name in functional_list, f"Expected {name!r} in functional list: {functional_list}"
+    assert "antigravity-cli" not in functional_list, (
+        f"antigravity-cli must not be listed as functional: {functional_list}"
+    )
 
 
 def test_require_functional_adapter_unknown_raises() -> None:

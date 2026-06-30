@@ -242,7 +242,7 @@ engine:
 | `copilot-cli` | Functional (default) | `copilot-github-token` | `COPILOT_GITHUB_TOKEN` — must be a fine-grained user-owned PAT (`github_pat_…`) with Copilot Requests permission |
 | `claude-code-cli` | Functional | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
 | `cursor-cli` | Functional | `cursor-api-key` | `CURSOR_API_KEY` |
-| `gemini-cli` | Registered skeleton — not yet functional for review | — | `GEMINI_API_KEY` (planned) |
+| `antigravity-cli` | Registered, not functional — no headless/non-interactive auth exists for the `agy` CLI per official docs; review attempts fail closed with a clear error | — | `ANTIGRAVITY_API_KEY` |
 
 **Review model:** set `PREVUE_MODEL` or `COPILOT_MODEL` in the workflow environment. `PREVUE_MODEL` takes precedence; `COPILOT_MODEL` is the fallback (Copilot adapter). This is separate from `classification.fallback.model`.
 

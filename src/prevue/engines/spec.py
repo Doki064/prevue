@@ -146,6 +146,13 @@ CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
         usage_capture="stdout-json",
         functional=True,
     ),
+    # Gap B (10-07 gap closure): official Antigravity CLI docs
+    # (antigravity.google/docs/cli/install) confirm no API-key / non-interactive
+    # auth mode exists for `agy`. The engine stays registered (get_adapter still
+    # resolves it for future use if Antigravity ships headless auth) but
+    # require_functional_adapter must reject it — closes the UAT gap where
+    # functional=True shipped on an unconfirmed checkpoint that was never
+    # closed (10-06-PLAN.md Task 3).
     CliEngineSpec(
         name="antigravity-cli",
         cli_label="Antigravity CLI",
@@ -160,6 +167,6 @@ CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
         model_flag="argv",
         model_argv_flag="--model",
         usage_capture="none",
-        functional=True,
+        functional=False,
     ),
 )
