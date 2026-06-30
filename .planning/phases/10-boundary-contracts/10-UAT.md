@@ -89,15 +89,44 @@ blocked: 1
 - truth: "Antigravity CLI authenticates headlessly via ANTIGRAVITY_API_KEY/GEMINI_API_KEY in CI"
   status: failed
   reason: "Official docs indicate no non-interactive auth mode exists; spec.py's secret_env assumption (A1, low-confidence citation) may be structurally wrong"
+  root_cause: |
+    spec.py's secret_env="ANTIGRAVITY_API_KEY" + GEMINI_API_KEY alias fallback (cli_adapter.py
+    _build_env, ~line 65-66) was a design-time bet on an unverified, low-confidence third-party
+    citation (antigravitylab.net — domain itself looks suspect vs official antigravity.google).
+    10-RESEARCH.md flagged this exact risk (A1) and gated it behind a checkpoint:human-verify
+    (10-06-SUMMARY.md Task 3) — that checkpoint was never closed, so the engine shipped as
+    functional=true on an unconfirmed auth assumption. Not a code logic bug; a closed-loop
+    verification step that never ran.
   severity: major
   test: 1
-  artifacts: []
-  missing: []
+  artifacts:
+    - src/prevue/engines/spec.py (antigravity-cli entry, secret_env field)
+    - src/prevue/engines/cli_adapter.py (_build_env GEMINI_API_KEY alias fallback)
+  missing:
+    - "Live verification of agy CLI's actual non-interactive auth support (API key vs OAuth-only)"
+    - "Startup smoke-test (e.g. agy --version / dry-run) to fail fast with actionable error before full review invocation"
 
 - truth: "cursor-cli reports real (non-estimated) token usage when the CLI exposes it"
   status: failed
   reason: "usage_capture hardcoded to 'none' in spec.py with no Cursor envelope parser implemented; stale research finding never re-verified against installed CLI version"
+  root_cause: |
+    Two-layer issue. (1) Confirmed bug independent of CLI capability: spec.py:128 invokes
+    cursor-agent with --output-format text, not json — so even if Cursor's JSON envelope
+    exposes token fields, prevue never requests it. (2) Unconfirmed: 10-RESEARCH.md's "no
+    token fields" finding (line 335, dated 2026-06-28, sourced cursor.com/docs +
+    forum.cursor.com) was never re-verified against the currently pinned cursor-agent
+    version (install-engine-cli.sh curl-installs latest, no version pin). User's Tokscale
+    citation (junhoyeo/tokscale, per 10-CONTEXT.md) documents Claude JSONL usage + Codex
+    token_count as confirmed sources — does NOT list Cursor in its own description, so it
+    may read a separate Cursor usage/billing API rather than cursor-agent stdout. Needs
+    live verification before concluding which layer is the real gap.
   severity: major
   test: 4
-  artifacts: []
-  missing: ["_parse_cursor_json function in prevue/engines/usage.py", "usage_capture=\"stdout-json\" or equivalent on cursor-cli spec entry"]
+  artifacts:
+    - src/prevue/engines/spec.py:128 (cursor-cli base_argv uses --output-format text)
+    - src/prevue/engines/usage.py:66-74 (capture_usage dispatcher, "none" branch)
+  missing:
+    - "Live check: does `cursor-agent -p --output-format json` (current version) expose token fields?"
+    - "Check junhoyeo/tokscale source for its actual Cursor token-read mechanism (if any)"
+    - "_parse_cursor_json function in prevue/engines/usage.py (only if JSON envelope confirmed to expose tokens)"
+    - "usage_capture=\"stdout-json\" or new literal on cursor-cli spec entry + --output-format json in base_argv"
