@@ -91,3 +91,5 @@ jobs:
             ${{ github.event.client_payload.engine == 'claude-code-cli' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           CURSOR_API_KEY: >-
             ${{ github.event.client_payload.engine == 'cursor-cli' && secrets.CURSOR_API_KEY || '' }}
+          COPILOT_OTEL_FILE_EXPORTER_PATH: ${{ runner.temp }}/copilot-otel
+          PREVUE_RESULT_FILE: ${{ runner.temp }}/prevue-result.json
