@@ -113,15 +113,11 @@ def emit_machine_output(
     try:
         out.write_text(full_json, encoding="utf-8")
     except OSError as exc:
-        # Non-fatal: if the result file can't be written (disk full, bad path),
-        # log to stderr and continue — GITHUB_OUTPUT job outputs may still succeed,
-        # and the review check already published. Aborting here would leave the
-        # workflow in a broken state with no additional user value.
+        # Non-fatal: log to stderr and continue — GITHUB_OUTPUT may still succeed.
         print(
             f"prevue: failed to write result file {str(out)!r}: {exc}",
             file=sys.stderr,
         )
-        return
 
     # Write compact lines to $GITHUB_OUTPUT (guarded — no-op when unset)
     github_output_path = os.environ.get("GITHUB_OUTPUT")
