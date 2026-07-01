@@ -265,7 +265,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 7. Customization & Hardening | 7/7 | Complete    | 2026-06-14 |
 | 8. Incremental & Stateful Review Lifecycle | 16/16 | Complete   | 2026-06-16 |
 | 9. Classification-aligned skill loading + multi-call review | 6/6 | Complete   | 2026-06-21 |
-| 10. Boundary Contracts | 7/7 | Complete   | 2026-06-30 |
+| 10. Boundary Contracts | 7/8 | Gap closure in progress | - |
 
 ### Phase 8: Incremental & Stateful Review Lifecycle
 
@@ -395,7 +395,7 @@ Plans:
   5. Adapters support per-role model selection (cheap classify / strong review / cheap consolidate) (ENGN-09)
   6. The validated `ReviewResult` is emitted as a GitHub Actions job output (and/or JSON artifact) that consumers can chain automation on (OUTP-05)
 
-**Plans**: 7 plans (4 waves + gap closure)
+**Plans**: 8 plans (4 waves + gap closure)
 Plans:
 **Wave 1**
 
@@ -418,6 +418,7 @@ Plans:
 **Gap closure** *(from 10-UAT.md — live sandbox verification surfaced 2 unresolved gaps)*
 
 - [x] 10-07-PLAN.md — Gap A: cursor-cli requests/parses real JSON envelope (confirmed no token fields, fixed wrong output-format bug); Gap B: antigravity-cli flipped functional=False (confirmed no headless auth exists per official docs)
+- [ ] 10-08-PLAN.md — Gap closure from live 10-UAT.md: Copilot OTEL flipped to honest usage_capture="none" (no CI-viable mechanism exists on the pinned CLI); model workflow_call input threaded into PREVUE_MODEL; on.workflow_call.outputs block added so job outputs reach the caller (OUTP-05 boundary fix)
 
 ### Phase 11: Skills as Pinned External Repo
 
