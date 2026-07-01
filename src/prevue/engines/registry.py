@@ -33,23 +33,41 @@ class NonFunctionalEngineError(ValueError):
     """Raised when a registered non-functional engine is selected for review."""
 
 
-def get_adapter(name: str) -> CliEngineAdapter:
+def get_adapter(
+    name: str,
+    *,
+    raw_args: list[str] | None = None,
+    pricing: dict | None = None,
+) -> CliEngineAdapter:
     """Resolve a CliEngineAdapter for the given engine name.
 
     Raises UnknownEngineError for unregistered names (fail-closed, D-04).
+
+    T-07 (10-THERMOS quick task): raw_args/pricing are threaded into the
+    adapter at construction time (factory kwargs) instead of via
+    post-construction setter calls.
     """
     spec = ENGINES.get(name)
     if spec is None:
         valid = ", ".join(sorted(ENGINES))
         raise UnknownEngineError(f"Unknown PREVUE_ENGINE {name!r}; valid engines: {valid}")
-    return CliEngineAdapter(spec)
+    return CliEngineAdapter(spec, raw_args=raw_args, pricing_override=pricing)
 
 
-def require_functional_adapter(name: str) -> CliEngineAdapter:
+def require_functional_adapter(
+    name: str,
+    *,
+    raw_args: list[str] | None = None,
+    pricing: dict | None = None,
+) -> CliEngineAdapter:
     """Resolve an adapter that can run reviews (excludes non-functional specs).
 
     Raises NonFunctionalEngineError if the spec has functional=False.
     The mechanism is kept for future API siblings/skeletons (D-02/D-03).
+
+    T-07 (10-THERMOS quick task): raw_args/pricing are threaded into the
+    adapter at construction time (factory kwargs) instead of via
+    post-construction setter calls.
     """
     spec = ENGINES.get(name)
     if spec is None:
@@ -60,4 +78,4 @@ def require_functional_adapter(name: str) -> CliEngineAdapter:
         raise NonFunctionalEngineError(
             f"Engine {name!r} is registered but not yet functional; choose one of: {functional}"
         )
-    return CliEngineAdapter(spec)
+    return CliEngineAdapter(spec, raw_args=raw_args, pricing_override=pricing)

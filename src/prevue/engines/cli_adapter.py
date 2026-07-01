@@ -43,22 +43,18 @@ class CliEngineAdapter(EngineAdapter):
     to the pre-Plan-04 code when no extra flags are configured.
     """
 
-    def __init__(self, spec: CliEngineSpec, raw_args: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        spec: CliEngineSpec,
+        raw_args: list[str] | None = None,
+        pricing_override: dict | None = None,
+    ) -> None:
         self._spec = spec
         self.name = spec.name
         # raw_args appended LAST after all framework argv (ENGN-08/D-10: list form only)
         self._raw_args: list[str] = list(raw_args) if raw_args else []
         # pricing_override: consumer engine.pricing dict (D-06c); None = use vendored table
-        self._pricing_override: dict | None = None
-
-    def set_raw_args(self, raw_args: list[str]) -> None:
-        """Replace the raw_args list (ENGN-08/D-10: called from review.py after get_adapter)."""
-        self._raw_args = list(raw_args)
-
-    def set_pricing_override(self, pricing: dict | None) -> None:
-        """Set the consumer pricing override dict (D-06c: called from review.py after
-        load_config)."""
-        self._pricing_override = pricing
+        self._pricing_override: dict | None = pricing_override
 
     # ------------------------------------------------------------------
     # Internal helpers

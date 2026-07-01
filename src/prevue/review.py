@@ -32,7 +32,6 @@ from prevue.config import (
 )
 from prevue.dismiss import active_suppressed_fingerprints, parse_dismiss_block
 from prevue.engines.base import EngineAdapter
-from prevue.engines.cli_adapter import CliEngineAdapter
 from prevue.engines.prompt import (
     MAX_PROMPT_BYTES,
     build_prompt,
@@ -588,8 +587,16 @@ def run_review(
 
     # config.engine already encodes PREVUE_ENGINE > prevue.yml > default precedence
     # via _resolve_engine — re-reading the env here would duplicate that rule (WR-06).
+    # T-07 (10-THERMOS quick task): raw_args/pricing are threaded at construction
+    # time via require_functional_adapter's factory kwargs (gated by base-ref
+    # engine_config, same SKIL-04/Pitfall 4 sentinel as before) — no post-
+    # construction isinstance(engine, CliEngineAdapter) + setter-call mutation.
     try:
-        engine = adapter or require_functional_adapter(config.engine)
+        engine = adapter or require_functional_adapter(
+            config.engine,
+            raw_args=config.engine_config.raw_args or None,
+            pricing=config.engine_config.pricing,
+        )
     except (NonFunctionalEngineError, UnknownEngineError) as exc:
         _publish_skip(
             pr,
@@ -601,33 +608,16 @@ def run_review(
         )
         return
 
-    # Thread raw_args from base-ref engine_config into the adapter (ENGN-08/D-10).
-    # Injected here (not in get_adapter) so the raw_args are always sourced from the
-    # single load_config read — gated by resolve_consumer_config_path's base-ref sentinel
-    # (SKIL-04/Pitfall 4: PR-head raw_args is ignored).
-    # Q-02: isinstance guard replaces hasattr duck-typing; engine is always CliEngineAdapter
-    # when `not adapter` (require_functional_adapter always returns CliEngineAdapter).
-    if not adapter and config.engine_config.raw_args and isinstance(engine, CliEngineAdapter):
-        engine.set_raw_args(config.engine_config.raw_args)
-    elif adapter and config.engine_config.raw_args:
-        # WR-04: a caller-supplied adapter silently skips raw_args threading (the
-        # guard above only fires when `not adapter`). Log so this isn't a silent
-        # "why did my raw_args stop applying" bug if a future call site starts
-        # passing a pre-built adapter.
+    if adapter and config.engine_config.raw_args:
+        # WR-04: a caller-supplied adapter cannot receive raw_args threading (it
+        # was already constructed before run_review saw the config). Log so this
+        # isn't a silent "why did my raw_args stop applying" bug.
         print(
             "prevue: custom adapter supplied; engine.raw_args from prevue.yml not applied",
             file=sys.stderr,
         )
 
-    # Thread pricing override from base-ref engine_config into the adapter (D-06c).
-    # Injected here alongside raw_args so the same base-ref sentinel gate applies.
-    if (
-        not adapter
-        and config.engine_config.pricing is not None
-        and isinstance(engine, CliEngineAdapter)
-    ):
-        engine.set_pricing_override(config.engine_config.pricing)
-    elif adapter and config.engine_config.pricing is not None:
+    if adapter and config.engine_config.pricing is not None:
         # WR-04: same silent no-op risk as raw_args above, for the pricing override.
         print(
             "prevue: custom adapter supplied; engine.pricing from prevue.yml not applied",

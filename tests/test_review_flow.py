@@ -1173,7 +1173,9 @@ def test_engine_selection_via_prevue_engine(monkeypatch: pytest.MonkeyPatch) -> 
     ):
         mock_get_adapter.return_value = FindingsEngine()
         run_review()
-        mock_get_adapter.assert_called_once_with("copilot-cli")
+        # T-07 (10-THERMOS quick task): raw_args/pricing are now threaded at
+        # construction time via require_functional_adapter's factory kwargs.
+        mock_get_adapter.assert_called_once_with("copilot-cli", raw_args=None, pricing=None)
 
     # T-03 (10-THERMOS quick task): a bad PREVUE_ENGINE value must degrade to the
     # same graceful failure-conclusion skip path as NonFunctionalEngineError,
