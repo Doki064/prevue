@@ -110,20 +110,21 @@ def _validate_nonempty_secret(error_class: type, env_var: str) -> Callable[[str]
 # ---------------------------------------------------------------------------
 
 CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
-    # Gap 1 (10-08 gap closure, T-10-08 usage_capture): live sandbox verification (10-UAT.md)
-    # confirmed COPILOT_OTEL_FILE_EXPORTER_PATH has no effect on the pinned
-    # @github/copilot@1.0.61 CLI — `copilot --help` has zero OTEL/telemetry mention,
-    # ~/.copilot is never created, and the exporter directory never appears. Checked
-    # against official GitHub Copilot CLI docs and the github/copilot-cli repo (including
-    # open issues): no OTEL export mechanism ships on this CLI today — an open feature
-    # request ("Enterprise OTel auth ... parity with Claude Code") confirms this is
-    # requested-but-unshipped, not a Prevue-side documentation gap (supersedes the stale
-    # ccusage.com/guide/copilot secondary-source citation from 10-RESEARCH.md). Falls back
-    # to the honest bytes/4 ~est estimate path (same as cursor-cli/antigravity-cli) instead
-    # of falsely implying real-token capture via a non-functional wire. May be flipped back
-    # to "otel-jsonl" if/when GitHub ships real OTEL export — usage.py's _parse_copilot_otel
-    # parser and flow.py's otel-jsonl dispatch path are left unchanged (still correct, just
-    # unreached for Copilot going forward).
+    # Gap 1 (10-08 gap closure, T-10-08 usage_capture) — SUPERSEDED 2026-07-01
+    # (10-09 gap closure): the 10-08 conclusion ("COPILOT_OTEL_FILE_EXPORTER_PATH
+    # is inert on @github/copilot@1.0.61") is stale. A local install of the
+    # real Copilot CLI (`gh copilot`, v1.0.67) confirms OTEL file export IS real
+    # and documented (`copilot help monitoring`). The actual defect was in
+    # usage.py::_parse_copilot_otel, which parsed a fictitious nested
+    # resourceSpans->scopeSpans->spans OTLP shape the real exporter never
+    # produces — the real exporter writes flat per-line
+    # {"type": "span"|"metric", "attributes": {...}} records with
+    # gen_ai.usage.* token keys. The parser fix lives in usage.py (10-09-PLAN.md
+    # Task 1); this flip back to "otel-jsonl" re-enables the now-correctly-
+    # implemented capture path. OPEN FOLLOW-UP: a live CI spot-check with a real
+    # COPILOT_GITHUB_TOKEN confirming estimated=False end-to-end on an actual
+    # GitHub Actions run (not just a local subprocess) remains unverified — see
+    # 10-VERIFICATION.md's human_verification entry.
     CliEngineSpec(
         name="copilot-cli",
         cli_label="Copilot CLI",
@@ -134,7 +135,7 @@ CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
         prompt_delivery="stdin",
         model_flag="env",
         model_env="COPILOT_MODEL",
-        usage_capture="none",
+        usage_capture="otel-jsonl",
         functional=True,
     ),
     CliEngineSpec(

@@ -179,6 +179,12 @@ jobs:
           PREVUE_MODEL: ${{ inputs.model }}
           PREVUE_CONSUMER_ROOT: ${{ github.workspace }}/consumer
           PREVUE_CONFIG_PATH: ${{ inputs.config-path }}
+          # PERF-03/D-04 (10-09 gap closure): per-invocation temp directory for
+          # Copilot CLI's OTEL file exporter — usage.py's _parse_copilot_otel
+          # globs *.jsonl files here for real (non-estimated) token counts.
+          # Inert for non-Copilot engines (their specs never read this var), so
+          # it is safe to set unconditionally rather than per-engine-gated.
+          COPILOT_OTEL_FILE_EXPORTER_PATH: ${{ runner.temp }}/copilot-otel
           COPILOT_GITHUB_TOKEN: ${{ inputs.engine == 'copilot-cli' && secrets.copilot-github-token || '' }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.engine == 'claude-code-cli' && secrets.claude-code-oauth-token || '' }}
           CURSOR_API_KEY: ${{ inputs.engine == 'cursor-cli' && secrets.cursor-api-key || '' }}

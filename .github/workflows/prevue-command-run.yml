@@ -89,6 +89,10 @@ jobs:
           PREVUE_ENGINE: ${{ github.event.client_payload.engine }}
           PREVUE_CONSUMER_ROOT: ${{ github.workspace }}/consumer
           PREVUE_CONFIG_PATH: .github/prevue.yml
+          # PERF-03/D-04 (10-09 gap closure): per-invocation temp directory for
+          # Copilot CLI's OTEL file exporter — mirrors prevue-review.yml's
+          # "Run review" step wiring (WR-02: keep both entry points in sync).
+          COPILOT_OTEL_FILE_EXPORTER_PATH: ${{ runner.temp }}/copilot-otel
           COPILOT_GITHUB_TOKEN: >-
             ${{ github.event.client_payload.engine == 'copilot-cli' && secrets.COPILOT_GITHUB_TOKEN || '' }}
           CLAUDE_CODE_OAUTH_TOKEN: >-
