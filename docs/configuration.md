@@ -277,6 +277,8 @@ The reusable workflow (`prevue-review.yml`) exposes these `workflow_call` inputs
 | `copilot-github-token` | No | `copilot-cli` | Fine-grained user PAT (`github_pat_…`) with Copilot Requests permission. Maps to `COPILOT_GITHUB_TOKEN` |
 | `claude-code-oauth-token` | No | `claude-code-cli` | Long-lived OAuth token (`claude setup-token`). Maps to `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cursor-api-key` | No | `cursor-cli` | Cursor API key. Maps to `CURSOR_API_KEY` |
+| `antigravity-api-key` | No | `antigravity-cli` | API key for `agy` (registered, not yet functional). Maps to `ANTIGRAVITY_API_KEY` |
+| `gemini-api-key` | No | `antigravity-cli` | Documented alias for `antigravity-api-key`. Maps to `GEMINI_API_KEY` |
 
 Pass only the secret for your chosen engine. Do **not** use `secrets: inherit`.
 
