@@ -190,6 +190,55 @@ def test_job_outputs_map_declared() -> None:
             )
 
 
+def test_workflow_call_outputs_block_declared() -> None:
+    """OUTP-05 gap-closure (10-08, Gap 3): a job-level `jobs.review.outputs:` block alone
+    does NOT propagate across the workflow_call boundary — GitHub Actions requires a
+    sibling top-level `on.workflow_call.outputs:` block re-mapping the same keys, or every
+    job output comes back empty to a caller's `needs.<job>.outputs.*` (live-confirmed via
+    a downstream probe job in 10-UAT.md gap 3). This regression test fails if the block is
+    missing entirely, or if a key drifts between the two output declarations (the exact
+    failure mode UAT gap 3 describes as "easy to reintroduce").
+    """
+    wf = _load_reusable_workflow()
+    on = wf.get("on") or wf.get(True)
+    workflow_call = (on or {}).get("workflow_call", {})
+    call_outputs = workflow_call.get("outputs")
+    assert call_outputs, (
+        "on.workflow_call.outputs block is missing — job-level jobs.review.outputs alone "
+        "never reaches a caller's needs.<job>.outputs.* (OUTP-05 gap 3)"
+    )
+
+    job_outputs = wf["jobs"]["review"].get("outputs", {})
+    expected_keys = {
+        "schema_version",
+        "conclusion",
+        "error_count",
+        "warning_count",
+        "info_count",
+        "tokens",
+        "cost_usd",
+    }
+
+    # Per-key existence check (not "at least these keys exist") — catches drift between
+    # on.workflow_call.outputs and jobs.review.outputs in either direction.
+    assert expected_keys <= set(call_outputs.keys()), (
+        f"Missing workflow_call output keys: {expected_keys - set(call_outputs.keys())}"
+    )
+    assert set(call_outputs.keys()) == set(job_outputs.keys()), (
+        "on.workflow_call.outputs and jobs.review.outputs key sets have drifted: "
+        f"workflow_call-only={set(call_outputs.keys()) - set(job_outputs.keys())}, "
+        f"job-only={set(job_outputs.keys()) - set(call_outputs.keys())}"
+    )
+
+    for key in expected_keys:
+        entry = call_outputs.get(key) or {}
+        value_expr = str(entry.get("value", ""))
+        assert f"jobs.review.outputs.{key}" in value_expr, (
+            f"on.workflow_call.outputs.{key} must re-map to jobs.review.outputs.{key} "
+            f"(got: {value_expr!r})"
+        )
+
+
 def test_run_review_step_has_id() -> None:
     """Run review step must have id: run-review so job outputs can reference its $GITHUB_OUTPUT."""
     wf = _load_reusable_workflow()
