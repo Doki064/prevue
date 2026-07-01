@@ -265,7 +265,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 7. Customization & Hardening | 7/7 | Complete    | 2026-06-14 |
 | 8. Incremental & Stateful Review Lifecycle | 16/16 | Complete   | 2026-06-16 |
 | 9. Classification-aligned skill loading + multi-call review | 6/6 | Complete   | 2026-06-21 |
-| 10. Boundary Contracts | 7/8 | Gap closure in progress | - |
+| 10. Boundary Contracts | 8/8 | Complete   | 2026-07-01 |
 
 ### Phase 8: Incremental & Stateful Review Lifecycle
 
@@ -418,7 +418,7 @@ Plans:
 **Gap closure** *(from 10-UAT.md — live sandbox verification surfaced 2 unresolved gaps)*
 
 - [x] 10-07-PLAN.md — Gap A: cursor-cli requests/parses real JSON envelope (confirmed no token fields, fixed wrong output-format bug); Gap B: antigravity-cli flipped functional=False (confirmed no headless auth exists per official docs)
-- [ ] 10-08-PLAN.md — Gap closure from live 10-UAT.md: Copilot OTEL flipped to honest usage_capture="none" (no CI-viable mechanism exists on the pinned CLI); model workflow_call input threaded into PREVUE_MODEL; on.workflow_call.outputs block added so job outputs reach the caller (OUTP-05 boundary fix)
+- [x] 10-08-PLAN.md — Gap closure from live 10-UAT.md: Copilot OTEL flipped to honest usage_capture="none" (no CI-viable mechanism exists on the pinned CLI); model workflow_call input threaded into PREVUE_MODEL; on.workflow_call.outputs block added so job outputs reach the caller (OUTP-05 boundary fix)
 
 ### Phase 11: Skills as Pinned External Repo
 
@@ -486,7 +486,7 @@ _Unsequenced task/spike items mined 2026-06-25 (ai-code-review, claude-code-acti
 
 **Goal:** Measure whether semantic chunking (TreeSitter) and/or Headroom library-mode compression deliver meaningful token savings on Prevue's **diff-only / hunk-level** input — not the whole-codebase input their headline numbers (95%+) are measured on — before PERF-02 becomes a phase. Headroom is a real installable Apache-2.0 local lib (`pip install headroom-ai`), so the spike also measures the **minimal install footprint**: can a code-only/AST path skip the ONNX + HuggingFace `kompress-base` model (prose-only) that the `[all]`/`[ml]` extras pull? Decide adopt vs reject on savings × footprint.
 **Requirements:** Informs PERF-02
-**Plans:** 7/7 plans complete
+**Plans:** 8/8 plans complete
 **Source:** headroomlabs-ai/headroom (AST CodeCompressor, CacheAligner); bobmatnyc/ai-code-review semantic chunking.
 
 Plans:

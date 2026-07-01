@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 10-07-PLAN.md
-last_updated: "2026-06-30T11:44:04.531Z"
-last_activity: 2026-06-30 -- Phase 10 execution started
+stopped_at: Completed 10-08-PLAN.md
+last_updated: "2026-07-01T11:37:23.395Z"
+last_activity: 2026-07-01 -- Phase 10 execution started
 progress:
   total_phases: 15
   completed_phases: 10
-  total_plans: 62
-  completed_plans: 62
+  total_plans: 63
+  completed_plans: 63
   percent: 67
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-06-12)
 ## Current Position
 
 Phase: 10 (boundary-contracts) — COMPLETE
-Plan: 7 of 7
-Status: All plans executed; 2 UAT gaps closed via 10-07 gap-closure plan
-Last activity: 2026-06-30 -- Phase 10 execution complete (10-07 gap closure: cursor-cli JSON envelope, antigravity-cli fail-closed)
+Plan: 8 of 8
+Status: Phase 10 complete; all P0 UAT gaps closed
+Last activity: 2026-07-01 -- Completed 10-08-PLAN.md (gap closure)
 
-Progress: [██████████] 7/7 plans complete (Phase 10) — All 10 phases complete
+Progress: [██████████] 8/8 plans complete (Phase 10) — All 10 phases complete
 
 ## Performance Metrics
 
@@ -121,6 +121,7 @@ Progress: [██████████] 7/7 plans complete (Phase 10) — All
 | Phase 10-boundary-contracts P05 | 7min | 2 tasks | 6 files |
 | Phase 10-boundary-contracts P06 | 10min | - tasks | - files |
 | Phase 10-boundary-contracts P07 | 5min | 2 tasks | 5 files |
+| Phase 10-boundary-contracts P08 | 5min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -230,6 +231,9 @@ Recent decisions affecting current work:
 - [Phase ?]: ANTIGRAVITY_API_KEY gated on inputs.engine == antigravity-cli in workflow env (T-10-20)
 - [Phase 10-07]: cursor-cli requests --output-format json + usage_capture=stdout-json reusing Claude envelope-unwrap path (still estimated=True, now verified-correct)
 - [Phase 10-07]: antigravity-cli functional=False — fails closed via NonFunctionalEngineError; registry lookup/install/invoke unaffected
+- [Phase ?]: 10-08: Copilot usage_capture flipped to none — no CI-viable OTEL export exists on @github/copilot@1.0.61 (live sandbox + docs verified)
+- [Phase ?]: 10-08: model workflow_call input threaded into PREVUE_MODEL — empty-string default is safe since review.py resolves via env_model or fallback
+- [Phase ?]: 10-08: on.workflow_call.outputs added as literal sibling of jobs.review.outputs, backed by exact-key-set-equality regression test
 
 ### Pending Todos
 
@@ -256,6 +260,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-30T11:44:04.525Z
-Stopped at: Completed 10-07-PLAN.md
+Last session: 2026-07-01T11:37:23.388Z
+Stopped at: Completed 10-08-PLAN.md
 Resume file: None
