@@ -2,12 +2,16 @@
 
 These tests pin the exact input > yml > default precedence for:
   - engine: PREVUE_ENGINE env > engine.name in yml > DEFAULT_ENGINE
-  - model: PREVUE_MODEL (then COPILOT_MODEL) env > engine.model in yml > None
   - fallback model: env (if any) > classification.fallback.model > None
 
 Tests for _resolve_engine() (already exists in config.py) are GREEN by design —
-they confirm the existing ladder is correct. Tests for _resolve_model() and
-_resolve_engine_models() are RED until Plan 04 adds those functions.
+they confirm the existing ladder is correct. Tests for _resolve_engine_models()
+are RED until Plan 04 adds those functions.
+
+Note: _resolve_model() (an earlier, superseded model-precedence resolver with
+no production call path) was deleted (WR-03) — model resolution in production
+goes through _resolve_engine_models()/resolve_review_model() instead, exercised
+by the tests further below.
 """
 
 from __future__ import annotations
@@ -23,20 +27,19 @@ from prevue.config import (
 from prevue.engines.registry import DEFAULT_ENGINE
 
 try:
-    from prevue.config import _resolve_engine_models, _resolve_model
+    from prevue.config import _resolve_engine_models
 
     _IMPORT_ERROR: ImportError | None = None
 except ImportError as exc:
-    _resolve_model = None  # type: ignore[assignment]
     _resolve_engine_models = None  # type: ignore[assignment]
     _IMPORT_ERROR = exc
 
 
 def _require_new_resolvers() -> None:
-    """Fail test clearly if _resolve_model / _resolve_engine_models are not importable."""
+    """Fail test clearly if _resolve_engine_models is not importable."""
     if _IMPORT_ERROR is not None:
         pytest.fail(
-            f"prevue.config._resolve_model/_resolve_engine_models do not exist yet "
+            f"prevue.config._resolve_engine_models does not exist yet "
             f"(Plan 04 will create them): {_IMPORT_ERROR}",
             pytrace=False,
         )
@@ -96,49 +99,6 @@ def test_engine_precedence_matrix(
         raw = {"engine": {"name": yml_name}}
 
     assert _resolve_engine(raw) == expected
-
-
-# ---------------------------------------------------------------------------
-# Model precedence — _resolve_model (RED until Plan 04)
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    "prevue_model,copilot_model,yml_model,expected",
-    [
-        ("gpt-5", "gpt-4o", "gpt-4", "gpt-5"),  # PREVUE_MODEL beats all
-        (None, "gpt-4o", "gpt-4", "gpt-4o"),  # COPILOT_MODEL beats yml
-        (None, None, "gpt-4", "gpt-4"),  # yml beats None
-        (None, None, None, None),  # no model set -> None
-    ],
-    ids=["PREVUE_MODEL>all", "COPILOT_MODEL>yml", "yml>none", "none"],
-)
-def test_model_precedence_matrix(
-    prevue_model: str | None,
-    copilot_model: str | None,
-    yml_model: str | None,
-    expected: str | None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Parametrized matrix: PREVUE_MODEL > COPILOT_MODEL > yml engine.model > None."""
-    _require_new_resolvers()
-
-    if prevue_model is not None:
-        monkeypatch.setenv("PREVUE_MODEL", prevue_model)
-    else:
-        monkeypatch.delenv("PREVUE_MODEL", raising=False)
-
-    if copilot_model is not None:
-        monkeypatch.setenv("COPILOT_MODEL", copilot_model)
-    else:
-        monkeypatch.delenv("COPILOT_MODEL", raising=False)
-
-    raw: dict = {}
-    if yml_model is not None:
-        raw = {"engine": {"model": yml_model}}
-
-    result = _resolve_model(raw)  # type: ignore[misc]
-    assert result == expected
 
 
 # ---------------------------------------------------------------------------

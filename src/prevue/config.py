@@ -244,25 +244,6 @@ def _resolve_engine(raw: dict) -> str:
     return DEFAULT_ENGINE
 
 
-def _resolve_model(raw: dict) -> str | None:
-    """Model precedence: PREVUE_MODEL env > COPILOT_MODEL env > engine.model in yml > None.
-
-    This is knob 2 in the CONFIG_PRECEDENCE ladder (WKFL-05/D-07).
-    """
-    env_model = os.environ.get("PREVUE_MODEL")
-    if env_model:
-        return env_model
-    copilot_model = os.environ.get("COPILOT_MODEL")
-    if copilot_model:
-        return copilot_model
-    engine_block = raw.get("engine")
-    if isinstance(engine_block, dict):
-        yml_model = engine_block.get("model")
-        if yml_model:
-            return str(yml_model)
-    return None
-
-
 def _resolve_engine_models(raw: dict) -> dict[str, str | None]:
     """Per-role model resolution for classify / review / consolidate (ENGN-09/D-11).
 
