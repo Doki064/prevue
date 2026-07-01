@@ -6,6 +6,13 @@ the copilot-cli CliEngineSpec in spec.py. This module retains:
   - CopilotCliAdapter backward-compat alias
   - __all__ re-exports that tests import directly (Pitfall 5)
   - _sanitize_stderr alias (test_copilot_adapter.py imports it)
+
+Q-08 (10-THERMOS): shim migration deferred. When tests/test_copilot_adapter.py
+and any other consumers are ready, replace CopilotCliAdapter() usages with:
+    from prevue.engines.cli_adapter import CliEngineAdapter
+    from prevue.engines.registry import get_adapter
+    adapter = get_adapter("copilot-cli")
+then delete this file.
 """
 
 from __future__ import annotations
