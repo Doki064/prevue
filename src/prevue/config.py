@@ -157,6 +157,32 @@ class EngineConfig(BaseModel):
                 )
         return value
 
+    @field_validator("pricing", mode="before")
+    @classmethod
+    def _validate_pricing(cls, value: object) -> dict | None:
+        """Reject a malformed engine.pricing override (CR-01: phase-10 review).
+
+        Mirrors ``_validate_raw_args``'s intent: catch consumer-YAML shape
+        mistakes at the Pydantic boundary rather than letting them crash
+        uncaught deep inside ``compute_cost``/``_lookup_row``. ``None`` (an
+        absent/empty ``pricing:`` block) is tolerated as "no override", same
+        as the field's declared default.
+        """
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"engine.pricing must be a mapping of model -> pricing row, "
+                f"got {type(value).__name__!r}: {value!r}"
+            )
+        for model, row in value.items():
+            if row is not None and not isinstance(row, dict):
+                raise ValueError(
+                    f"engine.pricing[{model!r}] must be a mapping or null, "
+                    f"got {type(row).__name__!r}: {row!r}"
+                )
+        return value
+
 
 class PrevueConfig(BaseModel):
     """Typed bundle from one prevue.yml read."""
