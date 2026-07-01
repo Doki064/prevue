@@ -1,84 +1,72 @@
 ---
 phase: 10-boundary-contracts
-fixed_at: 2026-07-01T13:38:12Z
+fixed_at: 2026-07-01T19:10:00Z
 review_path: .planning/phases/10-boundary-contracts/10-REVIEW.md
-iteration: 3
-findings_in_scope: 2
-fixed: 2
-skipped: 0
+iteration: 1
+findings_in_scope: 4
+fixed: 4
+skipped: 1
 status: all_fixed
 ---
 
-# Phase 10: Code Review Fix Report
+# Phase 10: Code Review Fix Report (10-09 gap-closure round)
 
-**Fixed at:** 2026-07-01T13:38:12Z
-**Source review:** .planning/phases/10-boundary-contracts/10-REVIEW.md
-**Iteration:** 3
+**Fixed at:** 2026-07-01T19:10:00Z
+**Source review:** .planning/phases/10-boundary-contracts/10-REVIEW.md (9-file scope, plan 10-09's changeset)
+**Iteration:** 1
 
 **Summary:**
-- Findings in scope: 2 (Critical: 0, Warning: 2 — `fix_scope: critical_warning`; Info
-  findings IN-01/IN-02/IN-03 excluded)
-- Fixed: 2
-- Skipped: 0
+- Findings in scope: 4 (Critical: 2 — CR-01, CR-02; Warning: 2 — WR-01, WR-02; Info IN-01 excluded, `fix_scope: critical_warning`)
+- Fixed: 4
+- Skipped: 0 in scope (IN-01 left as a documented follow-up, not applied)
 
-_Note: this report documents iteration 3 (final, `--auto` loop cap = 3) of the fix loop — a
-re-review pass run after iteration 2's CR-01/WR-01..03 fixes, which confirmed those four
-fixed and surfaced two new warnings, no new critical. It overwrites iteration 2's
-`10-REVIEW-FIX.md`; that report remains available in `10-REVIEW-FIX.iter3.md`._
+Fixes applied manually by the orchestrator (not via `gsd-code-fixer`) since CR-01 required a
+user decision (CI-pinned dependency version bump — see below) before it could be applied.
 
 ## Fixed Issues
 
-### WR-01: `prevue-command-run.yml` missing the `antigravity-cli` install exclusion added to `prevue-review.yml` in iteration 2 — drift between the two entry points
+### CR-02: Partial-field parse failure inside one OTEL span silently produces a corrupted total reported as `estimated=False`
 
-**Files modified:** `.github/workflows/prevue-command-run.yml`
-**Commit:** `30c5cf9`
-**Applied fix:** Added the matching `github.event.client_payload.engine != 'antigravity-cli'`
-exclusion to the command-run workflow's own "Install engine CLI" `if:` condition, mirroring
-iteration 2's WR-03 fix in `prevue-review.yml`, with a comment cross-referencing that finding
-and noting the exclusion should be removed once `antigravity-cli` ships headless auth and
-`spec.py` flips `functional=True`.
+**Files modified:** `src/prevue/engines/usage.py`, `tests/test_usage_capture.py`
+**Commit:** `cdd96e8`
+**Applied fix:** Parse all four token fields into locals first; only merge into the running
+totals and increment `span_count` if the whole span parses cleanly, otherwise skip the span
+entirely (same as any other malformed span). Added regression test
+`test_copilot_otel_partial_field_parse_failure_skips_whole_span`.
 
-### WR-02: `_validate_pricing` field validator (iteration 2's CR-01 fix) had zero regression test coverage
+### CR-01: Fix root-caused against `gh copilot` v1.0.67, but CI still installed 1.0.61
 
-**Files modified:** `tests/test_engine_config_pricing.py` (new)
-**Commit:** `5801c14`
-**Applied fix:** Added a new test file covering the validator: non-dict `pricing` value
-rejected, non-dict/non-null row rejected, `None` tolerated as "no override," and a
-well-formed row accepted — mirroring `test_raw_args.py`'s structure for the sibling
-`raw_args` validator.
+**Files modified:** `.github/scripts/install-engine-cli.sh`, `docs/configuration.md`, `docs/DEVELOPMENT.md`, `tests/test_workflow_yaml.py`
+**Commit:** `4956f00`
+**Applied fix:** User selected "bump CI pin to 1.0.67" (of three options: bump pin, add
+runtime diagnostic only, leave as documented gap) via AskUserQuestion. Bumped
+`install-engine-cli.sh`'s `@github/copilot` pin from `1.0.61` to `1.0.67`, updated
+`docs/configuration.md`'s engine-install-versions table and OTEL paragraph to state support
+plainly instead of hedging, updated `docs/DEVELOPMENT.md`'s example, and bumped
+`tests/test_workflow_yaml.py`'s `COPILOT_CLI_VERSION` constant (which asserts the installer
+string matches it).
 
-## Skipped Issues
+### WR-02: `span_count`'s doc comment claims a stronger guarantee than the code provided
 
-None — all in-scope findings were fixed.
+**Resolved as a byproduct of CR-02** — `span_count` is now only incremented for spans that
+parsed all four fields cleanly, so the existing comment's claim ("distinguishes 'no real
+spans found' from a genuine zero-token span") now holds. No separate edit needed.
 
-_Note: IN-01, IN-02, IN-03 are Info-tier findings, explicitly out of scope for this run
-(`fix_scope: critical_warning`) and unchanged across all three iterations. A future `--all`
-pass can address them if desired._
+### WR-01: `docs/configuration.md`'s OTEL claim hedged rather than resolved the version-mismatch gap
 
-## Verification Summary
+**Resolved as a byproduct of CR-01** — once the pin was bumped to `1.0.67`, the paragraph was
+rewritten to state plainly that the pinned version ships OTEL export and matches the parser's
+schema, rather than instructing the reader to self-verify.
 
-- Both fix commits (`30c5cf9`, `5801c14`) were made in an isolated git worktree and
-  fast-forwarded onto `gsd/phase-10-boundary-contracts`; worktree, temp branch, and recovery
-  sentinel were cleaned up.
-- Full test suite (`uv run pytest -q`): **813 passed**, 0 failed, 0 errors (807 baseline + 6
-  new tests from `test_engine_config_pricing.py`).
-- `uv run ruff check .`: all checks passed.
-- No findings required rollback.
+## Skipped (left for follow-up, not fixed)
 
-## `--auto` Loop Summary (iterations 1–3)
+### IN-01: `github.copilot.cost` correctly excluded from parser output, but no regression test pins that decision
 
-| Iteration | Critical | Warning | Fixed | Key findings |
-|---|---|---|---|---|
-| 1 | 2 | 4 | 6/6 | `load_config()` uncaught crash on empty `models`/`raw_args` YAML; pricing-table key mismatch; missing secrets docs; dead `_resolve_model`; silent adapter override |
-| 2 | 1 | 3 | 4/4 | `engine.pricing` shape unvalidated; undocumented `engine.models`/`raw_args`/`pricing`; command-run/review workflow env drift; wasted install for non-functional antigravity-cli |
-| 3 | 0 | 2 | 2/2 | command-run/review workflow install-exclusion drift (same class as iteration 2, second entry point); no test coverage for the new pricing validator |
-
-Loop cap (3 iterations) reached with 0 critical findings remaining and only Info-tier findings
-outstanding (unaddressed by design, out of `critical_warning` scope). Total across all three
-iterations: 12 Critical/Warning findings fixed, 0 skipped, 12 commits.
+**Reason:** Info-severity, no correctness impact — `fix_scope: critical_warning` excludes Info
+findings by default. Left as a documented follow-up; a future change adding a fixture with a
+`github.copilot.cost` field and asserting no `cost_usd` key leaks into `_parse_copilot_otel`'s
+return dict would close it.
 
 ---
 
-_Fixed: 2026-07-01T13:38:12Z_
-_Fixer: Claude (gsd-code-fixer)_
-_Iteration: 3_
+_Full CI mirror (`bash scripts/ci-local.sh`: 823 tests, ruff, ruff format, actionlint, zizmor) green after both fixes._
