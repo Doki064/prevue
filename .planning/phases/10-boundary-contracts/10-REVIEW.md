@@ -1,87 +1,38 @@
 ---
 phase: 10-boundary-contracts
-reviewed: 2026-07-01T13:33:51Z
+reviewed: 2026-07-01T00:00:00Z
 depth: standard
-files_reviewed: 34
+files_reviewed: 9
 files_reviewed_list:
-  - .github/scripts/install-engine-cli.sh
-  - .github/workflows/prevue-command-run.yml
-  - .github/workflows/prevue-review.yml
-  - .github/workflows/review.yml
-  - .github/workflows/update-pricing.yml
-  - docs/configuration.md
-  - src/prevue/config.py
-  - src/prevue/engines/claude_code_cli.py
-  - src/prevue/engines/cli_adapter.py
-  - src/prevue/engines/copilot_cli.py
-  - src/prevue/engines/cursor_cli.py
-  - src/prevue/engines/errors.py
-  - src/prevue/engines/flow.py
-  - src/prevue/engines/gemini_cli.py
-  - src/prevue/engines/registry.py
-  - src/prevue/engines/spec.py
-  - src/prevue/engines/tokens.py
   - src/prevue/engines/usage.py
-  - src/prevue/github/comments.py
-  - src/prevue/pricing/__init__.py
-  - src/prevue/pricing/model_prices.json
-  - src/prevue/review.py
-  - tests/fixtures/pricing/sample_prices.json
-  - tests/fixtures/usage/antigravity_text.txt
-  - tests/fixtures/usage/claude_envelope.json
-  - tests/fixtures/usage/copilot_otel.jsonl
-  - tests/fixtures/usage/cursor_envelope.json
-  - tests/test_comments.py
-  - tests/test_config_precedence.py
-  - tests/test_copilot_adapter.py
-  - tests/test_engine_contract.py
-  - tests/test_model_roles.py
-  - tests/test_output_contract.py
-  - tests/test_pricing.py
-  - tests/test_raw_args.py
-  - tests/test_registry.py
-  - tests/test_reusable_workflow_yaml.py
+  - src/prevue/engines/spec.py
+  - src/prevue/engines/cli_adapter.py
+  - .github/workflows/prevue-review.yml
+  - .github/workflows/prevue-command-run.yml
   - tests/test_usage_capture.py
+  - tests/test_reusable_workflow_yaml.py
+  - tests/fixtures/usage/copilot_otel.jsonl
+  - docs/configuration.md
 findings:
-  critical: 0
+  critical: 2
   warning: 2
-  info: 2
-  total: 4
+  info: 1
+  total: 5
 status: issues_found
 ---
 
 # Phase 10: Code Review Report
 
-**Reviewed:** 2026-07-01T13:33:51Z
+**Reviewed:** 2026-07-01
 **Depth:** standard
-**Files Reviewed:** 34
+**Files Reviewed:** 9
 **Status:** issues_found
 
 ## Summary
 
-This is a re-review of phase 10 (boundary contracts) against the current tree, after the
-prior `10-REVIEW.md` / `10-REVIEW-FIX.md` iteration (CR-01 pricing-shape validator, WR-01
-docs, WR-02 command-run secret wiring, WR-03 antigravity install exclusion). All four fixes
-from that iteration were verified correct in isolation: `EngineConfig.pricing` now has a
-`_validate_pricing` field validator that raises `ValidationError` on a non-dict `pricing`
-value or a non-dict/non-null row (confirmed by direct construction), `docs/configuration.md`
-now documents `engine.models`/`engine.raw_args`/`engine.pricing`, `prevue-command-run.yml`
-now wires `ANTIGRAVITY_API_KEY`/`GEMINI_API_KEY` into the `Prevue command` step, and
-`prevue-review.yml`'s "Install engine CLI" step now excludes `antigravity-cli`. The full
-in-scope pytest suite (807 tests) passes.
+This change rewrites `usage.py::_parse_copilot_otel` for the real Copilot CLI flat-span OTEL JSONL schema, flips `copilot-cli`'s `usage_capture` back to `"otel-jsonl"`, wires `COPILOT_OTEL_FILE_EXPORTER_PATH` into both reusable workflow entry points, and updates fixtures/tests/docs to match (commits `2a75168`, `60daa3e`). The parser rewrite itself is a real improvement over the previous fictitious `resourceSpans`/`scopeSpans` OTLP-shape parser, and the retry/accumulation logic in `flow.py` (`_merge_retry_tokens` / `otel_accumulates`) correctly avoids double-counting OTEL spans across a retried invocation.
 
-This pass found that the WR-03 fix was applied to only one of the two workflow entry points
-that run the "Install engine CLI" step — `prevue-command-run.yml` has its own separate
-install step that still runs unconditionally for `antigravity-cli`, reproducing the exact
-waste/attack-surface issue WR-03 was meant to close, and reproducing the exact
-two-entry-points-drift failure mode that WR-02 (from the same review iteration) was meant to
-close. Additionally, the CR-01 pricing validator fix shipped with zero regression test
-coverage — no test asserts `EngineConfig.model_validate` actually rejects a malformed
-`engine.pricing` value, so a future refactor could silently regress it without any test
-failing. The remaining prior INFO findings (IN-01 defense-in-depth guard in
-`_lookup_row`/`compute_cost`, IN-02 placeholder summary fallback, IN-03 docstring/behavior
-mismatch) are unchanged and confirmed still present — they were explicitly out of scope for
-the prior fix pass (`fix_scope: critical_warning`) and remain accurately documented as such.
+However, the entire justification for this gap-closure — "the real Copilot CLI file exporter writes flat span-per-line records with `gen_ai.usage.*` keys" — was root-caused against a **locally installed `gh copilot` v1.0.67**, while `.github/scripts/install-engine-cli.sh` (not touched by either commit in this change set) still pins CI to `@github/copilot@1.0.61`. Nothing in this change verifies, bumps, or even flags that pin in a way that would surface a mismatch. This matters because the *previous* gap-closure round concluded OTEL export was "inert" on that exact pinned version (`1.0.61`) — the very conclusion this change calls "stale" — yet the stale-conclusion evidence and this fix's evidence were gathered against two different CLI versions, and the CI-pinned version was never re-verified. `docs/configuration.md` even hedges this explicitly ("verify against the pinned install version") rather than resolving it. Additionally, the new flat-span parser has a real aggregation bug: a malformed numeric field partway through one span's `attributes` dict causes the rest of that span's fields to be silently dropped while fields already summed earlier in the same span are kept, and `span_count` is incremented regardless — producing a corrupted, non-zero-but-wrong total that is still reported as `estimated=False` ("trustworthy, real data"). This directly contradicts the function's own stated design goal of never returning a misleading `estimated=False` result when no real usage data exists.
 
 ## Structural Findings (fallow)
 
@@ -89,179 +40,112 @@ None provided for this review invocation.
 
 ## Narrative Findings (AI reviewer)
 
-## Warnings
+## Critical Issues
 
-### WR-01: `prevue-command-run.yml`'s "Install engine CLI" step still runs for `antigravity-cli`, reproducing the issue WR-03 fixed only in `prevue-review.yml`
+### CR-01: Fix root-caused against gh copilot v1.0.67, but CI still installs 1.0.61 — unverified against the actual deployment environment
 
-**File:** `.github/workflows/prevue-command-run.yml:57-61`, `.github/workflows/prevue-review.yml:157-167`
+**File:** `.github/scripts/install-engine-cli.sh:8` (not modified by this change), cross-referenced with `src/prevue/engines/spec.py:114-127`, `src/prevue/engines/usage.py:15-16,194-196`, `docs/configuration.md:298,306`
 
-**Issue:** The prior review's WR-03 finding ("Install engine CLI runs for antigravity-cli even
-though the engine is registered non-functional") was fixed by adding
-`inputs.engine != 'antigravity-cli'` to the `if:` condition of `prevue-review.yml`'s "Install
-engine CLI" step (line 164, with an explanatory comment referencing WR-03). But
-`prevue-command-run.yml` — the `/prevue` slash-command dispatch entry point into the exact
-same review pipeline — has its own, separate "Install engine CLI" step:
+**Issue:** The entire premise of this gap-closure plan — that the real Copilot CLI OTEL file exporter writes flat `{"type": "span"|"metric", "attributes": {...}}` records with `gen_ai.usage.*` keys — was diagnosed by installing `gh copilot` **v1.0.67** locally (per the `spec.py` comment, the `usage.py` docstring, and the 10-09 planning docs, all of which explicitly cite "v1.0.67"). But `install-engine-cli.sh`, the script that actually provisions the Copilot CLI inside the two reusable workflows this same change touches, still pins:
 
-```yaml
-- name: Install engine CLI
-  if: github.event.client_payload.needs_engine
-  env:
-    PREVUE_ENGINE: ${{ github.event.client_payload.engine }}
-  run: bash .prevue/.github/scripts/install-engine-cli.sh
+```bash
+npm install -g @github/copilot@1.0.61
 ```
 
-This condition was never updated to exclude `antigravity-cli`. A `/prevue review` command
-dispatched with `engine: antigravity-cli` (and `needs_engine: true`) still runs the full
-`curl` + optional-checksum + `bash "$installer"` third-party install
-(`.github/scripts/install-engine-cli.sh`'s `antigravity-cli)` case) before
-`require_functional_adapter` rejects the engine downstream in `review.py` — exactly the
-wasted install/attack-surface spend WR-03 was written to close, now present in one of the two
-entry points but not the other.
+This script was **not modified** by either commit in this change set (`2a75168` "rewrite _parse_copilot_otel", `60daa3e` "flip to otel-jsonl and wire OTEL export path"). The *prior* (10-08) gap-closure round had concluded `COPILOT_OTEL_FILE_EXPORTER_PATH` was "inert" specifically on `1.0.61` — that conclusion is exactly what this change calls "stale" and reverses, but the reversal's supporting evidence comes from a different, newer CLI version than the one CI actually runs. `docs/configuration.md:298` (added by this change) states: "confirmed present in `@github/copilot` v1.0.67+; verify against the pinned install version in 'Engine install versions' below" — this is a direct admission that the verification gap exists, and it is left unresolved within the same change (line 306's table still reads `1.0.61`, unchanged).
 
-This is also a second, fresh instance of the class of bug the *same review iteration's*
-WR-02 finding described ("a `/prevue` command-dispatch workflow ... missing ... wiring
-present in the primary reusable workflow ... a real drift between the two entry points into
-the same review pipeline") — WR-02 was fixed for secret wiring, but the parallel install-step
-gating fix (WR-03) was not mirrored to the second entry point at the same time, so the two
-workflows have drifted again on a different axis.
+Net effect: this fix may not work at all in the actual GitHub Actions environment it targets — the flat-span schema may differ, or OTEL export may still be unavailable, on `1.0.61` — and there is no test, CI check, or version-pin bump that would catch a mismatch. `10-VERIFICATION.md`'s `human_verification` entry says a live CI spot-check "remains an open follow-up," but that follow-up is framed as confirming the fix works end-to-end, not as reconciling the version discrepancy that makes the outcome uncertain in the first place. Given prior history in this exact code path (a previous "confirmed inert" conclusion was itself wrong), shipping a second unverified version-dependent claim without closing the loop is a real risk of landing a no-op fix a second time.
 
-No test guards this: `tests/test_reusable_workflow_yaml.py` only loads and asserts against
-`prevue-review.yml` (`REUSABLE_WORKFLOW` constant, line 10-12); `prevue-command-run.yml` has
-no equivalent test file, so this class of two-workflow drift has no regression coverage at
-all in either direction.
+**Fix:** Either bump `install-engine-cli.sh`'s pin to `1.0.67` (or a later, confirmed-compatible version) as part of this same change, or explicitly re-verify the flat-span schema against `1.0.61` before flipping `usage_capture` back to `"otel-jsonl"`. At minimum, add a runtime diagnostic: when `_parse_copilot_otel` returns `None` for a copilot-cli run where `COPILOT_OTEL_FILE_EXPORTER_PATH` is set and the path exists (i.e. "we looked, but found nothing usable"), emit a stderr note with the first line's top-level keys, so a version/schema mismatch is visible in CI logs instead of silently degrading to `estimated=True` with zero diagnostic signal.
 
-**Fix:** Add the same `&& github.event.client_payload.engine != 'antigravity-cli'` exclusion
-to `prevue-command-run.yml`'s "Install engine CLI" step `if:` condition, mirroring
-`prevue-review.yml:164`:
+### CR-02: Partial-field parse failure inside one OTEL span silently produces a corrupted total reported as `estimated=False` (trustworthy) instead of degrading cleanly
 
-```yaml
-- name: Install engine CLI
-  if: >-
-    github.event.client_payload.needs_engine &&
-    github.event.client_payload.engine != 'antigravity-cli'
-  env:
-    PREVUE_ENGINE: ${{ github.event.client_payload.engine }}
-  run: bash .prevue/.github/scripts/install-engine-cli.sh
-```
+**File:** `src/prevue/engines/usage.py:279-286`
 
-Consider also adding a shared regression test (or extending
-`test_reusable_workflow_yaml.py` to parametrize over both workflow files) that asserts both
-"Install engine CLI" steps exclude any engine with `functional=False` in `CLI_ENGINE_SPECS`,
-so this drift cannot silently reappear a third time as new non-functional engines are added.
-
-### WR-02: The `_validate_pricing` field validator (CR-01 fix) has no regression test coverage
-
-**File:** `src/prevue/config.py:160-184`, `tests/test_pricing.py`, `tests/test_raw_args.py`
-
-**Issue:** The prior review's CR-01 finding was fixed by adding a
-`field_validator("pricing", mode="before")` on `EngineConfig` that rejects a non-dict
-`pricing` value or a non-dict/non-null row within it. This validator is exercised manually
-here and confirmed to work correctly:
-
-```
->>> EngineConfig.model_validate({"pricing": {"gpt-4o": "not-a-dict"}})
-pydantic.ValidationError: ... engine.pricing['gpt-4o'] must be a mapping or null ...
-```
-
-But no test in the repository calls it. `tests/test_pricing.py` only tests the pure
-`compute_cost`/`load_pricing_table` functions with hand-built `override`/`table` dicts — it
-never constructs an `EngineConfig` and never imports `_validate_pricing`. The sibling
-`raw_args` validator (`_validate_raw_args`), by contrast, has a full dedicated test file
-(`tests/test_raw_args.py`, 124 lines) covering the string-rejection, non-list-rejection,
-non-string-element-rejection, and `None`-tolerance cases. `_validate_pricing` mirrors that
-validator's logic and intent but has zero equivalent coverage — a future refactor of
-`EngineConfig` (e.g. accidentally dropping the `mode="before"` validator during a Pydantic
-version bump, or a copy-paste edit that loosens the `isinstance` check) would not be caught
-by any test, silently reopening the exact crash this phase's own review cycle flagged as
-CRITICAL.
-
-**Fix:** Add a `tests/test_pricing.py` (or new `test_engine_config_pricing.py`) section
-mirroring `test_raw_args.py`'s structure, e.g.:
+**Issue:**
 
 ```python
-import pytest
-from pydantic import ValidationError
-from prevue.config import EngineConfig
-
-def test_pricing_rejects_non_dict_value():
-    with pytest.raises(ValidationError, match="mapping"):
-        EngineConfig.model_validate({"pricing": "not-a-dict"})
-
-def test_pricing_rejects_non_dict_row():
-    with pytest.raises(ValidationError, match="mapping or null"):
-        EngineConfig.model_validate({"pricing": {"gpt-4o": "not-a-dict"}})
-
-def test_pricing_accepts_none():
-    cfg = EngineConfig.model_validate({"pricing": None})
-    assert cfg.pricing is None
-
-def test_pricing_accepts_valid_row():
-    cfg = EngineConfig.model_validate(
-        {"pricing": {"gpt-4o": {"input_cost_per_token": 1e-6}}}
-    )
-    assert cfg.pricing == {"gpt-4o": {"input_cost_per_token": 1e-6}}
+span_count += 1
+try:
+    total_input += int(attrs.get(_OTEL_INPUT_TOKENS, 0) or 0)
+    total_output += int(attrs.get(_OTEL_OUTPUT_TOKENS, 0) or 0)
+    total_cache_read += int(attrs.get(_OTEL_CACHE_READ_TOKENS, 0) or 0)
+    total_cache_creation += int(attrs.get(_OTEL_CACHE_CREATION_TOKENS, 0) or 0)
+except (TypeError, ValueError):
+    continue  # skip malformed span (T-10-07)
 ```
+
+All four token fields for one span are summed inside a single `try` block, and `span_count += 1` happens *before* the block runs. If one field (e.g. `gen_ai.usage.output_tokens`) is malformed (non-numeric) while an earlier field on the same line (`gen_ai.usage.input_tokens`) is valid, the earlier field's increment is **not rolled back** when the exception fires on the later field. Verified directly against the current code:
+
+```python
+>>> _parse_copilot_otel(<file with one span: input_tokens=500, output_tokens="garbage">)
+{'input': 500, 'output': 0, 'cache_read': 0, 'cache_creation': 0, 'estimated': False}
+```
+
+and, worse — if the *first* field parsed (`input_tokens`) is the malformed one, `span_count` was already incremented before the exception, so the function still returns a non-`None` result instead of degrading:
+
+```python
+>>> _parse_copilot_otel(<file with one span: input_tokens="garbage", output_tokens=10>)
+{'input': 0, 'output': 0, 'cache_read': 0, 'cache_creation': 0, 'estimated': False}
+```
+
+This is exactly the failure mode the function's own docstring says it avoids — the `span_count == 0` guard's comment (lines 292-297) states the intent is to avoid "reporting a misleading estimated=False zeroed dict," but that guard only protects the file-level "zero real spans seen" case; it does not protect against a single malformed field silently zeroing (or partially zeroing) an otherwise-real span while still being counted as "real" (`estimated=False`). A caller (the sticky PR comment / cost report) will display this corrupted total as trustworthy real token data. `tests/test_usage_capture.py` has no test combining one valid field with one malformed field on the same span, so this gap is unguarded.
+
+**Fix:** Parse all four fields into local variables first, without mutating the running totals; only merge into the totals (and increment `span_count`) if the entire span parses cleanly. Otherwise skip the whole span, same as any other malformed-span case:
+
+```python
+parsed: dict[str, int] = {}
+span_ok = True
+for key, field in (
+    ("input", _OTEL_INPUT_TOKENS),
+    ("output", _OTEL_OUTPUT_TOKENS),
+    ("cache_read", _OTEL_CACHE_READ_TOKENS),
+    ("cache_creation", _OTEL_CACHE_CREATION_TOKENS),
+):
+    try:
+        parsed[key] = int(attrs.get(field, 0) or 0)
+    except (TypeError, ValueError):
+        span_ok = False
+        break
+if not span_ok:
+    continue  # malformed span — do not count toward span_count or totals
+span_count += 1
+total_input += parsed["input"]
+total_output += parsed["output"]
+total_cache_read += parsed["cache_read"]
+total_cache_creation += parsed["cache_creation"]
+```
+
+## Warnings
+
+### WR-01: `docs/configuration.md`'s new OTEL claim hedges rather than resolves the version-mismatch gap it documents
+
+**File:** `docs/configuration.md:298,306`
+
+**Issue:** Line 298 (added by this change) reads: "confirmed present in `@github/copilot` v1.0.67+; verify against the pinned install version in 'Engine install versions' below." Line 306 (pre-existing, unchanged by this change) shows `copilot-cli` pinned at `1.0.61` in that same table. This documents the ambiguity from CR-01 rather than resolving it — a consumer reading this doc still has to cross-reference two places and comes away unsure whether real-token capture actually works on the version their CI will install, which is exactly the opposite of what a "boundary contracts" phase's docs should guarantee.
+
+**Fix:** Once CR-01 is resolved (pin bumped or `1.0.61` re-verified), update line 298 to state plainly whether the pinned version supports OTEL export and the flat-span schema, rather than instructing the reader to self-verify.
+
+### WR-02: `span_count`'s doc comment claims a stronger guarantee than the code currently provides
+
+**File:** `src/prevue/engines/usage.py:250-251,279`
+
+**Issue:** The comment at lines 250-251 states `span_count` "distinguishes 'no real spans found' from a genuine zero-token span" — implying `span_count > 0` means at least one span's tokens were actually captured. As shown in CR-02, `span_count` is incremented as soon as a record passes the `type == "span"` / `isinstance(attrs, dict)` shape checks, before any token field is parsed — so the comment's guarantee does not currently hold for partially-malformed spans.
+
+**Fix:** This will be resolved as a byproduct of the CR-02 fix (only increment `span_count` for spans that fully parsed). Until then, the comment overstates what the guard actually protects against.
 
 ## Info
 
-### IN-01: `_lookup_row`/`compute_cost` still has no defense-in-depth guard against non-dict pricing rows (carried forward, unfixed — correctly out of scope)
+### IN-01: `github.copilot.cost` is correctly excluded from the parsed result, but no regression test pins that decision
 
-**File:** `src/prevue/pricing/__init__.py:105-141, 187-201`
+**File:** `src/prevue/engines/usage.py:212-214`
 
-**Issue:** Unchanged from the prior review. `_lookup_row` and `compute_cost` still assume
-every value under `override`/`table` is a dict (`row.get(...)`) with no `isinstance` guard.
-The Pydantic-boundary fix (CR-01/`_validate_pricing`) closes the `prevue.yml`-sourced attack
-surface, but `compute_cost` remains a public function; called directly (as in
-`update-pricing.yml`'s validation step, or any future test/caller) with a malformed
-`override`/`table` dict built outside `EngineConfig`, it still crashes uncaught:
+**Issue:** The docstring explains `github.copilot.cost` is deliberately not read here, to keep a single cost-computation path via `pricing.compute_cost` (documented as T-10-09-02, a tampering mitigation — an exporter-supplied cost value shouldn't be trusted as-is). This is a sound design decision, but no test in `tests/test_usage_capture.py` asserts a span carrying a suspicious `github.copilot.cost` value doesn't leak into the returned dict's `cost_usd` (which is computed downstream by `flow._enrich_capture`, not by `_parse_copilot_otel` itself). A future refactor could silently reintroduce a direct read of this field without any test catching the regression.
 
-```
->>> compute_cost("openai", "gpt-4o", {"input": 100, "output": 10},
-...              override={"gpt-4o": "not-a-dict"}, table={})
-AttributeError: 'str' object has no attribute 'get'
-```
-
-Confirmed still reproducible against the current code. This is intentionally unaddressed —
-the prior fix report explicitly scoped it out (`fix_scope: critical_warning`, IN-01 deferred
-to a future `--all` pass) — carried forward here for visibility, not as a new finding.
-
-**Fix:** (unchanged from prior review) Add `isinstance(row, dict)` guards in `_lookup_row`'s
-lookup branches (override exact/normalized, table exact/normalized, suffix-fallback) so a
-malformed row degrades to "skip this entry" rather than crashing, matching the defensive
-style already used in `usage.py`'s OTEL parsing.
-
-### IN-02: `combined_summary` in `review.py` still falls back to a bare, unlabeled placeholder heading (carried forward, unfixed — correctly out of scope)
-
-**File:** `src/prevue/review.py:1168`
-
-**Issue:** Unchanged from the prior review.
-`combined_summary = "\n\n".join(s for s in all_summaries if s) or "## Review\n"` still
-renders a bare, unlabeled `## Review` heading when every call result's `summary_markdown` is
-falsy, with no signal to the reader that this is a fallback rather than genuine (if terse)
-prose. Confirmed still present at the same line. Intentionally unaddressed per the prior fix
-report's scoping.
-
-**Fix:** (unchanged from prior review) Use a more descriptive fallback, e.g.
-`"_No review summary was returned by the engine._"`.
-
-### IN-03: `config.py` module docstring's fallback-model precedence still contradicts `review.py`'s actual behavior (carried forward, unfixed — correctly out of scope)
-
-**File:** `src/prevue/config.py:9-14`, `src/prevue/review.py:659,780,850`
-
-**Issue:** Unchanged from the prior review. The module docstring's precedence knob 3 still
-reads `(no env override) > classification.fallback.model in yml > None`, while
-`review.py`'s `_effective_classify_model` (line 659) and `_skill_select_model` (line 780)
-both end with `or os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))` — an env
-override applied last, directly contradicting the docstring's "(no env override)"
-parenthetical. Confirmed still present at the same lines. Intentionally unaddressed per the
-prior fix report's scoping.
-
-**Fix:** (unchanged from prior review) Update the `config.py` docstring's knob-3 line to:
-`3. fallback model: PREVUE_MODEL/COPILOT_MODEL env (applied at the review.py call site) >
-classification.fallback.model in yml > None`.
+**Fix:** Add a small regression test: a span fixture with `"github.copilot.cost": 999999.0` alongside valid `gen_ai.usage.*` fields, asserting `_parse_copilot_otel`'s returned dict has no `cost_usd` key (that field is only ever added later, by `flow._enrich_capture`/`pricing.compute_cost`).
 
 ---
 
-_Reviewed: 2026-07-01T13:33:51Z_
+_Reviewed: 2026-07-01_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
