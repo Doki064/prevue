@@ -50,14 +50,22 @@ def _classify_batch(
     adapter: EngineAdapter,
     *,
     model: str | None = None,
-) -> dict[str, str]:
-    """Run one adapter.classify() call; return validated labels (maybe empty)."""
+) -> tuple[dict[str, str], int | None]:
+    """Run one adapter.classify() call; return (validated_labels, real_tokens | None)."""
     try:
-        raw = adapter.classify(
-            paths,
-            list(CANONICAL_LABEL_ORDER),
-            model=model,
-        )
+        if hasattr(adapter, "classify_with_tokens"):
+            raw, real_tokens = adapter.classify_with_tokens(
+                paths,
+                list(CANONICAL_LABEL_ORDER),
+                model=model,
+            )
+        else:
+            raw = adapter.classify(
+                paths,
+                list(CANONICAL_LABEL_ORDER),
+                model=model,
+            )
+            real_tokens = None
     except (
         NotImplementedError,
         AttributeError,
@@ -67,9 +75,9 @@ def _classify_batch(
         json.JSONDecodeError,
         ValueError,
     ):
-        return {}
+        return {}, None
 
-    return _validate_labels(raw, CANONICAL_LABEL_ORDER)
+    return _validate_labels(raw, CANONICAL_LABEL_ORDER), real_tokens
 
 
 def llm_classify(
@@ -78,17 +86,26 @@ def llm_classify(
     *,
     model: str | None = None,
     batch_size: int = CLASSIFY_BATCH_SIZE,
-) -> tuple[dict[str, str], str | None]:
-    """Classify only unmatched paths via the selected adapter; degrade on failure."""
+) -> tuple[dict[str, str], str | None, int | None]:
+    """Classify only unmatched paths via the selected adapter; degrade on failure.
+
+    Returns (labels, disclosure, real_tokens) where real_tokens is the sum of
+    input+output tokens reported by the engine across all batches (json_envelope
+    engines only). None means no real count available — caller should estimate.
+    """
     if not unmatched_paths:
-        return {}, None
+        return {}, None, None
 
     validated: dict[str, str] = {}
+    total_tokens: int | None = None
     for batch in _chunk_paths(unmatched_paths, batch_size):
-        validated.update(_classify_batch(batch, adapter, model=model))
+        batch_labels, batch_tokens = _classify_batch(batch, adapter, model=model)
+        validated.update(batch_labels)
+        if batch_tokens is not None:
+            total_tokens = (total_tokens or 0) + batch_tokens
 
     if not validated:
-        return {GENERAL_LABEL: FALLBACK_FAILED_GLOB}, FALLBACK_DISCLOSURE
+        return {GENERAL_LABEL: FALLBACK_FAILED_GLOB}, FALLBACK_DISCLOSURE, total_tokens
 
     missing_paths = [path for path in unmatched_paths if path not in validated]
     if missing_paths:
@@ -100,9 +117,9 @@ def llm_classify(
             f"classification fallback partial — reviewed {len(missing_paths)} "
             f"unmatched path(s) as general: {listed}{suffix}"
         )
-        return partial, disclosure
+        return partial, disclosure, total_tokens
 
-    return validated, None
+    return validated, None, total_tokens
 
 
 _RELEVANT_LABEL = "relevant"

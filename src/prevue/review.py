@@ -609,6 +609,7 @@ def run_review(
 
     classification_disclosure: str | None = None
     classify_tokens = 0
+    _classify_real_tokens: int | None = None
     llm_skill_names: set[str] | None = None
     _llm_path_labels: dict[str, str] = {}
 
@@ -625,7 +626,7 @@ def run_review(
             or fallback_cfg.model
             or os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
         )
-        fallback_labels, classification_disclosure = llm_classify(
+        fallback_labels, classification_disclosure, _classify_real_tokens = llm_classify(
             unmatched_pre_pack,
             engine,
             model=_effective_classify_model,
@@ -636,7 +637,12 @@ def run_review(
         # overstate the audit-trail cost (WR-02).
         produced_real_labels = bool(fallback_labels.keys() - {GENERAL_LABEL})
         if produced_real_labels:
-            classify_tokens = estimate_classify_tokens(unmatched_pre_pack)
+            # Prefer real token counts from json_envelope engines; fall back to estimate.
+            classify_tokens = (
+                _classify_real_tokens
+                if _classify_real_tokens is not None
+                else estimate_classify_tokens(unmatched_pre_pack)
+            )
         for path_or_label, label_or_glob in fallback_labels.items():
             is_degrade_general = path_or_label == GENERAL_LABEL and label_or_glob in {
                 FALLBACK_FAILED_GLOB,
@@ -1238,10 +1244,9 @@ def run_review(
         "token_meta": {
             **engine_tokens,
             "classify": classify_tokens,
-            # review provenance comes from the engine's own "estimated" flag;
-            # classify is always a bytes/4 estimate (estimate_classify_tokens).
             "review_estimated": bool(engine_tokens.get("estimated")),
-            "classify_estimated": True,
+            # False when engine returned real usage in JSON envelope; True for estimate.
+            "classify_estimated": _classify_real_tokens is None,
             "per_call": result.engine_meta.get("per_call", []),
         },
         "reviewed_file_count": len(packed_files),

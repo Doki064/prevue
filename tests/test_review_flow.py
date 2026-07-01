@@ -912,7 +912,7 @@ def test_fallback_classifies_full_reduced_set_including_budget_skipped() -> None
         patch("prevue.review.conclude_review_check", return_value=True),
         patch(
             "prevue.review.llm_classify",
-            return_value=({"data/mystery_a.bin": "backend"}, None),
+            return_value=({"data/mystery_a.bin": "backend"}, None, None),
         ) as mock_llm,
     ):
         run_review(adapter=FindingsEngine())
@@ -1018,7 +1018,7 @@ def test_run_review_classify_tokens_zero_on_full_degrade() -> None:
         patch("prevue.review.conclude_review_check", return_value=True),
         patch(
             "prevue.review.llm_classify",
-            return_value=({GENERAL_LABEL: FALLBACK_FAILED_GLOB}, FALLBACK_DISCLOSURE),
+            return_value=({GENERAL_LABEL: FALLBACK_FAILED_GLOB}, FALLBACK_DISCLOSURE, None),
         ) as mock_llm,
     ):
         run_review(adapter=FindingsEngine())
@@ -1044,7 +1044,7 @@ def test_run_review_classify_tokens_nonzero_on_real_labels() -> None:
         patch("prevue.review.conclude_review_check", return_value=True),
         patch(
             "prevue.review.llm_classify",
-            return_value=({"mystery.bin": "backend"}, None),
+            return_value=({"mystery.bin": "backend"}, None, None),
         ) as mock_llm,
     ):
         run_review(adapter=FindingsEngine())
@@ -1081,6 +1081,7 @@ def test_run_review_partial_degrade_bills_routes_and_retains_general() -> None:
             return_value=(
                 {"mystery.bin": "backend", GENERAL_LABEL: FALLBACK_PARTIAL_GLOB},
                 partial_disclosure,
+                None,
             ),
         ) as mock_llm,
     ):
@@ -2960,7 +2961,7 @@ def test_llm_fallback_label_triggers_bundle_selection() -> None:
         # LLM fallback returns 'data' label for the unmatched path
         patch(
             "prevue.review.llm_classify",
-            return_value=({"data/billing.bin": "data"}, None),
+            return_value=({"data/billing.bin": "data"}, None, None),
         ) as mock_llm,
         patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky),

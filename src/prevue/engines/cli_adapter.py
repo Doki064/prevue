@@ -237,11 +237,38 @@ class CliEngineAdapter(EngineAdapter):
         *,
         model: str | None = None,
     ) -> dict[str, str]:
+        labels, _ = self.classify_with_tokens(paths, allowed_labels, model=model)
+        return labels
+
+    def classify_with_tokens(
+        self,
+        paths: list[str],
+        allowed_labels: tuple[str, ...] | list[str],
+        *,
+        model: str | None = None,
+    ) -> tuple[dict[str, str], int | None]:
+        """Classify paths and return (labels, real_token_count).
+
+        real_token_count is input+output tokens from the engine's JSON envelope
+        (json_envelope specs only). None for plain-stdout engines.
+        """
         token, env = self._build_env(model)
         prompt = build_classify_prompt(paths, allowed_labels)
         # raw_args not passed to classify — extra engine flags are review-only (D-10)
         raw = self._invoke(prompt, env, token, CLASSIFY_TIMEOUT_SECONDS, model)
-        return parse_classify_response(self._unwrap_classify_text(raw), paths, allowed_labels)
+        labels = parse_classify_response(self._unwrap_classify_text(raw), paths, allowed_labels)
+        real_tokens: int | None = None
+        if self._spec.stdout_format == "json_envelope":
+            from prevue.engines.usage import parse_envelope
+
+            envelope = parse_envelope(raw)
+            if envelope is not None:
+                usage = envelope.get("usage")
+                if isinstance(usage, dict):
+                    inp = usage.get("input_tokens") or 0
+                    out = usage.get("output_tokens") or 0
+                    real_tokens = int(inp) + int(out)
+        return labels, real_tokens
 
     def classify_skills(
         self,
