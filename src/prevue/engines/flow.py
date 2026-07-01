@@ -70,8 +70,10 @@ def _token_meta(
     stdout_tokens = estimate_tokens(stdout)
     review_tokens = prompt_tokens + stdout_tokens
     if captured is not None:
-        meta: dict[str, Any] = {"review": review_tokens}
+        meta: dict[str, Any] = {}
         meta.update(_pick_real_token_fields(captured))
+        real_review = (captured.get("input") or 0) + (captured.get("output") or 0)
+        meta["review"] = real_review if real_review else review_tokens
         return meta
     meta = {"review": review_tokens, "estimated": True}
     cost = _estimated_cost_usd(prompt_tokens, stdout_tokens, spec, model_label, pricing_override)
@@ -107,8 +109,11 @@ def _retry_token_meta(
     # real input/output/cache/cost when both invocations succeeded, silently
     # under-reporting ~50% of actual usage on any retried review.
     if captured is not None or captured_retry is not None:
-        meta: dict[str, Any] = {"review": review_tokens}
-        meta.update(_sum_real_token_fields(captured, captured_retry))
+        meta: dict[str, Any] = {}
+        summed = _sum_real_token_fields(captured, captured_retry)
+        meta.update(summed)
+        real_review = (summed.get("input") or 0) + (summed.get("output") or 0)
+        meta["review"] = real_review if real_review else review_tokens
         return meta
     meta = {"review": review_tokens, "estimated": True}
     cost = _estimated_cost_usd(prompt_tokens, output_tokens, spec, model_label, pricing_override)
@@ -303,10 +308,15 @@ def review_with_retry(
                 ),
             )
 
-        # Capture usage for retry invocation too (Q-05)
+        # Capture usage for retry invocation too (Q-05).
+        # otel-jsonl: the JSONL dir accumulates spans from ALL invocations, so
+        # captured_retry already contains first+retry spans. Pass captured=None
+        # to _retry_token_meta to avoid double-counting first invocation's spans.
+        _otel_accumulates = spec is not None and spec.usage_capture == "otel-jsonl"
         captured_retry = _enrich_capture(
             spec, raw_retry_stdout, model_label, pricing_override, otel_path
         )
+        captured_for_sum = None if _otel_accumulates else captured
 
         fence_retry_source = _resolve_fence_source(spec, raw_retry_stdout)
         prose, payload, fence_err = extract_json_fence(fence_retry_source)
@@ -325,7 +335,7 @@ def review_with_retry(
                     retry_prompt,
                     first_stdout,
                     retry_stdout,
-                    captured,
+                    captured_for_sum,
                     captured_retry,
                     spec=spec,
                     model_label=model_label,
@@ -339,7 +349,7 @@ def review_with_retry(
                 retry_prompt,
                 first_stdout,
                 retry_stdout,
-                captured,
+                captured_for_sum,
                 captured_retry,
                 spec=spec,
                 model_label=model_label,
