@@ -42,6 +42,34 @@ on:
         required: false
       gemini-api-key:
         required: false
+    # OUTP-05 (10-08 gap closure, Gap 3): GitHub Actions requires this top-level
+    # workflow_call.outputs block as a SIBLING of jobs.review.outputs — a job-level
+    # outputs: map alone never propagates across the workflow_call boundary to a
+    # caller's needs.<job>.outputs.* (live-confirmed via a downstream probe job in
+    # 10-UAT.md). Both blocks must stay in sync (same 7 keys, same order) — a
+    # regression test (test_workflow_call_outputs_block_declared) fails on drift.
+    outputs:
+      schema_version:
+        description: "Machine-readable output schema version"
+        value: ${{ jobs.review.outputs.schema_version }}
+      conclusion:
+        description: "Review conclusion (success | failure | neutral)"
+        value: ${{ jobs.review.outputs.conclusion }}
+      error_count:
+        description: "Number of error-severity findings"
+        value: ${{ jobs.review.outputs.error_count }}
+      warning_count:
+        description: "Number of warning-severity findings"
+        value: ${{ jobs.review.outputs.warning_count }}
+      info_count:
+        description: "Number of info-severity findings"
+        value: ${{ jobs.review.outputs.info_count }}
+      tokens:
+        description: "Total tokens consumed by the review (estimated or real)"
+        value: ${{ jobs.review.outputs.tokens }}
+      cost_usd:
+        description: "Estimated review cost in USD"
+        value: ${{ jobs.review.outputs.cost_usd }}
 
 # LIFE-04 (resolveReviewThread) requires contents:write — verified live 2026-06 (08-07).
 # pull-requests:write alone returns GraphQL 403 Forbidden on resolveReviewThread.
