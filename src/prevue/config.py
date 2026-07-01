@@ -294,6 +294,31 @@ def _resolve_engine_models(raw: dict) -> dict[str, str | None]:
     }
 
 
+def resolve_engine_models_from_config(engine_config: EngineConfig) -> dict[str, str | None]:
+    """Direct EngineConfig → per-role model dict (Q-02, 10-THERMOS).
+
+    Replaces the review.py round-trip that reconstructed a fake raw YAML dict from
+    EngineConfig fields just to pass it into _resolve_engine_models() — the round-trip
+    existed because _resolve_engine_models() was designed for the raw YAML dict from
+    load_config, not for the already-parsed typed model. This function takes the typed
+    model directly.
+
+    Resolution per role: models.<role> else engine.model else None (env override
+    deliberately omitted — applied at call-sites per _resolve_engine_models docstring).
+    """
+    single_model = engine_config.model or None
+    em = engine_config.models
+
+    def _role(val: str | None) -> str | None:
+        return val or single_model
+
+    return {
+        "classify": _role(em.classify),
+        "review": _role(em.review),
+        "consolidate": _role(em.consolidate),
+    }
+
+
 def resolve_review_model(review_model_from_config: str | None, env_model: str | None) -> str | None:
     """Apply the env-override layer to the per-role review model (T-02 fix — 10-THERMOS).
 

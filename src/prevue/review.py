@@ -24,13 +24,14 @@ from prevue.classify.llm_fallback import (
 from prevue.classify.models import CANONICAL_LABEL_ORDER, GENERAL_LABEL
 from prevue.classify.router import route
 from prevue.config import (
-    _resolve_engine_models,
     load_config,
     resolve_consumer_config_path,
+    resolve_engine_models_from_config,
     resolve_review_model,
 )
 from prevue.dismiss import active_suppressed_fingerprints, parse_dismiss_block
 from prevue.engines.base import EngineAdapter
+from prevue.engines.cli_adapter import CliEngineAdapter
 from prevue.engines.prompt import (
     MAX_PROMPT_BYTES,
     build_prompt,
@@ -582,7 +583,9 @@ def run_review(
     # Injected here (not in get_adapter) so the raw_args are always sourced from the
     # single load_config read — gated by resolve_consumer_config_path's base-ref sentinel
     # (SKIL-04/Pitfall 4: PR-head raw_args is ignored).
-    if not adapter and config.engine_config.raw_args and hasattr(engine, "set_raw_args"):
+    # Q-02: isinstance guard replaces hasattr duck-typing; engine is always CliEngineAdapter
+    # when `not adapter` (require_functional_adapter always returns CliEngineAdapter).
+    if not adapter and config.engine_config.raw_args and isinstance(engine, CliEngineAdapter):
         engine.set_raw_args(config.engine_config.raw_args)
 
     # Thread pricing override from base-ref engine_config into the adapter (D-06c).
@@ -590,26 +593,15 @@ def run_review(
     if (
         not adapter
         and config.engine_config.pricing is not None
-        and hasattr(engine, "set_pricing_override")
+        and isinstance(engine, CliEngineAdapter)
     ):
         engine.set_pricing_override(config.engine_config.pricing)
 
-    # Resolve per-role models (ENGN-09/D-11): classify, review, consolidate.
-    # Engine-config raw dict used to produce a flat dict for the two active call sites.
+    # Resolve per-role models (ENGN-09/D-11, Q-02): classify, review, consolidate.
+    # Direct from EngineConfig — no fake raw-dict round-trip (resolve_engine_models_from_config).
     # The consolidate slot resolves but is unused this phase (D-13: Phase 13/QUAL-01 will
     # consume it for the multicall merge step).
-    _engine_models = _resolve_engine_models(
-        {
-            "engine": {
-                "model": config.engine_config.model,
-                "models": {
-                    "classify": config.engine_config.models.classify,
-                    "review": config.engine_config.models.review,
-                    "consolidate": config.engine_config.models.consolidate,
-                },
-            }
-        }
-    )
+    _engine_models = resolve_engine_models_from_config(config.engine_config)
     # Classify model: models.classify > engine.model > env fallback (applied at call-site)
     _classify_model: str | None = _engine_models.get("classify")
     # Review model: models.review > engine.model > env (PREVUE_MODEL/COPILOT_MODEL)
