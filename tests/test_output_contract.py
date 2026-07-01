@@ -1,7 +1,7 @@
 """RED contract tests for versioned machine-readable output (OUTP-05 / D-08/D-09).
 
 These tests are intentionally RED until Plan 05 implements the emit helpers
-in prevue.review. They pin the behavioral contract for build_compact_output()
+in prevue.output. They pin the behavioral contract for build_compact_output()
 and build_full_output() so downstream implementation must satisfy the shape here.
 
 Contract (from 10-RESEARCH.md § Pattern 4: Versioned both-form output):
@@ -11,6 +11,10 @@ Contract (from 10-RESEARCH.md § Pattern 4: Versioned both-form output):
   Both forms include schema_version="1.0" (D-09).
   GITHUB_OUTPUT rendering: each key=value line safe (no embedded newlines in a
   single value), using a heredoc-style or escaped form (Pitfall 6).
+
+Q-01 (10-THERMOS): these helpers moved from prevue.review to prevue.output
+(extracted — no orchestration dependency); prevue.review still re-exports
+them for backward compat, but tests target the canonical module directly.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ import pytest
 from prevue.models import DiffBundle, Finding, ReviewResult
 
 try:
-    from prevue.review import build_compact_output, build_full_output, emit_machine_output
+    from prevue.output import build_compact_output, build_full_output, emit_machine_output
 
     _IMPORT_ERROR: ImportError | None = None
 except ImportError as exc:

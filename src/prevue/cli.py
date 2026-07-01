@@ -9,8 +9,9 @@ from prevue.commands import run_command
 from prevue.engines.errors import AuthError, EngineFailure
 from prevue.gate_validate import run_gate_revalidate, run_materialize_comment_event
 from prevue.models import ReviewResult
+from prevue.output import emit_machine_output
 from prevue.preflight import run_preflight_noop_check
-from prevue.review import ForkPrUnsupported, emit_machine_output, run_review
+from prevue.review import ForkPrUnsupported, run_review
 
 
 def main(argv: list[str] | None = None) -> int:
