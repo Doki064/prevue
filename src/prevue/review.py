@@ -39,7 +39,11 @@ from prevue.engines.prompt import (
     estimate_file_prompt_tokens,
     estimate_prompt_overhead_tokens,
 )
-from prevue.engines.registry import NonFunctionalEngineError, require_functional_adapter
+from prevue.engines.registry import (
+    NonFunctionalEngineError,
+    UnknownEngineError,
+    require_functional_adapter,
+)
 from prevue.engines.tokens import estimate_tokens
 from prevue.fingerprint import fingerprint
 from prevue.gate import SEVERITY_RANK, GateResult, PlacedFinding, apply_gate
@@ -585,7 +589,7 @@ def run_review(
     # via _resolve_engine — re-reading the env here would duplicate that rule (WR-06).
     try:
         engine = adapter or require_functional_adapter(config.engine)
-    except NonFunctionalEngineError as exc:
+    except (NonFunctionalEngineError, UnknownEngineError) as exc:
         _publish_skip(
             pr,
             ctx,
@@ -1183,6 +1187,11 @@ def run_review(
                     else {}
                 ),
                 **({"cost_usd": total_cost_usd} if total_cost_usd is not None else {}),
+                # T-01 (10-THERMOS quick task): mirror the classify cost into the same
+                # tokens dict that build_compact_output/emit_machine_output read, so the
+                # LLM-fallback classify spend is reflected in the machine output — not
+                # just sticky_base_kwargs["token_meta"]["classify"] below.
+                **({"classify": classify_tokens} if classify_tokens else {}),
             },
             "per_call": per_call_tokens,
         },
@@ -1349,6 +1358,10 @@ def run_review(
         sticky_failed=sticky_failed,
         skipped_count=len(skipped_files),
     )
+    # T-04 (10-THERMOS quick task): emit machine output BEFORE the publish-failure
+    # raise so the real result/tokens/findings are always emitted, even when the
+    # check-run publish itself fails — the RuntimeError below still propagates
+    # afterward so callers still see (and exit non-zero on) the publish failure.
+    emit_machine_output(result, gate.conclusion)
     if not check_published:
         raise RuntimeError("Failed to publish review check run")
-    emit_machine_output(result, gate.conclusion)

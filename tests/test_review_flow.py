@@ -10,7 +10,6 @@ from pydantic import ValidationError
 
 from prevue.config import NO_CONSUMER_CONFIG_SENTINEL, SkillsConfig, load_config
 from prevue.engines.errors import EngineFailure
-from prevue.engines.registry import UnknownEngineError
 from prevue.fingerprint import fingerprint
 from prevue.github.client import PrContext
 from prevue.github.comments import PARTIAL_MARKER, render_body
@@ -1050,6 +1049,40 @@ def test_run_review_classify_tokens_zero_on_full_degrade() -> None:
     assert token_meta["classify"] == 0
 
 
+def test_run_review_compact_output_includes_classify_tokens() -> None:
+    """T-01 (10-THERMOS quick task): emit_machine_output's tokens must include the
+    LLM-fallback classify cost, not just review cost — build_compact_output already
+    sums tokens["classify"] into the total; the bug was that classify was never
+    written into engine_meta["tokens"] in the first place."""
+    from prevue.output import build_compact_output
+
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_mixed_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=True),
+        patch(
+            "prevue.review.llm_classify",
+            return_value=({"mystery.bin": "backend"}, None, None),
+        ) as mock_llm,
+        patch("prevue.review.emit_machine_output") as mock_emit,
+    ):
+        run_review(adapter=FindingsEngine())
+
+    mock_llm.assert_called_once()
+    emitted_result, conclusion = mock_emit.call_args.args
+    assert emitted_result.engine_meta["tokens"]["classify"] > 0
+    compact = build_compact_output(emitted_result, conclusion)
+    assert compact["tokens"] >= emitted_result.engine_meta["tokens"]["classify"]
+
+
 def test_run_review_classify_tokens_nonzero_on_real_labels() -> None:
     """WR-02 pair: a fallback that produces real labels must bill a non-zero estimate."""
     mock_pr = MagicMock()
@@ -1142,15 +1175,30 @@ def test_engine_selection_via_prevue_engine(monkeypatch: pytest.MonkeyPatch) -> 
         run_review()
         mock_get_adapter.assert_called_once_with("copilot-cli")
 
+    # T-03 (10-THERMOS quick task): a bad PREVUE_ENGINE value must degrade to the
+    # same graceful failure-conclusion skip path as NonFunctionalEngineError,
+    # rather than propagating UnknownEngineError uncaught.
     monkeypatch.setenv("PREVUE_ENGINE", "nope")
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.upsert_skip_note") as mock_skip_note,
+        patch("prevue.review.conclude_skip_check", return_value=True) as mock_skip_check,
     ):
-        with pytest.raises(UnknownEngineError, match="nope"):
-            run_review()
+        run_review()
+
+    mock_skip_note.assert_called_once()
+    reason = mock_skip_note.call_args.kwargs.get("reason", "")
+    assert "nope" in reason
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        HEAD_SHA,
+        conclusion="failure",
+        reason=reason,
+        title="review failed",
+    )
 
 
 def test_engine_failure_propagates_without_upsert() -> None:
@@ -1190,6 +1238,33 @@ def test_run_review_raises_when_review_check_not_published() -> None:
     ):
         with pytest.raises(RuntimeError, match="review check run"):
             run_review(adapter=FindingsEngine())
+
+
+def test_run_review_emits_machine_output_before_check_publish_failure() -> None:
+    """T-04 (10-THERMOS quick task): emit_machine_output must run even when the
+    check-run publish step fails — the real result/tokens/findings must not be
+    lost behind a synthetic failure summary just because conclude_review_check
+    returned False."""
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=False),
+        patch("prevue.review.emit_machine_output") as mock_emit,
+    ):
+        with pytest.raises(RuntimeError, match="review check run"):
+            run_review(adapter=FindingsEngine())
+
+    mock_emit.assert_called_once()
+    emitted_result = mock_emit.call_args.args[0]
+    assert emitted_result.engine_meta
 
 
 def test_consumer_skills_root_skips_workspace_fallback_in_actions(
