@@ -19,12 +19,16 @@ from tests.engine_helpers import (
     stdout_with_fence,
 )
 
-FUNCTIONAL = [name for name in ENGINES if name != "gemini-cli"]
+# Gap B (10-07): antigravity-cli is registered-but-not-functional (no headless
+# auth mode exists for agy per official docs) — only the three engines with a
+# confirmed headless auth path are exercised by the parametrized contract suite.
+FUNCTIONAL = sorted(name for name, spec in ENGINES.items() if spec.functional)
 
 AUTH_ENV: dict[str, tuple[str, str | None]] = {
     "copilot-cli": ("COPILOT_GITHUB_TOKEN", VALID_TOKEN),
-    "claude-code-cli": ("ANTHROPIC_API_KEY", "sk-ant-test-key"),
+    "claude-code-cli": ("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test-key"),
     "cursor-cli": ("CURSOR_API_KEY", "cur_test_key"),
+    "antigravity-cli": ("ANTIGRAVITY_API_KEY", "agy-test-key"),
 }
 
 
@@ -83,7 +87,25 @@ def test_bad_then_good_sets_retried(
     calls: list[str | None] = []
 
     def _run(_cmd, input=None, **_kwargs):
-        calls.append(input)
+        # Capture the prompt from the appropriate delivery channel per engine type:
+        #   stdin engines (copilot-cli, claude-code-cli): prompt in `input` kwarg
+        #   tempfile engine (cursor-cli): prompt written to the file at cmd[cmd.index("-f")+1]
+        #   env-var engine (antigravity-cli): prompt in env["_AGY_PROMPT"]
+        if input is not None:
+            prompt_content = input
+        elif "_AGY_PROMPT" in (_kwargs.get("env") or {}):
+            prompt_content = _kwargs["env"]["_AGY_PROMPT"]
+        elif "-f" in list(_cmd):
+            cmd_list = list(_cmd)
+            try:
+                f_idx = cmd_list.index("-f")
+                with open(cmd_list[f_idx + 1], encoding="utf-8") as fh:
+                    prompt_content = fh.read()
+            except (ValueError, IndexError, OSError):
+                prompt_content = None
+        else:
+            prompt_content = None
+        calls.append(prompt_content)
         stdout = PROSE_REVIEW if len(calls) == 1 else stdout_with_fence(payload=[VALID_FINDING])
         return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
@@ -93,6 +115,10 @@ def test_bad_then_good_sets_retried(
     assert result.degraded is False
     assert len(result.findings) == 1
     assert result.engine_meta.get("retried") is True
+    # Both calls must have sent a prompt; the retry call must differ (contains retry context)
+    assert calls[0] is not None, "First call must deliver a prompt"
+    assert calls[1] is not None, "Retry call must deliver a prompt"
+    assert calls[0] != calls[1], "Retry call must send a different (retry) prompt"
 
 
 def test_missing_credential_raises_auth_error(
@@ -132,18 +158,30 @@ def test_vendor_argv(
         assert cmd == ["copilot", "-s", "--no-ask-user"]
         assert captured["input"] is not None
     elif engine_name == "claude-code-cli":
-        assert cmd == ["claude", "--bare", "-p", "--output-format", "text"]
+        assert cmd == ["claude", "-p", "--output-format", "json"]
         assert captured["input"] is not None
     elif engine_name == "cursor-cli":
-        assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "text"]
+        assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "json"]
         assert "-f" in cmd
         assert "--force" not in cmd
+    elif engine_name == "antigravity-cli":
+        # Pitfall 2 pseudo-TTY wrapper: antigravity runs via `bash -c 'script -qec ...'`
+        # to survive the non-TTY stdout-drop bug in CI (T-10-21).
+        assert cmd[:2] == ["bash", "-c"], (
+            f"Antigravity must invoke via bash -c wrapper for pseudo-TTY; got cmd={cmd}"
+        )
+        # The shell command string must reference the inner agy invocation
+        shell_cmd = cmd[2]
+        assert "agy" in shell_cmd, f"Inner shell command missing 'agy': {shell_cmd}"
+        assert "script -qec" in shell_cmd, (
+            f"Antigravity must use 'script -qec' pseudo-TTY wrapper; got: {shell_cmd}"
+        )
     else:
         pytest.fail(f"Unexpected engine {engine_name!r}")
 
 
 def test_claude_model_mapping_on_argv(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test-key")
     captured: dict = {}
 
     def _capture(cmd, input=None, **_kwargs):
@@ -155,10 +193,9 @@ def test_claude_model_mapping_on_argv(monkeypatch: pytest.MonkeyPatch) -> None:
     get_adapter("claude-code-cli").review(req)
     assert captured["cmd"] == [
         "claude",
-        "--bare",
         "-p",
         "--output-format",
-        "text",
+        "json",
         "--model",
         "sonnet",
     ]
@@ -179,7 +216,7 @@ def test_cursor_model_mapping_and_prompt_file(monkeypatch: pytest.MonkeyPatch) -
     req = make_sample_request().model_copy(update={"model": "sonnet-4"})
     get_adapter("cursor-cli").review(req)
     cmd = captured["cmd"]
-    assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "text"]
+    assert cmd[:4] == ["cursor-agent", "-p", "--output-format", "json"]
     assert ["-m", "sonnet-4"] == cmd[-2:]
     assert "src/main.py" in captured["prompt"]
 
@@ -220,6 +257,37 @@ def test_cursor_invoked_with_none_cwd_when_env_unset(
     assert captured["cwd"] is None
 
 
+def test_cursor_json_envelope_unwraps_result_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Gap A (10-07): cursor-cli now requests --output-format json, and its envelope's
+    'result' field must be unwrapped before fence parsing — the same envelope-unwrap
+    path already proven for claude-code-cli (usage_capture='stdout-json')."""
+    monkeypatch.setenv("CURSOR_API_KEY", "cur_test_key")
+
+    fenced_result = stdout_with_fence(payload=[VALID_FINDING])
+    envelope = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "duration_ms": 8900,
+            "session_id": "sess-cursor-xyz789",
+            "result": fenced_result,
+        }
+    )
+
+    def _success(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout=envelope, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _success)
+    result = get_adapter("cursor-cli").review(make_sample_request())
+
+    assert result.degraded is False, (
+        f"Cursor JSON envelope was not unwrapped before fence parsing: {result.engine_meta}"
+    )
+    assert len(result.findings) == 1
+    assert result.summary_markdown == PROSE_REVIEW
+
+
 def test_classify_valid_json_returns_label_map(
     engine_name: str, adapter, authed_env, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -247,6 +315,41 @@ def test_classify_drops_unknown_labels(
     assert result == {"src/main.py": "backend"}
 
 
+def test_classify_unwraps_json_envelope_for_claude_code_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: claude-code-cli wraps classify output in --output-format json
+    envelope. _extract_json_object would parse the outer envelope dict (with
+    "type"/"result" keys) and find no valid path→label entries → empty dict →
+    llm fallback failed.
+
+    _unwrap_classify_text must extract the "result" field for json_envelope specs
+    before passing to parse_classify_response.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test-key")
+    payload = {"src/main.py": "backend", "README.md": "frontend"}
+    envelope = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": json.dumps(payload),  # model output is the JSON dict as a string
+            "usage": {"input_tokens": 50, "output_tokens": 10},
+            "total_cost_usd": 0.001,
+        }
+    )
+
+    def _success(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout=envelope, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _success)
+    adapter = get_adapter("claude-code-cli")
+    result = adapter.classify(["src/main.py", "README.md"], CANONICAL_LABEL_ORDER)
+    assert result == payload, (
+        f"classify must unwrap json_envelope for claude-code-cli; got: {result}"
+    )
+
+
 def test_classify_missing_credential_raises_auth_error(
     engine_name: str, adapter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -264,12 +367,6 @@ def test_classify_missing_credential_raises_auth_error(
     with pytest.raises(AuthError):
         adapter.classify(["src/main.py"], CANONICAL_LABEL_ORDER)
     assert not called
-
-
-def test_gemini_classify_raises_not_implemented() -> None:
-    adapter = get_adapter("gemini-cli")
-    with pytest.raises(NotImplementedError, match="does not implement classify"):
-        adapter.classify(["src/main.py"], CANONICAL_LABEL_ORDER)
 
 
 def test_adapter_cli_commands_contain_no_allow_tool_flags() -> None:

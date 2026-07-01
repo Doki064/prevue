@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sys
-from collections import Counter
 from pathlib import Path
 
 import yaml
@@ -12,18 +11,22 @@ from github import GithubException
 from pathspec import GitIgnoreSpec
 from pydantic import ValidationError
 
+from prevue import review_classify, review_config, review_publish
 from prevue.classify.classifier import classify
 from prevue.classify.filter import filter_diff
 from prevue.classify.llm_fallback import (
-    FALLBACK_FAILED_GLOB,
-    FALLBACK_PARTIAL_GLOB,
     estimate_classify_tokens,
     llm_classify,
     llm_select_skills,
 )
 from prevue.classify.models import CANONICAL_LABEL_ORDER, GENERAL_LABEL
 from prevue.classify.router import route
-from prevue.config import load_config, resolve_consumer_config_path
+from prevue.config import (
+    load_config,
+    resolve_classify_model,
+    resolve_consumer_config_path,
+    resolve_review_model,
+)
 from prevue.dismiss import active_suppressed_fingerprints, parse_dismiss_block
 from prevue.engines.base import EngineAdapter
 from prevue.engines.prompt import (
@@ -33,10 +36,14 @@ from prevue.engines.prompt import (
     estimate_file_prompt_tokens,
     estimate_prompt_overhead_tokens,
 )
-from prevue.engines.registry import NonFunctionalEngineError, require_functional_adapter
+from prevue.engines.registry import (
+    NonFunctionalEngineError,
+    UnknownEngineError,
+    require_functional_adapter,
+)
 from prevue.engines.tokens import estimate_tokens
 from prevue.fingerprint import fingerprint
-from prevue.gate import SEVERITY_RANK, GateResult, PlacedFinding, apply_gate
+from prevue.gate import SEVERITY_RANK, GateResult, apply_gate
 from prevue.github.checks import conclude_review_check, conclude_skip_check
 from prevue.github.client import PrContext, get_authenticated_pull, get_repo, load_pr_context
 from prevue.github.comments import (
@@ -46,7 +53,8 @@ from prevue.github.comments import (
     derive_prior_findings,
     inline_location_key,
     parse_marker_sha,
-    post_inline_review,
+    post_inline_review,  # noqa: F401 — looked up via prevue.review.post_inline_review
+    # by review_publish.py (patched directly in tests; must stay module-level here)
     read_newest_trusted_sticky_body,
     resolve_outdated_prior_findings,
     upsert_skip_note,
@@ -66,15 +74,14 @@ from prevue.github.positions import (
 )
 from prevue.models import Finding, ReviewRequest, ReviewResult
 from prevue.multicall import CallGroup, execute_calls, merge_findings, split_into_calls
+from prevue.output import emit_machine_output
 from prevue.pack import make_file_weight, pack_files, readmit_files, trim_packed_files
 from prevue.preflight import resolve_marker_for_scope
 from prevue.skills.loader import assemble_instructions, load_skills
 from prevue.skills.selection import (
     KEYWORD_THRESHOLD,
-    _dedup_sort,
     _supports_skill_classify,
     keyword_score,
-    select_skills_hybrid,
 )
 from prevue.skip import should_skip
 
@@ -121,61 +128,6 @@ def _consumer_skills_root() -> tuple[Path | None, str | None]:
     return skills_dir, None
 
 
-def _skill_ratios(all_skills: list, matched: list) -> dict[str, tuple[int, int]]:
-    loaded = Counter(s.bundle for s in matched)
-    totals = Counter(s.bundle for s in all_skills)
-    return {bundle: (loaded[bundle], totals[bundle]) for bundle in totals}
-
-
-def _refresh_matched(
-    packed_files: list,
-    skills: list,
-    bundles: list[str],
-    *,
-    adapter,
-    llm_skill_names: set[str] | None,
-    model: str | None,
-    guardrail_keys: list[str] | None = None,
-) -> tuple[list, str, list]:
-    """Recompute (packed_paths, diff_text, matched) after any pack change.
-
-    Centralizes the repeated pattern:
-        packed_paths = [f.path for f in packed_files]
-        diff_text = "\\n".join(f.patch or "" for f in packed_files)
-        matched = select_skills_hybrid(skills, paths, diff_text, bundles, ...)
-
-    WR-01: ``guardrail_keys`` are ``bundle/filename`` skill keys that must load on
-    EVERY call (the documented ``review.guardrail_skills`` security backstop). They
-    are force-added to ``matched`` regardless of keyword score or routed bundle, so
-    a consumer's always-on security skill is never dropped by selection. Unknown
-    keys are ignored (a typo can't fabricate a skill).
-    """
-    packed_paths = [f.path for f in packed_files]
-    diff_text = "\n".join(f.patch or "" for f in packed_files)
-    matched = select_skills_hybrid(
-        skills,
-        packed_paths,
-        diff_text,
-        bundles,
-        adapter=adapter,
-        llm_skill_names=llm_skill_names,
-        model=model,
-    )
-    if guardrail_keys:
-        wanted = set(guardrail_keys)
-        present = {f"{s.bundle}/{s.filename}" for s in matched}
-        forced = [
-            s
-            for s in skills
-            if f"{s.bundle}/{s.filename}" in wanted and f"{s.bundle}/{s.filename}" not in present
-        ]
-        if forced:
-            # Re-run the shared dedup/sort so guardrail skills slot into the same
-            # canonical (bundle, filename) ordering as keyword/escalation matches.
-            matched = _dedup_sort([*matched, *forced])
-    return packed_paths, diff_text, matched
-
-
 def _inline_key(finding) -> tuple[str, int, str]:
     """Location key matching post_inline_review's failed-key set."""
     return inline_location_key(finding.path, finding.line, finding.side)
@@ -210,6 +162,8 @@ def _publish_skip(
     published = conclude_skip_check(get_repo(ctx), head_sha, **check_kwargs)
     if not published:
         raise RuntimeError("Failed to publish skip check run")
+    _skip_result = ReviewResult(summary_markdown=reason or "skipped")
+    emit_machine_output(_skip_result, conclusion)
 
 
 def _prior_to_finding(prior: PriorFinding) -> Finding:
@@ -457,6 +411,7 @@ def _finish_noop_review(
     )
     if not check_published:
         raise RuntimeError("Failed to publish review check run")
+    emit_machine_output(noop_result, gate.conclusion)
 
 
 class ForkPrUnsupported(Exception):
@@ -482,12 +437,29 @@ def run_review(
         os.environ.get("PREVUE_CONFIG_PATH"),
         consumer_root=os.environ.get("PREVUE_CONSUMER_ROOT"),
     )
-    config = load_config(str(consumer_path))
+    # Fetch the pull first so a malformed prevue.yml can still fail closed with a
+    # sticky comment + failure check instead of crashing with no `prevue/review`
+    # signal at all (CR-01/CR-02: a trivial consumer YAML typo like an empty
+    # `engine.models:` or `engine.raw_args:` block parses to `None` and raises an
+    # uncaught pydantic.ValidationError from load_config()).
+    pr = get_authenticated_pull(ctx)
+    try:
+        config = load_config(str(consumer_path))
+    except ValidationError as exc:
+        print(f"prevue: invalid prevue.yml config: {exc!r}", file=sys.stderr)
+        reason = f"Invalid `prevue.yml` configuration ({type(exc).__name__}). See workflow logs."
+        _publish_skip(
+            pr,
+            ctx,
+            pr.head.sha,
+            reason=reason,
+            conclusion="failure",
+            title="review failed",
+        )
+        return
     ruleset = config.ruleset
     review_cfg = config.review
     fallback_cfg = config.fallback
-
-    pr = get_authenticated_pull(ctx)
 
     skip_reason = should_skip(pr, config.skip)
     if skip_reason:
@@ -551,9 +523,20 @@ def run_review(
 
     # config.engine already encodes PREVUE_ENGINE > prevue.yml > default precedence
     # via _resolve_engine — re-reading the env here would duplicate that rule (WR-06).
+    # T-07 (10-THERMOS quick task): raw_args/pricing are threaded at construction
+    # time via require_functional_adapter's factory kwargs (gated by base-ref
+    # engine_config, same SKIL-04/Pitfall 4 sentinel as before) — no post-
+    # construction isinstance(engine, CliEngineAdapter) + setter-call mutation.
+    # T-05 (10-THERMOS quick task): require_functional_adapter itself is called
+    # HERE (not in review_config.py) because tests patch
+    # "prevue.review.require_functional_adapter" directly — the call site must
+    # stay in this module for that patch to take effect.
     try:
-        engine = adapter or require_functional_adapter(config.engine)
-    except NonFunctionalEngineError as exc:
+        engine = adapter or require_functional_adapter(
+            config.engine,
+            **review_config.adapter_factory_kwargs(config.engine_config),
+        )
+    except (NonFunctionalEngineError, UnknownEngineError) as exc:
         _publish_skip(
             pr,
             ctx,
@@ -564,8 +547,35 @@ def run_review(
         )
         return
 
+    if adapter and config.engine_config.raw_args:
+        # WR-04: a caller-supplied adapter cannot receive raw_args threading (it
+        # was already constructed before run_review saw the config). Log so this
+        # isn't a silent "why did my raw_args stop applying" bug.
+        print(
+            "prevue: custom adapter supplied; engine.raw_args from prevue.yml not applied",
+            file=sys.stderr,
+        )
+
+    if adapter and config.engine_config.pricing is not None:
+        # WR-04: same silent no-op risk as raw_args above, for the pricing override.
+        print(
+            "prevue: custom adapter supplied; engine.pricing from prevue.yml not applied",
+            file=sys.stderr,
+        )
+
+    # Resolve per-role models (ENGN-09/D-11, Q-02): classify, review, consolidate.
+    # Direct from EngineConfig — no fake raw-dict round-trip (resolve_engine_models_from_config).
+    # The consolidate slot resolves but is unused this phase (D-13: Phase 13/QUAL-01 will
+    # consume it for the multicall merge step).
+    _engine_models = review_config.resolve_role_models(config.engine_config)
+    # Classify model: models.classify > engine.model > env fallback (applied at call-site)
+    _classify_model: str | None = _engine_models.get("classify")
+    # Review model: models.review > engine.model > env (PREVUE_MODEL/COPILOT_MODEL)
+    _review_model_from_config: str | None = _engine_models.get("review")
+
     classification_disclosure: str | None = None
     classify_tokens = 0
+    _classify_real_tokens: int | None = None
     llm_skill_names: set[str] | None = None
     _llm_path_labels: dict[str, str] = {}
 
@@ -575,55 +585,27 @@ def run_review(
     unmatched_pre_pack = list(result_cls.unmatched)
     if fallback_cfg.enabled and unmatched_pre_pack:
         # LLM fallback on the pre-pack unmatched set.
-        fallback_labels, classification_disclosure = llm_classify(
+        # Classify model: models.classify > engine.model > fallback.model (yml) > env
+        # (env applied last — matches skill-select path at _skill_select_model below)
+        _effective_classify_model = resolve_classify_model(
+            _classify_model,
+            fallback_cfg.model,
+            os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL")),
+        )
+        fallback_labels, classification_disclosure, _classify_real_tokens = llm_classify(
             unmatched_pre_pack,
             engine,
-            model=fallback_cfg.model,
+            model=_effective_classify_model,
         )
-        # Only bill classify tokens when classification actually produced usable
-        # labels — a fully degraded fallback ({GENERAL_LABEL: FALLBACK_FAILED_GLOB})
-        # obtained no real classification, so reporting a non-zero estimate would
-        # overstate the audit-trail cost (WR-02).
-        produced_real_labels = bool(fallback_labels.keys() - {GENERAL_LABEL})
-        if produced_real_labels:
-            classify_tokens = estimate_classify_tokens(unmatched_pre_pack)
-        for path_or_label, label_or_glob in fallback_labels.items():
-            is_degrade_general = path_or_label == GENERAL_LABEL and label_or_glob in {
-                FALLBACK_FAILED_GLOB,
-                FALLBACK_PARTIAL_GLOB,
-            }
-            if is_degrade_general:
-                result_cls.labels[GENERAL_LABEL] = label_or_glob
-                continue
-            if (
-                isinstance(path_or_label, str)
-                and isinstance(label_or_glob, str)
-                and label_or_glob in CANONICAL_LABEL_ORDER
-                and label_or_glob not in result_cls.labels
-            ):
-                result_cls.labels[label_or_glob] = path_or_label
-        if (
-            fallback_labels
-            and GENERAL_LABEL in result_cls.labels
-            and GENERAL_LABEL not in fallback_labels
-            and any(label != GENERAL_LABEL for label in result_cls.labels)
-        ):
-            result_cls.labels.pop(GENERAL_LABEL, None)
-
-        # Build path→label map for files classified by LLM so _file_bundle_map
-        # can assign the correct routed bundle without re-running glob matching.
-        _llm_path_labels = {
-            p: lbl
-            for p, lbl in fallback_labels.items()
-            if isinstance(p, str)
-            and p != GENERAL_LABEL
-            and isinstance(lbl, str)
-            and lbl in CANONICAL_LABEL_ORDER
-        }
-        # Remove successfully LLM-classified paths from unmatched so sticky
-        # metadata and disclosure don't report them as unresolved.
-        if _llm_path_labels:
-            result_cls.unmatched = [p for p in result_cls.unmatched if p not in _llm_path_labels]
+        # T-05 (10-THERMOS quick task): pure label-merge bookkeeping extracted to
+        # review_classify.py — no adapter/patched calls happen inside it.
+        classify_tokens, _llm_path_labels = review_classify.apply_fallback_labels(
+            result_cls,
+            fallback_labels,
+            unmatched_pre_pack,
+            _classify_real_tokens,
+            estimate_classify_tokens=estimate_classify_tokens,
+        )
 
     result_cls.bundles = route(list(result_cls.labels.keys()), ruleset.routing_map)
     result_cls.dropped_count = len(dropped)
@@ -685,13 +667,16 @@ def run_review(
                 _skill_select_tokens = estimate_tokens(
                     build_skill_select_prompt(_escalation_candidates, ("relevant", "irrelevant"))
                 )
+                # Use classify model (models.classify > engine.model > fallback.model > env)
+                _skill_select_model = resolve_classify_model(
+                    _classify_model,
+                    fallback_cfg.model,
+                    os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL")),
+                )
                 fetched = llm_select_skills(
                     _escalation_candidates,
                     engine,
-                    model=(
-                        fallback_cfg.model
-                        or os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
-                    ),
+                    model=_skill_select_model,
                     paths=_prefetch_paths,
                     diff_text=_prefetch_diff,
                 )
@@ -753,7 +738,11 @@ def run_review(
         )
         return
 
-    _review_model = os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
+    # Review model resolution (ENGN-09/D-11, T-02 fix — 10-THERMOS):
+    #   PREVUE_MODEL env > COPILOT_MODEL env > models.review (yml) > engine.model (yml)
+    # Matches CONFIG_PRECEDENCE (config.py knob 2): env always wins over yml.
+    _env_model = os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
+    _review_model = resolve_review_model(_review_model_from_config, _env_model)
     _hybrid_kwargs: dict = dict(
         skills=skills,
         bundles=result_cls.bundles,
@@ -763,7 +752,7 @@ def run_review(
         guardrail_keys=review_cfg.guardrail_skills,
     )
 
-    _, _, matched = _refresh_matched(packed_files, **_hybrid_kwargs)
+    _, _, matched = review_classify.refresh_matched(packed_files, **_hybrid_kwargs)
     instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
     trimmed, extra_skipped = trim_packed_files(
         packed_files,
@@ -779,8 +768,8 @@ def run_review(
                 "Files ranked by classification risk; whole files dropped when over token budget."
             )
     packed_files = trimmed
-    _, _, matched = _refresh_matched(packed_files, **_hybrid_kwargs)
-    skill_ratios = _skill_ratios(skills, matched)
+    _, _, matched = review_classify.refresh_matched(packed_files, **_hybrid_kwargs)
+    skill_ratios = review_classify.skill_ratios(skills, matched)
     instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
 
     # Re-admission pass: when actual matched-skill overhead is smaller than the
@@ -800,8 +789,8 @@ def run_review(
             if skipped_paths
             else None
         )
-        _, _, matched = _refresh_matched(packed_files, **_hybrid_kwargs)
-        skill_ratios = _skill_ratios(skills, matched)
+        _, _, matched = review_classify.refresh_matched(packed_files, **_hybrid_kwargs)
+        skill_ratios = review_classify.skill_ratios(skills, matched)
         instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
         # Second trim: re-admitted paths may activate new skills, growing instructions.
         packed_files, trim2_skipped = trim_packed_files(
@@ -816,8 +805,8 @@ def run_review(
             skipped_reason = (
                 "Files ranked by classification risk; whole files dropped when over token budget."
             )
-            _, _, matched = _refresh_matched(packed_files, **_hybrid_kwargs)
-            skill_ratios = _skill_ratios(skills, matched)
+            _, _, matched = review_classify.refresh_matched(packed_files, **_hybrid_kwargs)
+            skill_ratios = review_classify.skill_ratios(skills, matched)
             instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
 
     if not packed_files:
@@ -867,7 +856,8 @@ def run_review(
     # inside max_total_run_tokens.  Projection = per-file token sum across ALL
     # packed files (conservative: one call per file).  When the budget is exceeded,
     # drop lowest-DIFF-03-priority files and disclose how many were dropped.
-    _review_model_str = os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
+    # _review_model already resolved above (models.review > engine.model > env fallback)
+    _review_model_str = _review_model
     _run_budget_reached: bool = False
     not_reviewed_run_budget: int = 0
     instruction_overhead_tokens = estimate_prompt_overhead_tokens(instructions=instructions)
@@ -912,13 +902,12 @@ def run_review(
         _run_budget_reached = True
         skipped_reason = (
             "run token budget reached — lowest-priority files dropped "
-            f"({not_reviewed_run_budget} file(s) not reviewed; "
-            "run token budget reached)"
+            f"({not_reviewed_run_budget} file(s) not reviewed)"
         )
         packed_files = cap_packed
         # Refresh matched skills after cap-triggered repack
-        _, _, matched = _refresh_matched(packed_files, **_hybrid_kwargs)
-        skill_ratios = _skill_ratios(skills, matched)
+        _, _, matched = review_classify.refresh_matched(packed_files, **_hybrid_kwargs)
+        skill_ratios = review_classify.skill_ratios(skills, matched)
         instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
 
     # Build per-file bundle map from classification result for the splitter
@@ -976,7 +965,7 @@ def run_review(
             ReviewRequest(
                 diff=group_diff,
                 instructions=instructions,  # shared instructions (full skill union)
-                budget_seconds=300,
+                budget_seconds=600,  # 10-THERMOS T-08 — see ReviewRequest.budget_seconds
                 model=_review_model_str,
                 known_issues=known_items,
                 max_known_issues=review_cfg.max_known_issues,
@@ -1039,6 +1028,7 @@ def run_review(
     # Aggregate engine metadata across all calls (Pitfall 5: per-call breakdown for 09-06)
     per_call_tokens: list[dict] = []
     total_review_tokens = 0
+    total_cost_usd: float | None = None
     any_estimated = False
     all_degraded = False
     all_dropped = 0
@@ -1052,6 +1042,10 @@ def run_review(
             call_tokens["bundle"] = "+".join(_grp_bundles) if _grp_bundles else "call"
         per_call_tokens.append(call_tokens)
         total_review_tokens += call_tokens.get("review", 0)
+        # Aggregate cost_usd across calls so build_compact_output reports total billing (CR-01)
+        call_cost = call_tokens.get("cost_usd")
+        if call_cost is not None:
+            total_cost_usd = (total_cost_usd or 0.0) + call_cost
         if call_tokens.get("estimated"):
             any_estimated = True
         if call_res.degraded:
@@ -1082,6 +1076,12 @@ def run_review(
                     if any(cr.engine_meta.get("tokens") for cr in call_results)
                     else {}
                 ),
+                **({"cost_usd": total_cost_usd} if total_cost_usd is not None else {}),
+                # T-01 (10-THERMOS quick task): mirror the classify cost into the same
+                # tokens dict that build_compact_output/emit_machine_output read, so the
+                # LLM-fallback classify spend is reflected in the machine output — not
+                # just sticky_base_kwargs["token_meta"]["classify"] below.
+                **({"classify": classify_tokens} if classify_tokens else {}),
             },
             "per_call": per_call_tokens,
         },
@@ -1175,10 +1175,9 @@ def run_review(
         "token_meta": {
             **engine_tokens,
             "classify": classify_tokens,
-            # review provenance comes from the engine's own "estimated" flag;
-            # classify is always a bytes/4 estimate (estimate_classify_tokens).
             "review_estimated": bool(engine_tokens.get("estimated")),
-            "classify_estimated": True,
+            # False when engine returned real usage in JSON envelope; True for estimate.
+            "classify_estimated": _classify_real_tokens is None,
             "per_call": result.engine_meta.get("per_call", []),
         },
         "reviewed_file_count": len(packed_files),
@@ -1192,62 +1191,18 @@ def run_review(
         "partial_marker": gate.partial,
     }
 
-    # Post sticky first so the summary appears before inline comments in the PR timeline.
-    sticky, sticky_failed = _upsert_sticky_with_retry(
+    # T-05 (10-THERMOS quick task): sticky/inline/check/emit sequence extracted to
+    # review_publish.py (byte-identical logic, including the T-04 emit-before-raise fix).
+    review_publish.publish_review_result(
         pr,
-        result,
-        head_sha=diff.head_sha,
-        gate=gate,
-        **sticky_base_kwargs,
-    )
-
-    failed_inline_keys = post_inline_review(
-        pr,
+        ctx,
+        diff,
         gate,
-        in_scope_paths=reviewed_paths,
+        result,
+        sticky_base_kwargs,
+        reviewed_paths=reviewed_paths,
         regions_by_path=regions_by_path,
         owner=owner,
-        repo=repo_name,
-        resolve_outdated=False,
+        repo_name=repo_name,
+        skipped_files=skipped_files,
     )
-    if failed_inline_keys and gate.inline:
-        downgraded = [
-            PlacedFinding(
-                finding=placed.finding,
-                placement="summary-only"
-                if placed.placement == "inline"
-                and _inline_key(placed.finding) in failed_inline_keys
-                else placed.placement,
-            )
-            for placed in gate.placed
-        ]
-        gate = GateResult(
-            conclusion=gate.conclusion,
-            severity_counts=gate.severity_counts,
-            placed=downgraded,
-            inline=[
-                finding for finding in gate.inline if _inline_key(finding) not in failed_inline_keys
-            ],
-            config=gate.config,
-            degraded=gate.degraded,
-            dropped_findings=gate.dropped_findings,
-            partial=gate.partial,
-        )
-        # Re-upsert to reflect the downgraded placements caused by inline post failures.
-        sticky, sticky_failed = _upsert_sticky_with_retry(
-            pr,
-            result,
-            head_sha=diff.head_sha,
-            gate=gate,
-            **sticky_base_kwargs,
-        )
-    check_published = conclude_review_check(
-        get_repo(ctx),
-        diff.head_sha,
-        gate,
-        sticky_url=getattr(sticky, "html_url", None),
-        sticky_failed=sticky_failed,
-        skipped_count=len(skipped_files),
-    )
-    if not check_published:
-        raise RuntimeError("Failed to publish review check run")

@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: complete
-stopped_at: "v1 milestone complete — all 9 phases done; UAT 14/14 pass; WR-01..WR-12 code review fixes applied"
-last_updated: "2026-06-24T00:00:00.000Z"
-last_activity: 2026-06-24 -- Phase 09 verification updated; UAT 14/14 confirmed; WR-08..WR-12 fixes committed; ruff CI gate clean; 720/720 tests
+status: executing
+stopped_at: Completed 10-08-PLAN.md
+last_updated: "2026-07-01T18:30:07.015Z"
+last_activity: 2026-07-01 -- Phase 10 execution started
 progress:
-  total_phases: 9
+  total_phases: 15
   completed_phases: 9
-  total_plans: 55
-  completed_plans: 55
-  percent: 100
+  total_plans: 64
+  completed_plans: 63
+  percent: 60
 ---
 
 # Project State
@@ -21,22 +21,22 @@ progress:
 See: .planning/PROJECT.md (updated 2026-06-12)
 
 **Core value:** Optimal memory context and token usage when integrating with AI — load only the review skills the PR actually needs — while keeping review quality on par with a full-context review.
-**Current focus:** v1 milestone complete — all 9 phases shipped
+**Current focus:** Phase 10 — boundary-contracts
 
 ## Current Position
 
-Phase: 09 (classification-skill-loading-multi-call-review) — COMPLETE
-Plan: 6 of 6 (all complete; UAT 14/14 pass; WR-01..WR-12 fixes applied)
-Status: v1 complete — 720/720 tests, live UAT confirmed, verification report finalized
-Last activity: 2026-06-24 -- Phase 09 post-review fixes committed; VERIFICATION.md updated to 10/10
+Phase: 10 (boundary-contracts) — EXECUTING
+Plan: 1 of 9
+Status: Executing Phase 10
+Last activity: 2026-07-01 -- Phase 10 execution started
 
-Progress: [██████████] 6/6 plans complete (Phase 09) — All 9 phases complete
+Progress: [██████████] 8/8 plans complete (Phase 10) — All 10 phases complete
 
 ## Performance Metrics
 
 **Velocity:**
 
-- Total plans completed: 55
+- Total plans completed: 61
 - Average duration: 16 min (46 plans with recorded duration)
 - Total execution time: ~12.5 hours (46 plans with recorded duration; Phase 08/09 partially recorded)
 
@@ -53,6 +53,7 @@ Progress: [██████████] 6/6 plans complete (Phase 09) — All
 | 07 | 7 | 53 min | 8 min |
 | 08 | 16 | 133 min (10 recorded) | 13 min |
 | 09 | 6 | 56 min | 9 min |
+| 10 | 6 | - | - |
 
 **Recent Trend:**
 
@@ -113,6 +114,14 @@ Progress: [██████████] 6/6 plans complete (Phase 09) — All
 | Phase 09-classification-skill-loading-multi-call-review P04 | 16 | 2 tasks | 3 files |
 | Phase 09-classification-skill-loading-multi-call-review PP05 | 12 | 3 tasks | 4 files |
 | Phase 09-classification-skill-loading-multi-call-review P06 | 11 | 2 tasks (+ 1 checkpoint) | 6 files |
+| Phase 10-boundary-contracts P01 | 8 | 3 tasks | 11 files |
+| Phase 10-boundary-contracts P02 | 15 | 3 tasks | 11 files |
+| Phase 10-boundary-contracts P03 | 13 | 2 tasks | 7 files |
+| Phase 10-boundary-contracts P04 | 6 | 2 tasks | 3 files |
+| Phase 10-boundary-contracts P05 | 7min | 2 tasks | 6 files |
+| Phase 10-boundary-contracts P06 | 10min | - tasks | - files |
+| Phase 10-boundary-contracts P07 | 5min | 2 tasks | 5 files |
+| Phase 10-boundary-contracts P08 | 5min | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -207,6 +216,24 @@ Recent decisions affecting current work:
 - [Phase 09]: skill_sources built via keyword_score re-eval per matched skill: crossed KEYWORD_THRESHOLD→'keyword', LLM double-duty names→'llm', below-threshold routed→'routed' (09-06)
 - [Phase 09]: run_budget_alert rendered as standalone section BEFORE Metadata <details> block (T-09-20 D-10 prominent alert requirement) (09-06)
 - [Phase 09]: ARCHITECTURE.md classify-first pipeline + multi-call section; configuration.md routing drives hybrid skill loading not metadata-only (CLSF-03/09-06)
+- [10-01]: RED scaffold pattern via try/except + pytest.fail() (not importorskip) so test modules collect AND fail clearly on missing production symbols
+- [10-01]: Fixture design — claude_envelope.json mirrors Claude --output-format json; copilot_otel.jsonl has 2 deterministic lines summing to known token counts; cursor_envelope.json has no token fields (confirms estimate path)
+- [10-01]: test_model_roles.py merge_findings tests kept GREEN to assert D-13 (merge stays fingerprint-deterministic); per-role resolver tests RED pending Plan 04
+- [10-02]: AuthError subclasses moved to errors.py to break spec←per-engine circular import; per-engine modules re-export for test compat
+- [10-02]: CopilotCliAdapter backward-compat alias kept in copilot_cli.py as CliEngineAdapter subclass for test_registry.py import compat
+- [10-02]: argv order for tempfile-arg: base_argv → tempfile_flag+path → model_argv_flag+model (preserves test assertions)
+- [10-02]: SKELETON_ENGINES removed; functional flag on CliEngineSpec is the D-03 replacement; all 4 CLI engines functional
+- [Phase ?]: OUTPUT_SCHEMA_VERSION='1.0' injected by build_full_output into serialization — NOT added as field on ReviewResult (D-09)
+- [Phase ?]: emit_machine_output: result file write unconditional; GITHUB_OUTPUT write guarded; heredoc form for T-10-13 defense (10-05)
+- [Phase ?]: COPILOT_OTEL_FILE_EXPORTER_PATH scoped to run-review step env (WARNING 3 resolved): Plan 03 real-token capture now functional in CI (10-05)
+- [Phase ?]: pseudo-TTY script -qec wrapper in cli_adapter.py for antigravity-cli (T-10-21)
+- [Phase ?]: update-pricing.yml: human-reviewed PR only, no merge step (D-06b / T-10-18)
+- [Phase ?]: ANTIGRAVITY_API_KEY gated on inputs.engine == antigravity-cli in workflow env (T-10-20)
+- [Phase 10-07]: cursor-cli requests --output-format json + usage_capture=stdout-json reusing Claude envelope-unwrap path (still estimated=True, now verified-correct)
+- [Phase 10-07]: antigravity-cli functional=False — fails closed via NonFunctionalEngineError; registry lookup/install/invoke unaffected
+- [Phase ?]: 10-08: Copilot usage_capture flipped to none — no CI-viable OTEL export exists on @github/copilot@1.0.61 (live sandbox + docs verified)
+- [Phase ?]: 10-08: model workflow_call input threaded into PREVUE_MODEL — empty-string default is safe since review.py resolves via env_model or fallback
+- [Phase ?]: 10-08: on.workflow_call.outputs added as literal sibling of jobs.review.outputs, backed by exact-key-set-equality regression test
 
 ### Pending Todos
 
@@ -221,6 +248,7 @@ None — all pre-v1 research risks resolved. Phase 1 spike confirmed Copilot CLI
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260613-w0q | Fix Phase 6 Prevue self-review findings (#5 upsert, #2 fork guard, #4 config warn, #1 cursor install, #3/#6 docs) | 2026-06-13 | 8ee8968 | [260613-w0q-fix-phase-6-prevue-self-review-findings](./quick/260613-w0q-fix-phase-6-prevue-self-review-findings/) |
+| 260701-ju8 | Fix thermos review findings except P3 (T-01..T-12: classify tokens, unknown-engine skip, emit-before-publish, model-resolution dedup, adapter factory, duck-typing/envelope-unwrap/getattr cleanup, antigravity alias, shim deletion, review.py/flow.py split) | 2026-07-01 | b1145ed | [260701-ju8-fix-thermos-review-findings-except-p3](./quick/260701-ju8-fix-thermos-review-findings-except-p3/) |
 
 ## Deferred Items
 
@@ -233,6 +261,6 @@ Items acknowledged and carried forward from previous milestone close:
 
 ## Session Continuity
 
-Last session: 2026-06-24T00:00:00.000Z
-Stopped at: v1 milestone complete — verification finalized, all docs updated
+Last session: 2026-07-01T11:37:23.388Z
+Stopped at: Completed 10-08-PLAN.md
 Resume file: None

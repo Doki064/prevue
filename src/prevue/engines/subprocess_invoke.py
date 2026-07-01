@@ -32,8 +32,10 @@ def invoke_subprocess_text(
         raise EngineFailure(f"{cli_label} timed out after {budget_seconds}s") from exc
 
     if proc.returncode != 0:
+        stderr = sanitize_stderr(proc.stderr, secret)
+        stdout = sanitize_stderr(proc.stdout, secret)
         raise EngineFailure(
-            f"{cli_label} exited {proc.returncode}: {sanitize_stderr(proc.stderr, secret)}"
+            f"{cli_label} exited {proc.returncode}: stderr={stderr!r} stdout={stdout!r}"
         )
 
     review_text = proc.stdout.strip()

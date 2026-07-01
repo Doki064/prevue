@@ -1,4 +1,22 @@
-"""Single-read consumer config loader for .github/prevue.yml (WKFL-03, D-05/D-07/D-08)."""
+"""Single-read consumer config loader for .github/prevue.yml (WKFL-03, D-05/D-07/D-08).
+
+Config Resolution Precedence (WKFL-05 / D-07)
+===============================================
+Three knobs have a caller-override layer above the consumer prevue.yml:
+
+  workflow input > .github/prevue.yml > built-in defaults
+
+Concretely, for each knob:
+
+  1. engine:       PREVUE_ENGINE env  >  engine.name in yml  >  DEFAULT_ENGINE constant
+  2. model:        PREVUE_MODEL env   >  COPILOT_MODEL env   >  engine.model in yml  >  None
+  3. fallback model: (no env override)  >  classification.fallback.model in yml  >  None
+
+``raw_args`` and ``pricing`` are parsed from the same single ``load_config`` read as
+all other fields — they are therefore gated by ``resolve_consumer_config_path``'s
+base-ref-only sentinel (SKIL-04/Pitfall 4).  A PR-head prevue.yml cannot inject CLI
+flags or fake pricing data.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +36,11 @@ from prevue.gate import ReviewConfig
 # Sentinel path that never exists on a runner; signals load_config() to use framework
 # defaults when no trusted base-ref root is available in Actions (SKIL-04 fail-closed).
 NO_CONSUMER_CONFIG_SENTINEL = "/nonexistent/prevue-no-consumer-config.yml"
+
+# Declared precedence constant (WKFL-05 / D-07) — machine-readable form of the module
+# docstring above.  Tests assert its presence with:
+#   grep -qi 'workflow input > .*prevue.yml > .*default' src/prevue/config.py
+CONFIG_PRECEDENCE = "workflow input > .github/prevue.yml > built-in defaults"
 
 
 class SkipConfig(BaseModel):
@@ -66,6 +89,101 @@ class SkillsConfig(BaseModel):
     max_consumer_skills: int = Field(default=50, ge=1)
 
 
+class EngineModels(BaseModel):
+    """Per-role model overrides (ENGN-09 / D-11).
+
+    Each role resolves: models.<role> else engine.model else None (engine default).
+    Roles: classify, review, consolidate.  The consolidate slot is reserved for
+    Phase 13 (QUAL-01) and is not consumed by the review pipeline today (D-13).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    classify: str | None = None
+    review: str | None = None
+    consolidate: str | None = None  # D-13: reserved; Phase 13 (QUAL-01) will consume this
+
+
+class EngineConfig(BaseModel):
+    """Typed engine block from prevue.yml (ENGN-08/09, D-10/D-11).
+
+    Parsed from the ``engine:`` YAML key in the single ``load_config`` read.
+    Fields ``raw_args`` and ``pricing`` are base-ref-only (same gated read path —
+    SKIL-04/Pitfall 4: PR-head prevue.yml cannot supply raw CLI flags or fake pricing).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    model: str | None = None
+    # models.<role> sub-block; stored as EngineModels or None when block absent.
+    models: EngineModels = Field(default_factory=EngineModels)
+    # raw_args: list[str] appended after framework argv (ENGN-08/D-10).
+    # A shell string is rejected; list form only — no shell parsing, no shell=True.
+    raw_args: list[str] = Field(default_factory=list)
+    pricing: dict | None = None
+
+    @field_validator("raw_args", mode="before")
+    @classmethod
+    def _validate_raw_args(cls, value: object) -> list[str]:
+        """Reject a string raw_args; list[str] only (D-10: command injection guard).
+
+        Also rejects lists with non-string elements (None, int, etc.) — Pydantic v2
+        would silently coerce them (None → "None", 42 → "42"), producing invalid CLI flags.
+        Exhaustive: any non-list, non-str scalar (int, float, bool, dict) is rejected here
+        too, so callers always get the clean D-10 message instead of a generic Pydantic
+        type-mismatch error.
+
+        ``None`` is tolerated as a defense-in-depth special case (rather than rejected):
+        an empty ``raw_args:`` YAML block parses to ``None``, not ``[]`` — a plausible
+        consumer typo, not an attack. Treated as "no extra args" (see phase-10 review CR-02).
+        """
+        if value is None:
+            return []
+        if isinstance(value, str):
+            raise ValueError(
+                "engine.raw_args must be a list of strings (D-10: no shell string allowed). "
+                f"Got str: {value!r}"
+            )
+        if not isinstance(value, list):
+            raise ValueError(
+                f"engine.raw_args must be a list of strings, "
+                f"got {type(value).__name__!r}: {value!r}"
+            )
+        for i, item in enumerate(value):
+            if not isinstance(item, str):
+                raise ValueError(
+                    f"engine.raw_args[{i}] must be a string, got {type(item).__name__!r}: {item!r}"
+                )
+        return value
+
+    @field_validator("pricing", mode="before")
+    @classmethod
+    def _validate_pricing(cls, value: object) -> dict | None:
+        """Reject a malformed engine.pricing override (CR-01: phase-10 review).
+
+        Mirrors ``_validate_raw_args``'s intent: catch consumer-YAML shape
+        mistakes at the Pydantic boundary rather than letting them crash
+        uncaught deep inside ``compute_cost``/``_lookup_row``. ``None`` (an
+        absent/empty ``pricing:`` block) is tolerated as "no override", same
+        as the field's declared default.
+        """
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"engine.pricing must be a mapping of model -> pricing row, "
+                f"got {type(value).__name__!r}: {value!r}"
+            )
+        for model, row in value.items():
+            if row is not None and not isinstance(row, dict):
+                raise ValueError(
+                    f"engine.pricing[{model!r}] must be a mapping or null, "
+                    f"got {type(row).__name__!r}: {row!r}"
+                )
+        return value
+
+
 class PrevueConfig(BaseModel):
     """Typed bundle from one prevue.yml read."""
 
@@ -74,7 +192,8 @@ class PrevueConfig(BaseModel):
     skip: SkipConfig
     fallback: FallbackConfig
     skills: SkillsConfig
-    engine: str
+    engine: str  # resolved engine name (back-compat — PREVUE_ENGINE > yml > default)
+    engine_config: EngineConfig = Field(default_factory=EngineConfig)  # full engine block
 
 
 def resolve_consumer_config_path(
@@ -151,6 +270,89 @@ def _resolve_engine(raw: dict) -> str:
     return DEFAULT_ENGINE
 
 
+def _resolve_engine_models(raw: dict) -> dict[str, str | None]:
+    """Per-role model resolution for classify / review / consolidate (ENGN-09/D-11).
+
+    Resolution per role: models.<role> (yml) else engine.model (yml) else None.
+    The consolidate role is resolved (slot reserved) but nothing consumes it this phase
+    — merge_findings stays the deterministic fingerprint-dedup merge (D-13).
+    Phase 13 (QUAL-01) will wire the consolidate model into the merge step.
+
+    T-08 (10-THERMOS quick task): delegates to resolve_engine_models_from_config —
+    the single canonical role-resolution implementation — after building an
+    EngineConfig from the raw dict's ``engine:`` block. This function's
+    signature/return type is unchanged (dict[str, str | None] with keys
+    classify/review/consolidate) so existing raw-dict callers/tests stay green.
+
+    Returns a dict with keys 'classify', 'review', 'consolidate'.
+    """
+    engine_block = raw.get("engine") or {}
+    if not isinstance(engine_block, dict):
+        engine_block = {}
+    engine_config = _build_engine_config({"engine": engine_block})
+    return resolve_engine_models_from_config(engine_config)
+
+
+def resolve_engine_models_from_config(engine_config: EngineConfig) -> dict[str, str | None]:
+    """Direct EngineConfig → per-role model dict (Q-02, 10-THERMOS).
+
+    Replaces the review.py round-trip that reconstructed a fake raw YAML dict from
+    EngineConfig fields just to pass it into _resolve_engine_models() — the round-trip
+    existed because _resolve_engine_models() was designed for the raw YAML dict from
+    load_config, not for the already-parsed typed model. This function takes the typed
+    model directly.
+
+    Resolution per role: models.<role> else engine.model else None (env override
+    deliberately omitted — applied at call-sites per _resolve_engine_models docstring).
+    """
+    single_model = engine_config.model or None
+    em = engine_config.models
+
+    def _role(val: str | None) -> str | None:
+        return val or single_model
+
+    return {
+        "classify": _role(em.classify),
+        "review": _role(em.review),
+        "consolidate": _role(em.consolidate),
+    }
+
+
+def resolve_review_model(review_model_from_config: str | None, env_model: str | None) -> str | None:
+    """Apply the env-override layer to the per-role review model (T-02 fix — 10-THERMOS).
+
+    Precedence: PREVUE_MODEL/COPILOT_MODEL env > models.review/engine.model (yml).
+    Matches CONFIG_PRECEDENCE (knob 2) — env always wins over yml. Extracted as its
+    own function so the operand order is unit-testable independent of review.py's
+    1400-line review() body (_resolve_engine_models() deliberately omits env; this
+    is the call-site env layer it defers to).
+    """
+    return env_model or review_model_from_config
+
+
+def resolve_classify_model(
+    classify_model: str | None,
+    fallback_model: str | None,
+    env_model: str | None,
+) -> str | None:
+    """Classify-model ladder, single canonical implementation (T-08 — 10-THERMOS).
+
+    Precedence: models.classify (yml, per-role) > classification.fallback.model
+    (yml) > PREVUE_MODEL/COPILOT_MODEL env. This was inlined identically at two
+    call sites in review.py (the LLM classify-fallback call and the skill-select
+    call) — this function is the single source of truth both call sites use.
+    """
+    return classify_model or fallback_model or env_model
+
+
+def _build_engine_config(raw: dict) -> EngineConfig:
+    """Parse the engine block from an already-loaded config dict (no second file read)."""
+    engine_block = raw.get("engine") or {}
+    if not isinstance(engine_block, dict):
+        engine_block = {}
+    return EngineConfig.model_validate(engine_block)
+
+
 def load_config(consumer_path: str | None = None) -> PrevueConfig:
     """Load all prevue.yml sections from a single yaml.safe_load (D-08).
 
@@ -184,6 +386,7 @@ def load_config(consumer_path: str | None = None) -> PrevueConfig:
     fallback = FallbackConfig.model_validate(classification.get("fallback", {}))
     skills = SkillsConfig.model_validate(raw.get("skills", {}))
     engine = _resolve_engine(raw)
+    engine_config = _build_engine_config(raw)
 
     return PrevueConfig(
         ruleset=ruleset,
@@ -192,4 +395,5 @@ def load_config(consumer_path: str | None = None) -> PrevueConfig:
         fallback=fallback,
         skills=skills,
         engine=engine,
+        engine_config=engine_config,
     )

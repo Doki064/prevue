@@ -8,3 +8,5 @@ ignore:
 review:
   incremental: false   # one-shot full review to clear carried incremental warnings (PR #16)
   min_severity_to_fail: error
+  max_review_calls: 3      # split large diffs across up to 3 parallel calls
+  review_concurrency: 3    # run all calls in parallel (ThreadPoolExecutor)

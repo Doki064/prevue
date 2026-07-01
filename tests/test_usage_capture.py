@@ -1,0 +1,439 @@
+"""RED contract tests for per-engine usage capture strategies (PERF-03).
+
+These tests are intentionally RED until Plan 03 implements prevue.engines.usage.
+They pin the behavioral contract for capture_usage() so downstream implementation
+must satisfy the exact shape asserted here.
+
+Strategy matrix (from 10-RESEARCH.md Per-Engine Token Reporting Matrix):
+  - Claude Code: stdout-json envelope -> real tokens, estimated=False
+  - Cursor: stdout JSON but no token fields -> None -> caller estimates
+  - Copilot: OTEL JSONL file -> flat per-line {"type": "span"|"metric",
+    "attributes": {...}} records; sum gen_ai.usage.* token attrs from
+    span-typed records only -> real tokens, estimated=False (10-09 gap
+    closure; root-caused against a local gh copilot v1.0.67 install)
+  - Antigravity: plain text, no reliable token reporting -> None -> caller estimates
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+try:
+    from prevue.engines.usage import capture_usage
+
+    _IMPORT_ERROR: ImportError | None = None
+except ImportError as exc:
+    capture_usage = None  # type: ignore[assignment]
+    _IMPORT_ERROR = exc
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures" / "usage"
+
+
+def _require_import() -> None:
+    """Fail the calling test with a clear RED message if the module is not available."""
+    if _IMPORT_ERROR is not None:
+        pytest.fail(
+            f"prevue.engines.usage is not importable yet (Plan 03 will create it): {_IMPORT_ERROR}",
+            pytrace=False,
+        )
+
+
+class _FakeSpec:
+    """Minimal spec stub for unit tests — mirrors the usage_capture field of CliEngineSpec."""
+
+    def __init__(self, usage_capture: str) -> None:
+        self.usage_capture = usage_capture
+
+
+def test_claude_stdout_json() -> None:
+    """Claude stdout-json envelope: real tokens captured, estimated=False."""
+    _require_import()
+    spec = _FakeSpec("stdout-json")
+    envelope = (FIXTURES_DIR / "claude_envelope.json").read_text()
+
+    result = capture_usage(spec, stdout=envelope)  # type: ignore[misc]
+
+    assert result is not None, "Claude stdout-json must return a usage dict, not None"
+    assert result["estimated"] is False, "Claude real tokens are not estimated"
+    assert result["input"] == 1500
+    assert result["output"] == 250
+    assert result["cache_read"] == 800
+    # cache_creation is present in the fixture (200) — capture must surface it or at minimum
+    # not crash on its presence.
+    assert "input" in result
+    assert "output" in result
+
+
+def test_claude_stdout_json_prefers_total_cost_usd() -> None:
+    """When Claude envelope includes total_cost_usd, capture must surface it."""
+    _require_import()
+    spec = _FakeSpec("stdout-json")
+    envelope = (FIXTURES_DIR / "claude_envelope.json").read_text()
+    data = json.loads(envelope)
+    expected_cost = data["total_cost_usd"]  # 0.007125
+
+    result = capture_usage(spec, stdout=envelope)  # type: ignore[misc]
+
+    assert result is not None
+    # cost_usd must be the vendor-reported cost, not recomputed
+    assert "cost_usd" in result
+    assert abs(result["cost_usd"] - expected_cost) < 1e-10
+
+
+def test_fallback_estimated_cursor() -> None:
+    """Cursor's real JSON envelope (confirmed schema) has no usage block: capture
+    routes through the stdout-json envelope-unwrap path (Gap A, 10-07) and still
+    returns None (caller uses bytes/4) — verified-correct degrade, not a
+    disconnected 'none' strategy."""
+    _require_import()
+    spec = _FakeSpec("stdout-json")
+    envelope = (FIXTURES_DIR / "cursor_envelope.json").read_text()
+
+    result = capture_usage(spec, stdout=envelope)  # type: ignore[misc]
+
+    assert result is None, (
+        "capture_usage must return None when the stdout-json envelope has no "
+        "usage block, so caller falls back to estimate"
+    )
+
+
+def test_fallback_estimated_antigravity() -> None:
+    """Antigravity plain-text output: capture returns None (caller uses bytes/4)."""
+    _require_import()
+    spec = _FakeSpec("none")
+    text = (FIXTURES_DIR / "antigravity_text.txt").read_text()
+
+    result = capture_usage(spec, stdout=text)  # type: ignore[misc]
+
+    assert result is None, "capture_usage must return None for 'none' strategy on plain text output"
+
+
+def test_copilot_otel(tmp_path: Path) -> None:
+    """Copilot OTEL JSONL: parse + sum per-call tokens from the real flat
+    span-per-line fixture (type/attributes-as-dict/gen_ai.usage.* keys),
+    estimated=False."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    # Copy fixture to tmp_path to simulate COPILOT_OTEL_FILE_EXPORTER_PATH
+    otel_fixture = FIXTURES_DIR / "copilot_otel.jsonl"
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    otel_path.write_bytes(otel_fixture.read_bytes())
+
+    # The fixture has 2 flat-span JSONL lines:
+    #   line 1: input=1200, output=180, cache_read=600
+    #   line 2: input=900,  output=120, cache_read=450
+    # Summed: input=2100, output=300, cache_read=1050
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is not None, "Copilot OTEL must return a usage dict, not None"
+    assert result["estimated"] is False, "Copilot OTEL tokens are real (not estimated)"
+    assert result["input"] == 2100
+    assert result["output"] == 300
+    assert result["cache_read"] == 1050
+
+
+def test_copilot_otel_cache_creation_tokens(tmp_path: Path) -> None:
+    """A flat-span line whose attributes dict includes
+    gen_ai.usage.cache_creation.input_tokens must have that value summed into
+    result["cache_creation"] (PERF-03/D-04: pricing.py already consumes this
+    token category)."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    otel_path.write_text(
+        json.dumps(
+            {
+                "type": "span",
+                "attributes": {
+                    "gen_ai.usage.input_tokens": 500,
+                    "gen_ai.usage.output_tokens": 50,
+                    "gen_ai.usage.cache_read.input_tokens": 0,
+                    "gen_ai.usage.cache_creation.input_tokens": 300,
+                },
+            }
+        )
+        + "\n"
+    )
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is not None
+    assert result["estimated"] is False
+    assert result["cache_creation"] == 300
+
+
+def test_copilot_otel_ignores_metric_type_records(tmp_path: Path) -> None:
+    """A JSONL file containing both span-typed and metric-typed records must
+    only sum the span-typed lines' tokens — metric records carry no per-call
+    token attributes and must be skipped, not mis-summed or crashed on."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    lines = [
+        json.dumps(
+            {
+                "type": "span",
+                "attributes": {
+                    "gen_ai.usage.input_tokens": 100,
+                    "gen_ai.usage.output_tokens": 20,
+                    "gen_ai.usage.cache_read.input_tokens": 0,
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "metric",
+                "attributes": {
+                    "gen_ai.usage.input_tokens": 99999,
+                    "gen_ai.usage.output_tokens": 99999,
+                },
+            }
+        ),
+    ]
+    otel_path.write_text("\n".join(lines) + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is not None
+    assert result["estimated"] is False
+    assert result["input"] == 100, "metric-typed record tokens must not be summed"
+    assert result["output"] == 20
+
+
+def test_copilot_otel_directory_path_globs_jsonl_files(tmp_path: Path) -> None:
+    """T-01 (10-THERMOS): when otel_path is a directory (Copilot's file exporter
+    writes *.jsonl files under the configured path, not a single file at it),
+    sum spans across every *.jsonl file inside it instead of degrading to None."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_dir = tmp_path / "copilot-otel"
+    otel_dir.mkdir()
+    otel_fixture = FIXTURES_DIR / "copilot_otel.jsonl"
+    # Fixture has 2 lines; split across 2 files to prove multi-file glob+sum.
+    lines = otel_fixture.read_text().splitlines()
+    (otel_dir / "part-1.jsonl").write_text(lines[0] + "\n")
+    (otel_dir / "part-2.jsonl").write_text(lines[1] + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_dir))  # type: ignore[misc]
+
+    assert result is not None, "Directory otel_path must still yield a usage dict, not None"
+    assert result["estimated"] is False
+    assert result["input"] == 2100
+    assert result["output"] == 300
+    assert result["cache_read"] == 1050
+
+
+def test_otel_missing_path_returns_none() -> None:
+    """If OTEL path is missing/None for otel-jsonl strategy, capture gracefully returns None."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+
+    result = capture_usage(spec, stdout="", otel_path=None)  # type: ignore[misc]
+
+    assert result is None, "Missing OTEL path must degrade gracefully to None"
+
+
+def test_otel_empty_file_returns_none(tmp_path: Path) -> None:
+    """T-09 (10-THERMOS): an existing-but-empty OTEL file must degrade to None
+    (estimated=True via caller fallback), not report a misleading
+    estimated=False zeroed dict."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    otel_path.write_text("")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is None, "Empty OTEL file must degrade to None, not estimated=False zeros"
+
+
+# ---------------------------------------------------------------------------
+# CR-01 regression (iteration 3, updated 10-09 for the flat schema): malformed
+# decoded JSONL must not crash _parse_copilot_otel with an uncaught exception.
+# Per T-10-07/T-10-09-01, malformed (but JSON-decodable) lines must degrade
+# gracefully, same as a JSON decode failure.
+# ---------------------------------------------------------------------------
+
+
+def test_copilot_otel_non_dict_top_level_line_skipped(tmp_path: Path) -> None:
+    """A JSONL line that decodes to a non-dict top-level value (e.g. a bare
+    array) must be skipped, not raise AttributeError.
+
+    T-09 (10-THERMOS): no real span was ever found in this file, so the
+    parser degrades to None (caller falls back to bytes/4 estimate) instead
+    of reporting a misleading estimated=False zeroed dict.
+    """
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    otel_path.write_text(json.dumps([1, 2, 3]) + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is None, "No real span found — must degrade to None, not a fake zeroed dict"
+
+
+def test_copilot_otel_malformed_attributes_dict_skipped(tmp_path: Path) -> None:
+    """A span-typed line whose 'attributes' value is not a dict (e.g. the OLD
+    list-of-{key,value} OTLP shape, or a plain string) must be skipped
+    without raising — same T-10-07 graceful-degrade contract, adapted to the
+    new flat-attributes-dict shape (no more resourceSpans/scopeSpans nesting
+    to test malformed elements of)."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    lines = [
+        json.dumps({"type": "span", "attributes": [{"key": "gen_ai.usage.input_tokens"}]}),
+        json.dumps({"type": "span", "attributes": "not-a-dict"}),
+    ]
+    otel_path.write_text("\n".join(lines) + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is None, "No real span found — must degrade to None, not raise or fake zeros"
+
+
+def test_copilot_otel_partial_field_parse_failure_skips_whole_span(tmp_path: Path) -> None:
+    """CR-02 (10-REVIEW.md): a span whose numeric fields parse in order, then
+    hit a malformed field partway through, must not contribute a corrupted
+    partial total. The whole span is discarded — same as any other malformed
+    span — rather than reporting an inconsistent estimated=False result."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    lines = [
+        # input_tokens parses fine; output_tokens is malformed. A pre-fix
+        # implementation summed input before hitting the exception on output,
+        # producing {"input": 500, "output": 0, ...} tagged estimated=False.
+        json.dumps(
+            {
+                "type": "span",
+                "attributes": {
+                    "gen_ai.usage.input_tokens": 500,
+                    "gen_ai.usage.output_tokens": "garbage",
+                },
+            }
+        ),
+    ]
+    otel_path.write_text("\n".join(lines) + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is None, (
+        "The only span in the file has a malformed field — no real span was "
+        "fully parsed, so the parser must degrade to None, not report a "
+        "corrupted partial total as estimated=False"
+    )
+
+
+def test_copilot_otel_missing_attributes_key_skipped(tmp_path: Path) -> None:
+    """A span-typed line with no 'attributes' key at all (or attributes:
+    null) must be skipped (contributes zero tokens), not crash."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    lines = [
+        json.dumps({"type": "span"}),
+        json.dumps({"type": "span", "attributes": None}),
+    ]
+    otel_path.write_text("\n".join(lines) + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is None, "No real span found — must degrade to None, not raise or fake zeros"
+
+
+# ---------------------------------------------------------------------------
+# Pitfall 3 regression: Claude stdout-json envelope must not break fence extraction
+# ---------------------------------------------------------------------------
+
+
+def test_claude_stdout_json_fence_extraction_pitfall3() -> None:
+    """Pitfall 3 regression: a Claude stdout-json envelope with a fenced result field
+    must still yield findings via extract_json_fence(result), not degrade.
+
+    When review_with_retry sees a stdout-json engine, it must run extract_json_fence
+    on the 'result' field (the review text), NOT on raw stdout (the JSON envelope).
+    Running extract_json_fence on the envelope would always fail because the envelope
+    itself is JSON with no markdown fence.
+    """
+    try:
+        from prevue.engines.flow import review_with_retry
+        from prevue.engines.spec import CliEngineSpec
+    except ImportError as exc:
+        pytest.fail(f"prevue.engines.flow or spec not importable: {exc}", pytrace=False)
+
+    # Build a Claude-like spec (stdout-json usage capture, no real secret)
+    from prevue.engines.errors import ClaudeAuthError
+
+    spec = CliEngineSpec(
+        name="claude-code-cli",
+        cli_label="Claude Code CLI",
+        secret_env="CLAUDE_CODE_OAUTH_TOKEN",
+        auth_error=ClaudeAuthError,
+        validate_secret=lambda t: t,
+        base_argv=("claude", "-p"),
+        prompt_delivery="stdin",
+        usage_capture="stdout-json",
+        stdout_format="json_envelope",  # Q-03: decoupled from usage_capture
+    )
+
+    # A Claude stdout-json envelope whose 'result' contains a fenced JSON review
+    finding_payload = json.dumps(
+        [
+            {
+                "path": "src/app.py",
+                "line": 42,
+                "title": "Null check missing",
+                "body": "Add a null check",
+                "severity": "warning",
+            }
+        ]
+    )  # noqa: E501
+    result_text = f"Review summary here.\n\n```json\n{finding_payload}\n```"
+    envelope = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": result_text,
+            "usage": {
+                "input_tokens": 1500,
+                "output_tokens": 250,
+                "cache_read_input_tokens": 800,
+                "cache_creation_input_tokens": 200,
+            },
+            "total_cost_usd": 0.007125,
+        }
+    )
+
+    from tests.engine_helpers import make_sample_request
+
+    req = make_sample_request()
+
+    result = review_with_retry(
+        req,
+        invoke=lambda _prompt: envelope,
+        secret="fake-key",
+        build_prompt=lambda req, **kw: "Review this diff: ...",
+        max_prompt_bytes=10_000_000,
+        model_label="claude-3-5-sonnet-20241022",
+        spec=spec,
+    )
+
+    # Pitfall 3 assertion: must NOT be degraded — findings extracted successfully
+    assert not result.degraded, (
+        f"Pitfall 3 regression: Claude stdout-json review was degraded. "
+        f"engine_meta={result.engine_meta}"
+    )
+    assert len(result.findings) >= 1, (
+        "Pitfall 3 regression: expected ≥1 finding from fenced result field, got 0"
+    )
+
+    # Bonus: real tokens must be captured (estimated=False)
+    tokens = result.engine_meta["tokens"]
+    assert tokens.get("estimated") is False, "Claude stdout-json must have estimated=False"
+    assert tokens.get("input") == 1500

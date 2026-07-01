@@ -23,7 +23,7 @@ INSTALL_SCRIPT = (
 
 SETUP_UV_SHA = "fac544c07dec837d0ccb6301d7b5580bf5edae39"
 CHECKOUT_SHA = "df4cb1c069e1874edd31b4311f1884172cec0e10"
-COPILOT_CLI_VERSION = "1.0.61"
+COPILOT_CLI_VERSION = "1.0.67"
 CLAUDE_CODE_CLI_VERSION = "2.1.177"
 
 
@@ -170,7 +170,7 @@ def test_review_yml_named_secrets_no_inherit() -> None:
     for name in workflow_call_secrets:
         assert name in secrets, f"missing workflow_call secret {name!r} on review job"
     assert "${{ secrets.COPILOT_GITHUB_TOKEN }}" in str(secrets["copilot-github-token"])
-    assert "${{ secrets.ANTHROPIC_API_KEY }}" in str(secrets["anthropic-api-key"])
+    assert "${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}" in str(secrets["claude-code-oauth-token"])
     assert "${{ secrets.CURSOR_API_KEY }}" in str(secrets["cursor-api-key"])
 
 
@@ -211,8 +211,8 @@ def test_copilot_token_env_separate_from_github_token_in_reusable() -> None:
     assert review_env["COPILOT_GITHUB_TOKEN"] == (
         "${{ inputs.engine == 'copilot-cli' && secrets.copilot-github-token || '' }}"
     )
-    assert review_env["ANTHROPIC_API_KEY"] == (
-        "${{ inputs.engine == 'claude-code-cli' && secrets.anthropic-api-key || '' }}"
+    assert review_env["CLAUDE_CODE_OAUTH_TOKEN"] == (
+        "${{ inputs.engine == 'claude-code-cli' && secrets.claude-code-oauth-token || '' }}"
     )
     assert review_env["CURSOR_API_KEY"] == (
         "${{ inputs.engine == 'cursor-cli' && secrets.cursor-api-key || '' }}"
@@ -280,7 +280,7 @@ def test_engine_secrets_passed_directly_to_review_step_in_reusable() -> None:
                 break
     assert review_step is not None
     env = review_step.get("env") or {}
-    assert "inputs.engine ==" in str(env["ANTHROPIC_API_KEY"])
+    assert "inputs.engine ==" in str(env["CLAUDE_CODE_OAUTH_TOKEN"])
     assert "inputs.engine ==" in str(env["CURSOR_API_KEY"])
 
 

@@ -2,36 +2,176 @@
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from prevue.engines.errors import EngineFailure
 from prevue.engines.parsing import extract_json_fence, validate_findings
 from prevue.engines.prompt import _build_retry_prompt
 from prevue.engines.tokens import estimate_tokens
+from prevue.engines.usage import capture_usage
 from prevue.models import ReviewRequest, ReviewResult
 
+if TYPE_CHECKING:
+    from prevue.engines.spec import CliEngineSpec
 
-def _token_meta(prompt: str, stdout: str = "") -> dict[str, int | bool]:
-    return {
-        "review": estimate_tokens(prompt) + estimate_tokens(stdout),
-        "estimated": True,
-    }
+
+@dataclass
+class InvocationResult:
+    """Bundle of everything one invoke()+capture+fence-extract pass produces.
+
+    T-06 (10-THERMOS quick task): return type of ``_run_invocation``, which
+    replaces the duplicated invoke -> _enrich_capture -> resolve fence source ->
+    extract_json_fence sequence that previously appeared inline for both the
+    first invocation and the retry invocation in ``review_with_retry``.
+    """
+
+    raw_stdout: str
+    captured: dict[str, Any] | None
+    prose: str
+    payload: list | dict | None
+    fence_err: str | None
+    fence_source: str
+
+
+def _estimated_cost_usd(
+    input_tokens: int,
+    output_tokens: int,
+    spec: CliEngineSpec | None,
+    model_label: str | None,
+    pricing_override: dict | None,
+) -> float | None:
+    """Best-effort ~est cost for engines with no real usage capture (T-07 — 10-THERMOS).
+
+    cursor-cli / antigravity-cli (``usage_capture == "none"``) never return a
+    real ``captured`` dict, so cost_usd was never computed for them — tokens
+    showed in the sticky comment but cost silently didn't, an inconsistent UX.
+    Feeds the bytes/4 estimate split (prompt ≈ input, stdout ≈ output) into the
+    same ``compute_cost`` pricing table used for real captures; the caller
+    labels the result ``~est`` via the existing ``estimated`` flag.
+
+    Returns None when spec/model are unknown or the model has no pricing row
+    (same "unknown model → no cost" contract as ``compute_cost``).
+    """
+    if spec is None or not model_label or model_label == "default":
+        return None
+    from prevue.pricing import compute_cost
+
+    return compute_cost(
+        spec.name,
+        model_label,
+        {"input": input_tokens, "output": output_tokens},
+        override=pricing_override,
+    )
+
+
+def _token_meta(
+    prompt: str,
+    stdout: str = "",
+    captured: dict[str, Any] | None = None,
+    *,
+    spec: CliEngineSpec | None = None,
+    model_label: str | None = None,
+    pricing_override: dict | None = None,
+) -> dict[str, int | bool]:
+    """Build the token-meta dict for a single-invocation (no retry) flow.
+
+    When *captured* is provided (from capture_usage), the real token counts are
+    embedded and ``estimated`` is taken from the capture.  When None, falls back
+    to bytes/4 with ``estimated=True`` (labeled fallback — D-04); T-07 also
+    attaches a best-effort ``~est`` cost_usd via _estimated_cost_usd when
+    *spec*/*model_label* are known (e.g. cursor-cli, antigravity-cli).
+    """
+    prompt_tokens = estimate_tokens(prompt)
+    stdout_tokens = estimate_tokens(stdout)
+    review_tokens = prompt_tokens + stdout_tokens
+    if captured is not None:
+        meta: dict[str, Any] = {}
+        meta.update(_pick_real_token_fields(captured))
+        real_review = (captured.get("input") or 0) + (captured.get("output") or 0)
+        meta["review"] = real_review if real_review else review_tokens
+        return meta
+    meta = {"review": review_tokens, "estimated": True}
+    cost = _estimated_cost_usd(prompt_tokens, stdout_tokens, spec, model_label, pricing_override)
+    if cost is not None:
+        meta["cost_usd"] = cost
+    return meta
 
 
 def _retry_token_meta(
-    prompt: str, retry_prompt: str, first_stdout: str, retry_stdout: str
+    prompt: str,
+    retry_prompt: str,
+    first_stdout: str,
+    retry_stdout: str,
+    captured: dict[str, Any] | None = None,
+    captured_retry: dict[str, Any] | None = None,
+    *,
+    spec: CliEngineSpec | None = None,
+    model_label: str | None = None,
+    pricing_override: dict | None = None,
 ) -> dict[str, int | bool]:
-    """Sum both invocations without double-counting the embedded original prompt."""
-    return {
-        "review": (
-            estimate_tokens(prompt)
-            + estimate_tokens(first_stdout)
-            + estimate_tokens(retry_prompt)
-            + estimate_tokens(retry_stdout)
-        ),
-        "estimated": True,
-    }
+    """Sum both invocations without double-counting the embedded original prompt.
+
+    When capture dicts are provided, real token counts are used; otherwise the
+    bytes/4 fallback applies (``estimated=True``); T-07 also attaches a
+    best-effort ``~est`` cost_usd when *spec*/*model_label* are known.
+    Per-engine flag — not global.
+    """
+    prompt_tokens = estimate_tokens(prompt) + estimate_tokens(retry_prompt)
+    output_tokens = estimate_tokens(first_stdout) + estimate_tokens(retry_stdout)
+    review_tokens = prompt_tokens + output_tokens
+    # T-04 (10-THERMOS): sum both invocations' real captures instead of picking
+    # one — `captured_retry or captured` previously discarded the first call's
+    # real input/output/cache/cost when both invocations succeeded, silently
+    # under-reporting ~50% of actual usage on any retried review.
+    if captured is not None or captured_retry is not None:
+        meta: dict[str, Any] = {}
+        summed = _sum_real_token_fields(captured, captured_retry)
+        meta.update(summed)
+        real_review = (summed.get("input") or 0) + (summed.get("output") or 0)
+        meta["review"] = real_review if real_review else review_tokens
+        return meta
+    meta = {"review": review_tokens, "estimated": True}
+    cost = _estimated_cost_usd(prompt_tokens, output_tokens, spec, model_label, pricing_override)
+    if cost is not None:
+        meta["cost_usd"] = cost
+    return meta
+
+
+def _pick_real_token_fields(captured: dict[str, Any]) -> dict[str, Any]:
+    """Extract the real-token fields from a capture dict for embedding in token-meta."""
+    result: dict[str, Any] = {"estimated": captured.get("estimated", False)}
+    for key in ("input", "output", "cache_read", "cache_creation", "cost_usd"):
+        if key in captured:
+            result[key] = captured[key]
+    return result
+
+
+def _sum_real_token_fields(
+    captured: dict[str, Any] | None,
+    captured_retry: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Sum real-token fields across both retry invocations (T-04 — 10-THERMOS).
+
+    Unlike ``_pick_real_token_fields`` (single capture), this combines both
+    captures so a retried review reports its true total usage/cost instead of
+    only one invocation's numbers. A field is summed when present in either
+    capture. Caller guarantees at least one capture is not None, so
+    ``estimated`` is always False here (capture_usage never returns a dict
+    with ``estimated=True`` — that value is synthesized only by the
+    no-capture-at-all fallback in the caller).
+    """
+    result: dict[str, Any] = {"estimated": False}
+    for key in ("input", "output", "cache_read", "cache_creation", "cost_usd"):
+        v1 = (captured or {}).get(key)
+        v2 = (captured_retry or {}).get(key)
+        if v1 is None and v2 is None:
+            continue
+        result[key] = (v1 or 0) + (v2 or 0)
+    return result
 
 
 def _degraded_result(
@@ -61,6 +201,118 @@ def _degraded_result(
     )
 
 
+def _enrich_capture(
+    spec: CliEngineSpec | None,
+    stdout: str,
+    model_label: str,
+    pricing_override: dict | None,
+    otel_path: str | None,
+) -> dict[str, Any] | None:
+    """Capture real usage and attach cost_usd if not vendor-reported (Q-05, 10-THERMOS).
+
+    Extracted from the two identical capture+cost blocks in review_with_retry
+    (first invocation and retry). Returns the enriched capture dict or None.
+    """
+    if spec is None:
+        return None
+    captured = capture_usage(spec, stdout, otel_path=otel_path)
+    if (
+        captured is not None
+        and "cost_usd" not in captured
+        and model_label
+        and model_label != "default"
+    ):
+        from prevue.pricing import compute_cost
+
+        priced = compute_cost(spec.name, model_label, captured, override=pricing_override)
+        if priced is not None:
+            captured["cost_usd"] = priced
+    return captured
+
+
+def _run_invocation(
+    prompt: str,
+    invoke: Callable[[str], str],
+    spec: CliEngineSpec | None,
+    model_label: str,
+    pricing_override: dict | None,
+    otel_path: str | None,
+) -> InvocationResult:
+    """Run one invoke() call and return the full invoke->capture->fence-extract bundle.
+
+    T-06 (10-THERMOS quick task): extracted from the identical sequence that
+    review_with_retry previously inlined twice (first invocation, retry
+    invocation) — invoke the engine, enrich the usage capture (Q-05), resolve
+    the fence source (Pitfall 3 — json_envelope engines need the "result"
+    field unwrapped first), then extract the JSON fence.
+    """
+    raw_stdout = invoke(prompt)
+    captured = _enrich_capture(spec, raw_stdout, model_label, pricing_override, otel_path)
+    fence_source = _resolve_fence_source(spec, raw_stdout)
+    prose, payload, fence_err = extract_json_fence(fence_source)
+    return InvocationResult(
+        raw_stdout=raw_stdout,
+        captured=captured,
+        prose=prose,
+        payload=payload,
+        fence_err=fence_err,
+        fence_source=fence_source,
+    )
+
+
+def _merge_retry_tokens(
+    prompt: str,
+    retry_prompt: str,
+    first: InvocationResult,
+    retry: InvocationResult | None,
+    *,
+    otel_accumulates: bool,
+    spec: CliEngineSpec | None,
+    model_label: str,
+    pricing_override: dict | None,
+) -> dict[str, int | bool]:
+    """Compute the final tokens dict for a (possibly retried) review.
+
+    T-06 (10-THERMOS quick task): centralizes the "which token-meta function to
+    call, with which captured dict, accounting for the otel-accumulates guard"
+    decision that was previously inlined at 3-4 separate call sites inside
+    review_with_retry (fence-err-first-attempt / retry-fence-err / retry-success).
+    Still delegates to the existing ``_token_meta``/``_retry_token_meta`` — their
+    names, signatures, and return shapes are unchanged since tests import them
+    directly.
+
+    *retry* is ``None`` when no retry was attempted (first invocation parsed
+    clean) — in that case this is just ``_token_meta`` on the first invocation.
+    When *retry* is provided but produced no output (EngineFailure before any
+    stdout), pass an ``InvocationResult`` with empty ``fence_source``/``captured``.
+    """
+    if retry is None:
+        return _token_meta(
+            prompt,
+            first.fence_source,
+            first.captured,
+            spec=spec,
+            model_label=model_label,
+            pricing_override=pricing_override,
+        )
+
+    # otel-jsonl: the JSONL dir accumulates spans from ALL invocations, so
+    # retry.captured already contains first+retry spans. Pass captured=None to
+    # _retry_token_meta to avoid double-counting the first invocation's spans.
+    captured_for_sum = None if otel_accumulates else first.captured
+    return _retry_token_meta(
+        prompt,
+        retry_prompt,
+        first.fence_source,
+        retry.fence_source,
+        captured_for_sum,
+        retry.captured,
+        spec=spec,
+        model_label=model_label,
+        pricing_override=pricing_override,
+    )
+
+
 def review_with_retry(
     req: ReviewRequest,
     *,
@@ -69,7 +321,19 @@ def review_with_retry(
     build_prompt: Callable[..., str],
     max_prompt_bytes: int,
     model_label: str,
+    spec: CliEngineSpec | None = None,
+    pricing_override: dict | None = None,
 ) -> ReviewResult:
+    """Run the review flow with one optional retry on fence-parse failure.
+
+    When *spec* is provided, real per-engine token usage is captured via
+    ``usage.capture_usage`` and the ``estimated`` flag is set per-engine
+    (D-04, PERF-03).  When None, falls back to bytes/4 estimates throughout.
+
+    Pitfall 3: for ``stdout-json`` engines (Claude Code), raw stdout is a JSON
+    envelope; ``extract_json_fence`` must run on the ``result`` field, not raw
+    stdout — otherwise every Claude review degrades to "no fence found".
+    """
     prompt = build_prompt(
         req,
         known_issues=req.known_issues,
@@ -81,13 +345,22 @@ def review_with_retry(
             f"Prompt exceeds 1MB ({prompt_bytes:,} bytes); use file-based fallback in Phase 6"
         )
 
+    # Determine OTEL log path for copilot (WARNING 3: None until Plan 05 wires the env)
+    otel_path: str | None = None
+    if spec is not None and spec.usage_capture == "otel-jsonl":
+        otel_path = os.environ.get("COPILOT_OTEL_FILE_EXPORTER_PATH") or None
+
     start = time.monotonic()
     retried = False
     retry_prompt = ""
+    retry: InvocationResult | None = None
+    _otel_accumulates = spec is not None and spec.usage_capture == "otel-jsonl"
 
-    stdout = invoke(prompt)
-    first_stdout = stdout
-    prose, payload, fence_err = extract_json_fence(stdout)
+    # T-06 (10-THERMOS quick task): first invocation via the shared helper —
+    # replaces the invoke -> _enrich_capture -> resolve fence source ->
+    # extract_json_fence sequence that used to be inlined here.
+    first = _run_invocation(prompt, invoke, spec, model_label, pricing_override, otel_path)
+    prose, payload, fence_err = first.prose, first.payload, first.fence_err
 
     if fence_err:
         retry_prompt = _build_retry_prompt(prompt, fence_err)
@@ -99,14 +372,31 @@ def review_with_retry(
                 start,
                 retried=False,
                 model_label=model_label,
-                tokens=_token_meta(prompt, first_stdout),
+                tokens=_merge_retry_tokens(
+                    prompt,
+                    retry_prompt,
+                    first,
+                    None,
+                    otel_accumulates=_otel_accumulates,
+                    spec=spec,
+                    model_label=model_label,
+                    pricing_override=pricing_override,
+                ),
             )
 
         retried = True
         try:
-            stdout = invoke(retry_prompt)
+            raw_retry_stdout = invoke(retry_prompt)
         except EngineFailure:
             # Retry input was sent but produced no output before failing.
+            empty_retry = InvocationResult(
+                raw_stdout="",
+                captured=None,
+                prose=prose,
+                payload=None,
+                fence_err=fence_err,
+                fence_source="",
+            )
             return _degraded_result(
                 prose,
                 fence_err,
@@ -114,10 +404,34 @@ def review_with_retry(
                 start,
                 retried=True,
                 model_label=model_label,
-                tokens=_retry_token_meta(prompt, retry_prompt, first_stdout, ""),
+                tokens=_merge_retry_tokens(
+                    prompt,
+                    retry_prompt,
+                    first,
+                    empty_retry,
+                    otel_accumulates=_otel_accumulates,
+                    spec=spec,
+                    model_label=model_label,
+                    pricing_override=pricing_override,
+                ),
             )
 
-        prose, payload, fence_err = extract_json_fence(stdout)
+        # Capture usage for retry invocation too (Q-05) — same shared helper as
+        # the first invocation.
+        _enriched_retry_capture = _enrich_capture(
+            spec, raw_retry_stdout, model_label, pricing_override, otel_path
+        )
+        fence_retry_source = _resolve_fence_source(spec, raw_retry_stdout)
+        prose, payload, fence_err = extract_json_fence(fence_retry_source)
+        retry = InvocationResult(
+            raw_stdout=raw_retry_stdout,
+            captured=_enriched_retry_capture,
+            prose=prose,
+            payload=payload,
+            fence_err=fence_err,
+            fence_source=fence_retry_source,
+        )
+
         if fence_err:
             return _degraded_result(
                 prose,
@@ -126,13 +440,29 @@ def review_with_retry(
                 start,
                 retried=True,
                 model_label=model_label,
-                tokens=_retry_token_meta(prompt, retry_prompt, first_stdout, stdout),
+                tokens=_merge_retry_tokens(
+                    prompt,
+                    retry_prompt,
+                    first,
+                    retry,
+                    otel_accumulates=_otel_accumulates,
+                    spec=spec,
+                    model_label=model_label,
+                    pricing_override=pricing_override,
+                ),
             )
 
     def _tokens() -> dict[str, int | bool]:
-        if retried:
-            return _retry_token_meta(prompt, retry_prompt, first_stdout, stdout)
-        return _token_meta(prompt, stdout)
+        return _merge_retry_tokens(
+            prompt,
+            retry_prompt,
+            first,
+            retry,
+            otel_accumulates=_otel_accumulates,
+            spec=spec,
+            model_label=model_label,
+            pricing_override=pricing_override,
+        )
 
     valid, dropped = validate_findings(payload or [])
     if payload and not valid:
@@ -161,3 +491,28 @@ def review_with_retry(
             "tokens": _tokens(),
         },
     )
+
+
+def _resolve_fence_source(spec: CliEngineSpec | None, raw_stdout: str) -> str:
+    """Return the text to run extract_json_fence on.
+
+    For json_envelope engines (Claude Code, Cursor CLI): raw stdout is a JSON
+    envelope whose ``result`` field holds the review text. Running
+    extract_json_fence on the envelope JSON would fail — Pitfall 3.
+
+    Q-03 (10-THERMOS): now keyed on ``spec.stdout_format == "json_envelope"``
+    instead of ``spec.usage_capture == "stdout-json"`` — the two axes are
+    independent. Cursor produces a JSON envelope (stdout_format="json_envelope")
+    but has no capturable token usage (usage_capture="none").
+
+    Guard: if raw_stdout cannot be parsed as JSON or has no ``result`` field,
+    fall back to raw_stdout so the normal degraded path fires gracefully.
+
+    T-09b (10-THERMOS quick task): delegates to the single shared
+    ``usage.unwrap_envelope_result`` helper — this and
+    ``cli_adapter._unwrap_classify_text`` cannot silently desync on
+    JSON-parse tolerance (WR-02) since both call the same function.
+    """
+    from prevue.engines.usage import unwrap_envelope_result
+
+    return unwrap_envelope_result(spec, raw_stdout)

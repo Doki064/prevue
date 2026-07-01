@@ -8,6 +8,8 @@ import sys
 from prevue.commands import run_command
 from prevue.engines.errors import AuthError, EngineFailure
 from prevue.gate_validate import run_gate_revalidate, run_materialize_comment_event
+from prevue.models import ReviewResult
+from prevue.output import emit_machine_output
 from prevue.preflight import run_preflight_noop_check
 from prevue.review import ForkPrUnsupported, run_review
 
@@ -50,6 +52,23 @@ def main(argv: list[str] | None = None) -> int:
     return args.func()
 
 
+def _emit_hard_fail_output(exc: Exception) -> None:
+    """T-05 (10-THERMOS): emit OUTP-05 machine output on a hard auth/engine
+    failure that propagated past run_review/run_command uncaught.
+
+    Without this, an AuthError/EngineFailure raised mid-review (e.g. an
+    invalid secret discovered only when the CLI subprocess runs) skips
+    emit_machine_output entirely — no $GITHUB_OUTPUT, no result-file
+    artifact — even though the workflow's "Upload review result artifact"
+    step runs with if: always() and expects one. Best-effort: failure to
+    emit here must not mask the original exception's exit code.
+    """
+    try:
+        emit_machine_output(ReviewResult(summary_markdown=str(exc)), conclusion="failure")
+    except Exception as emit_exc:
+        print(f"prevue: failed to emit machine output on hard failure: {emit_exc}", file=sys.stderr)
+
+
 def _cmd_review() -> int:
     try:
         run_review()
@@ -58,9 +77,11 @@ def _cmd_review() -> int:
         return 0
     except (EngineFailure, AuthError) as exc:
         print(str(exc), file=sys.stderr)
+        _emit_hard_fail_output(exc)
         return 1
     except Exception as exc:
         print(str(exc), file=sys.stderr)
+        _emit_hard_fail_output(exc)
         return 1
     return 0
 
@@ -73,9 +94,11 @@ def _cmd_command() -> int:
         return 0
     except (EngineFailure, AuthError) as exc:
         print(str(exc), file=sys.stderr)
+        _emit_hard_fail_output(exc)
         return 1
     except Exception as exc:
         print(str(exc), file=sys.stderr)
+        _emit_hard_fail_output(exc)
         return 1
 
 

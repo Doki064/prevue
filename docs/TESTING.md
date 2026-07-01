@@ -115,7 +115,7 @@ Some test files were initially written as **RED scaffolds** (failing) before the
 | Fixture | Type | Purpose |
 |---------|------|---------|
 | `sample_request` | `ReviewRequest` | Two-file diff (`.py` + `.md`) via `make_sample_request()` |
-| `set_all_engine_keys` | `None` | Sets `COPILOT_GITHUB_TOKEN`, `ANTHROPIC_API_KEY`, `CURSOR_API_KEY` via `monkeypatch` |
+| `set_all_engine_keys` | `None` | Sets `COPILOT_GITHUB_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN`, `CURSOR_API_KEY` via `monkeypatch` |
 | `responses_activated` | `responses.RequestsMock` | Active HTTP mock context for GitHub REST tests |
 | `fake_engine` | `FakeEngine` | Stub adapter returning a canned `ReviewResult` with no findings |
 | `skills_fixture_root` | `Path` | `tests/fixtures/skills/` — used by loader tests |
@@ -341,7 +341,7 @@ Invariants verified include:
 - No `pull_request_target` trigger or `secrets: inherit` (critical security gates)
 - `actions/checkout` and `astral-sh/setup-uv` pinned to SHA (not tag aliases)
 - Job permissions scoped to `contents: read` (CI) or `write` only for required scopes
-- Named secret pass-through to reusable workflow (`copilot-token:`, `anthropic-api-key:`, etc.)
+- Named secret pass-through to reusable workflow (`copilot-github-token:`, `claude-code-oauth-token:`, etc.)
 - Fork PR guard and draft PR guard conditions present
 - Engine CLI version pins in `install-engine-cli.sh` match the constants in `test_workflow_yaml.py`
 - CI-wait polling job exists in `prevue-review.yml` before Prevue review dispatch

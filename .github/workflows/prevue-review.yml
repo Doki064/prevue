@@ -7,6 +7,10 @@ on:
         type: string
         required: false
         default: copilot-cli
+      model:
+        type: string
+        required: false
+        default: ""
       config-path:
         type: string
         required: false
@@ -30,10 +34,42 @@ on:
     secrets:
       copilot-github-token:
         required: false
-      anthropic-api-key:
+      claude-code-oauth-token:
         required: false
       cursor-api-key:
         required: false
+      antigravity-api-key:
+        required: false
+      gemini-api-key:
+        required: false
+    # OUTP-05 (10-08 gap closure, Gap 3): GitHub Actions requires this top-level
+    # workflow_call.outputs block as a SIBLING of jobs.review.outputs — a job-level
+    # outputs: map alone never propagates across the workflow_call boundary to a
+    # caller's needs.<job>.outputs.* (live-confirmed via a downstream probe job in
+    # 10-UAT.md). Both blocks must stay in sync (same 7 keys, same order) — a
+    # regression test (test_workflow_call_outputs_block_declared) fails on drift.
+    outputs:
+      schema_version:
+        description: "Machine-readable output schema version"
+        value: ${{ jobs.review.outputs.schema_version }}
+      conclusion:
+        description: "Review conclusion (success | failure | neutral)"
+        value: ${{ jobs.review.outputs.conclusion }}
+      error_count:
+        description: "Number of error-severity findings"
+        value: ${{ jobs.review.outputs.error_count }}
+      warning_count:
+        description: "Number of warning-severity findings"
+        value: ${{ jobs.review.outputs.warning_count }}
+      info_count:
+        description: "Number of info-severity findings"
+        value: ${{ jobs.review.outputs.info_count }}
+      tokens:
+        description: "Total tokens consumed by the review (estimated or real)"
+        value: ${{ jobs.review.outputs.tokens }}
+      cost_usd:
+        description: "Estimated review cost in USD"
+        value: ${{ jobs.review.outputs.cost_usd }}
 
 # LIFE-04 (resolveReviewThread) requires contents:write — verified live 2026-06 (08-07).
 # pull-requests:write alone returns GraphQL 403 Forbidden on resolveReviewThread.
@@ -58,6 +94,16 @@ jobs:
         )
       }}
     runs-on: ubuntu-latest
+    # OUTP-05 / D-08/D-09: expose compact machine-readable review results as job
+    # outputs so downstream jobs can chain automation on a stable versioned contract.
+    outputs:
+      schema_version: ${{ steps.run-review.outputs.schema_version }}
+      conclusion: ${{ steps.run-review.outputs.conclusion }}
+      error_count: ${{ steps.run-review.outputs.error_count }}
+      warning_count: ${{ steps.run-review.outputs.warning_count }}
+      info_count: ${{ steps.run-review.outputs.info_count }}
+      tokens: ${{ steps.run-review.outputs.tokens }}
+      cost_usd: ${{ steps.run-review.outputs.cost_usd }}
     steps:
       - name: Checkout Prevue framework
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -109,20 +155,57 @@ jobs:
           fi
 
       - name: Install engine CLI
-        if: steps.preflight.outputs.noop != 'true'
+        # antigravity-cli not yet functional — see spec.py functional=False; mirrored
+        # in prevue-command-run.yml's "Install engine CLI" step.
+        if: steps.preflight.outputs.noop != 'true' && inputs.engine != 'antigravity-cli'
         env:
           PREVUE_ENGINE: ${{ inputs.engine }}
         run: bash .prevue/.github/scripts/install-engine-cli.sh
 
       - name: Run review
+        id: run-review
         working-directory: .prevue
         run: uv run prevue review
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PREVUE_STICKY_OWNER_LOGINS: ${{ vars.PREVUE_STICKY_OWNER_LOGINS }}
           PREVUE_ENGINE: ${{ inputs.engine }}
+          # WKFL-05/T-10-08-24: empty (unset) inputs.model sets PREVUE_MODEL="" here, but
+          # resolve_review_model()/the classify-model call sites in review.py all use
+          # `env_model or ...` — an empty string is falsy in Python and falls through to
+          # COPILOT_MODEL env / models.review / engine.model in prevue.yml, so this never
+          # silently overrides a value already configured there (verified against
+          # src/prevue/config.py::resolve_review_model and src/prevue/review.py env reads).
+          PREVUE_MODEL: ${{ inputs.model }}
           PREVUE_CONSUMER_ROOT: ${{ github.workspace }}/consumer
           PREVUE_CONFIG_PATH: ${{ inputs.config-path }}
+          # PERF-03/D-04 (10-09 gap closure): per-invocation temp directory for
+          # Copilot CLI's OTEL file exporter — usage.py's _parse_copilot_otel
+          # globs *.jsonl files here for real (non-estimated) token counts.
+          # Inert for non-Copilot engines (their specs never read this var), so
+          # it is safe to set unconditionally rather than per-engine-gated.
+          COPILOT_OTEL_FILE_EXPORTER_PATH: ${{ runner.temp }}/copilot-otel
           COPILOT_GITHUB_TOKEN: ${{ inputs.engine == 'copilot-cli' && secrets.copilot-github-token || '' }}
-          ANTHROPIC_API_KEY: ${{ inputs.engine == 'claude-code-cli' && secrets.anthropic-api-key || '' }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ inputs.engine == 'claude-code-cli' && secrets.claude-code-oauth-token || '' }}
           CURSOR_API_KEY: ${{ inputs.engine == 'cursor-cli' && secrets.cursor-api-key || '' }}
+          # ANTIGRAVITY_API_KEY: gated on engine == 'antigravity-cli'; GEMINI_API_KEY is a
+          # documented alias that the spec validator also honors (D-12 / T-10-20).
+          ANTIGRAVITY_API_KEY: ${{ inputs.engine == 'antigravity-cli' && secrets.antigravity-api-key || '' }}
+          # D-12: GEMINI_API_KEY alias — consumers who store their key under this name
+          # can pass it as gemini-api-key secret; cli_adapter.py reads it as fallback.
+          GEMINI_API_KEY: ${{ inputs.engine == 'antigravity-cli' && secrets.gemini-api-key || '' }}
+          # OUTP-05: full ReviewResult JSON written here; uploaded as artifact below.
+          PREVUE_RESULT_FILE: ${{ runner.temp }}/prevue-result.json
+
+      # OUTP-05 / D-08 (Pitfall 6): the compact form goes to $GITHUB_OUTPUT (above);
+      # the full ReviewResult JSON is too large for job outputs (1 MB limit) so it is
+      # uploaded as a build artifact. Runs with if: always() so the artifact is produced
+      # even on degraded/neutral reviews where the review step may exit non-zero.
+      - name: Upload review result artifact
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: prevue-result
+          path: ${{ runner.temp }}/prevue-result.json
+          if-no-files-found: warn
+          retention-days: 30

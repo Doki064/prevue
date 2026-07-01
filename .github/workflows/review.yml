@@ -84,7 +84,7 @@ jobs:
                   exit 0
                   ;;
                 *)
-                  echo "Unknown CI conclusion '${conclusion}'; skipping Prevue review."
+                  echo "::warning::Unknown CI conclusion '${conclusion}'; skipping Prevue review" >&2
                   echo "ci_ok=false" >> "$GITHUB_OUTPUT"
                   exit 0
                   ;;
@@ -116,5 +116,7 @@ jobs:
       seed-consumer-config: true
     secrets:
       copilot-github-token: ${{ secrets.COPILOT_GITHUB_TOKEN }}
-      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+      claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       cursor-api-key: ${{ secrets.CURSOR_API_KEY }}
+      antigravity-api-key: ${{ secrets.ANTIGRAVITY_API_KEY }}
+      gemini-api-key: ${{ secrets.GEMINI_API_KEY }}

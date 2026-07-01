@@ -173,10 +173,8 @@ prevue/
 │   │   ├── subprocess_invoke.py # Shared headless subprocess helper
 │   │   ├── tokens.py           # Token estimation (bytes / 4)
 │   │   ├── errors.py           # EngineFailure, AuthError, stderr sanitisation
-│   │   ├── copilot_cli.py      # Copilot CLI adapter (default)
-│   │   ├── claude_code_cli.py  # Claude Code CLI adapter
-│   │   ├── cursor_cli.py       # Cursor CLI adapter
-│   │   └── gemini_cli.py       # Gemini skeleton (not yet functional)
+│   │   ├── spec.py             # CliEngineSpec table — one declarative entry per CLI engine
+│   │   └── cli_adapter.py      # CliEngineAdapter(spec) — single generic adapter for all CLI engines
 │   └── github/
 │       ├── client.py           # PrContext, PR + repo auth helpers
 │       ├── diff.py             # Diff fetch, scope decision (full/incremental/noop)
@@ -300,7 +298,7 @@ Engines implement the `EngineAdapter` port in `src/prevue/engines/base.py`. The 
    }
    ```
 
-   If the adapter is not yet functional, add its name to `SKELETON_ENGINES` (same as `gemini-cli`) so `require_functional_adapter()` rejects it at review time with a clear error.
+   If the adapter is not yet functional, set `functional=False` on its `CliEngineSpec` (same as `antigravity-cli`) so `require_functional_adapter()` rejects it at review time with a clear error.
 
 3. **Wire CLI install** — add a `case` branch in `.github/scripts/install-engine-cli.sh` with a **pinned** package version:
 
@@ -424,7 +422,7 @@ There is no local CLI shortcut that replaces the full Actions environment. To ru
 
    ```bash
    export GITHUB_TOKEN="github_pat_..."     # read PR data + post comments
-   export COPILOT_GITHUB_TOKEN="github_pat_..."  # or ANTHROPIC_API_KEY / CURSOR_API_KEY
+   export COPILOT_GITHUB_TOKEN="github_pat_..."  # or CLAUDE_CODE_OAUTH_TOKEN / CURSOR_API_KEY
    export PREVUE_ENGINE="copilot-cli"        # or claude-code-cli, cursor-cli
    export GITHUB_REPOSITORY="owner/repo"
    export GITHUB_EVENT_PATH="/path/to/event.json"   # pull_request event payload
@@ -463,7 +461,7 @@ Prevue workflows are security-sensitive. CI enforces static checks; `tests/test_
 - **Least-privilege `permissions`** — caller jobs declare only what they need; the reusable workflow needs `contents: write`, `pull-requests: write`, `checks: write` for lifecycle GraphQL.
 - **Trusted checkout only** — consumer repo checked out at **base ref**, never PR head, for config/skills (`path: consumer`).
 - **Engine secrets** — map workflow secrets to env vars with an engine-conditional expression; keep `GITHUB_TOKEN` separate from engine tokens.
-- **Pin engine CLIs** — versions in `.github/scripts/install-engine-cli.sh` (e.g. `@github/copilot@1.0.61`, `@anthropic-ai/claude-code@2.1.177`).
+- **Pin engine CLIs** — versions in `.github/scripts/install-engine-cli.sh` (e.g. `@github/copilot@1.0.67`, `@anthropic-ai/claude-code@2.1.177`).
 - **Fork/draft guards** — job `if:` blocks skip fork PRs and drafts before spending runner time.
 
 ### Linting workflows

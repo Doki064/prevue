@@ -22,7 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: Customization & Hardening** - Consumer custom skills/overrides, prompt-injection verification, token transparency, large-PR budget (completed 2026-06-14)
 - [x] **Phase 8: Incremental & Stateful Review Lifecycle** - Incremental review scoped to the diff since the last-reviewed SHA, carry-forward/dedupe of prior findings, and auto-resolve of outdated inline threads (LIFE-01/02/04) (completed 2026-06-15)
 - [x] **Phase 9: Classification-aligned skill loading + multi-call review** - Reconcile classify/route with selective skill selection (SKIL-01 gap), and add configurable multi-call review with context-preserving splitting and optional parallel execution (ENGN-05/06/07) (completed 2026-06-21; live UAT deferred by user)
-- [ ] **Phase 10: Boundary Contracts** - Lock the highest-churn boundaries before they ossify: config precedence, real adapter token usage, adapter raw-args + model tiering, structured JSON output (WKFL-05/PERF-03/ENGN-08/09/OUTP-05)
+- [x] **Phase 10: Boundary Contracts** - Lock the highest-churn boundaries before they ossify: config precedence, real adapter token usage, adapter raw-args + model tiering, structured JSON output (WKFL-05/PERF-03/ENGN-08/09/OUTP-05) (completed 2026-06-29)
 - [ ] **Phase 11: Skills as Pinned External Repo** - Extract skills to a dedicated repo consumed as a SHA-pinned submodule = default source, with config-driven skill source and consumer override behind trust gating (SKIL-06/07)
 - [ ] **Phase 12: Cross-File Dependency Context** - Close the tier-2 whole-framework gap: inject unchanged first-party dependencies of changed files as capped, depth-1 reference context (PERF-04)
 - [ ] **Phase 13: Finding Signal Quality** - Confidence/impact scoring + intra-review dedup so a single review emits signal, not near-duplicate noise (QUAL-01)
@@ -265,6 +265,7 @@ Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 →
 | 7. Customization & Hardening | 7/7 | Complete    | 2026-06-14 |
 | 8. Incremental & Stateful Review Lifecycle | 16/16 | Complete   | 2026-06-16 |
 | 9. Classification-aligned skill loading + multi-call review | 6/6 | Complete   | 2026-06-21 |
+| 10. Boundary Contracts | 8/8 | Complete   | 2026-07-01 |
 
 ### Phase 8: Incremental & Stateful Review Lifecycle
 
@@ -394,11 +395,30 @@ Plans:
   5. Adapters support per-role model selection (cheap classify / strong review / cheap consolidate) (ENGN-09)
   6. The validated `ReviewResult` is emitted as a GitHub Actions job output (and/or JSON artifact) that consumers can chain automation on (OUTP-05)
 
-**Plans**: 0 plans
-
+**Plans**: 8 plans (4 waves + gap closure)
 Plans:
+**Wave 1**
 
-- [ ] TBD (run /gsd-plan-phase 10 to break down)
+- [x] 10-01-PLAN.md — Wave-0 RED test scaffolds + usage/pricing fixtures for all new contracts (Wave 1) — COMPLETE 2026-06-29
+- [x] 10-02-PLAN.md — ENGN-10: spec-driven CliEngineAdapter + auto-populated registry; antigravity replaces gemini (Wave 1, FIRST)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [x] 10-03-PLAN.md — PERF-03: per-engine usage capture + vendored pricing snapshot + pure cost compute (Wave 2)
+- [x] 10-04-PLAN.md — WKFL-05/ENGN-08/ENGN-09: declared precedence + raw_args passthrough + per-role models (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [x] 10-05-PLAN.md — OUTP-05: versioned compact output + full JSON artifact + sticky cost line + workflow wiring (Wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [x] 10-06-PLAN.md — Antigravity install/checksum + secret + scheduled pricing-bump PR + live human-verify checkpoint (Wave 4)
+
+**Gap closure** *(from 10-UAT.md — live sandbox verification surfaced 2 unresolved gaps)*
+
+- [x] 10-07-PLAN.md — Gap A: cursor-cli requests/parses real JSON envelope (confirmed no token fields, fixed wrong output-format bug); Gap B: antigravity-cli flipped functional=False (confirmed no headless auth exists per official docs)
+- [x] 10-08-PLAN.md — Gap closure from live 10-UAT.md: Copilot OTEL flipped to honest usage_capture="none" (no CI-viable mechanism exists on the pinned CLI); model workflow_call input threaded into PREVUE_MODEL; on.workflow_call.outputs block added so job outputs reach the caller (OUTP-05 boundary fix)
 
 ### Phase 11: Skills as Pinned External Repo
 
@@ -466,7 +486,7 @@ _Unsequenced task/spike items mined 2026-06-25 (ai-code-review, claude-code-acti
 
 **Goal:** Measure whether semantic chunking (TreeSitter) and/or Headroom library-mode compression deliver meaningful token savings on Prevue's **diff-only / hunk-level** input — not the whole-codebase input their headline numbers (95%+) are measured on — before PERF-02 becomes a phase. Headroom is a real installable Apache-2.0 local lib (`pip install headroom-ai`), so the spike also measures the **minimal install footprint**: can a code-only/AST path skip the ONNX + HuggingFace `kompress-base` model (prose-only) that the `[all]`/`[ml]` extras pull? Decide adopt vs reject on savings × footprint.
 **Requirements:** Informs PERF-02
-**Plans:** 0 plans
+**Plans:** 8/8 plans complete
 **Source:** headroomlabs-ai/headroom (AST CodeCompressor, CacheAligner); bobmatnyc/ai-code-review semantic chunking.
 
 Plans:

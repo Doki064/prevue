@@ -1,4 +1,4 @@
-"""Tests for CopilotCliAdapter — prompt, auth guard, failure paths (ENGN-02)."""
+"""Tests for the copilot-cli CliEngineAdapter — prompt, auth guard, failure paths (ENGN-02)."""
 
 from __future__ import annotations
 
@@ -7,15 +7,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from prevue.engines.copilot_cli import (
-    MAX_PROMPT_BYTES,
-    OUTPUT_CONTRACT,
-    CopilotAuthError,
-    CopilotCliAdapter,
-    EngineFailure,
-    _build_prompt,
-    _sanitize_stderr,
-)
+from prevue.engines.errors import CopilotAuthError, EngineFailure, sanitize_stderr
+from prevue.engines.prompt import MAX_PROMPT_BYTES, OUTPUT_CONTRACT, _build_prompt
+from prevue.engines.registry import get_adapter
 from prevue.models import ChangedFile, DiffBundle, ReviewRequest
 from tests.engine_helpers import (
     PROSE_REVIEW,
@@ -85,21 +79,21 @@ class TestBuildPrompt:
 
 class TestSanitizeStderr:
     def test_truncates_long_stderr(self) -> None:
-        snippet = _sanitize_stderr("x" * 600, "")
+        snippet = sanitize_stderr("x" * 600, "")
         assert len(snippet) == 500
 
     def test_redacts_token(self) -> None:
         token = "github_pat_secret"
-        snippet = _sanitize_stderr(f"error {token}", token)
+        snippet = sanitize_stderr(f"error {token}", token)
         assert token not in snippet
         assert "[REDACTED]" in snippet
 
     def test_handles_bytes_with_invalid_utf8(self) -> None:
-        snippet = _sanitize_stderr(b"ok\xff\xfe", "")
+        snippet = sanitize_stderr(b"ok\xff\xfe", "")
         assert "ok" in snippet
 
     def test_handles_none_stderr(self) -> None:
-        assert _sanitize_stderr(None, "") == ""
+        assert sanitize_stderr(None, "") == ""
 
 
 class TestPromptSizeGuard:
@@ -126,7 +120,7 @@ class TestPromptSizeGuard:
             ),
             instructions="Review.",
         )
-        adapter = CopilotCliAdapter()
+        adapter = get_adapter("copilot-cli")
         with pytest.raises(EngineFailure, match="exceeds 1MB"):
             adapter.review(req)
 
@@ -160,14 +154,14 @@ class TestPromptSizeGuard:
             instructions="Review.",
         )
         with pytest.raises(EngineFailure):
-            CopilotCliAdapter().review(req)
+            get_adapter("copilot-cli").review(req)
         assert not called
 
 
 class TestAuthGuard:
     def test_missing_token_raises_copilot_auth_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv("COPILOT_GITHUB_TOKEN", raising=False)
-        adapter = CopilotCliAdapter()
+        adapter = get_adapter("copilot-cli")
         with pytest.raises(CopilotAuthError):
             adapter.review(_sample_request())
 
@@ -175,7 +169,7 @@ class TestAuthGuard:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("COPILOT_GITHUB_TOKEN", "ghp_classic_pat_not_allowed")
-        adapter = CopilotCliAdapter()
+        adapter = get_adapter("copilot-cli")
         with pytest.raises(CopilotAuthError):
             adapter.review(_sample_request())
 
@@ -190,7 +184,7 @@ class TestFailurePaths:
             raise subprocess.TimeoutExpired(cmd=["copilot"], timeout=300)
 
         monkeypatch.setattr(subprocess, "run", _timeout)
-        adapter = CopilotCliAdapter()
+        adapter = get_adapter("copilot-cli")
         with pytest.raises(EngineFailure, match="timed out"):
             adapter.review(_sample_request())
 
@@ -199,7 +193,7 @@ class TestFailurePaths:
             return SimpleNamespace(returncode=1, stdout="", stderr="Copilot CLI error: auth failed")
 
         monkeypatch.setattr(subprocess, "run", _fail)
-        adapter = CopilotCliAdapter()
+        adapter = get_adapter("copilot-cli")
         with pytest.raises(EngineFailure, match="exited 1"):
             adapter.review(_sample_request())
 
@@ -212,18 +206,37 @@ class TestFailurePaths:
             return SimpleNamespace(returncode=2, stdout="", stderr=long_stderr)
 
         monkeypatch.setattr(subprocess, "run", _fail)
-        adapter = CopilotCliAdapter()
+        adapter = get_adapter("copilot-cli")
         with pytest.raises(EngineFailure) as exc_info:
             adapter.review(_sample_request())
         assert VALID_TOKEN not in str(exc_info.value)
         assert len(str(exc_info.value)) < len(long_stderr)
+
+    def test_nonzero_exit_includes_stdout_in_message(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _fail(*_args, **_kwargs):
+            return SimpleNamespace(returncode=1, stdout="engine error: bad request", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fail)
+        adapter = get_adapter("copilot-cli")
+        with pytest.raises(EngineFailure, match="engine error: bad request"):
+            adapter.review(_sample_request())
+
+    def test_nonzero_exit_redacts_token_from_stdout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _fail(*_args, **_kwargs):
+            return SimpleNamespace(returncode=1, stdout=f"leaked: {VALID_TOKEN}", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", _fail)
+        adapter = get_adapter("copilot-cli")
+        with pytest.raises(EngineFailure) as exc_info:
+            adapter.review(_sample_request())
+        assert VALID_TOKEN not in str(exc_info.value)
 
     def test_empty_stdout_raises_engine_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
         def _empty(*_args, **_kwargs):
             return SimpleNamespace(returncode=0, stdout="   ", stderr="")
 
         monkeypatch.setattr(subprocess, "run", _empty)
-        adapter = CopilotCliAdapter()
+        adapter = get_adapter("copilot-cli")
         with pytest.raises(EngineFailure, match="empty"):
             adapter.review(_sample_request())
 
@@ -264,7 +277,7 @@ class TestOutputContract:
             return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
 
         monkeypatch.setattr(subprocess, "run", _capture)
-        CopilotCliAdapter().review(_sample_request())
+        get_adapter("copilot-cli").review(_sample_request())
         prompt = captured["input"]
         assert "Clear, Concise, Correct, Complete" in prompt
         assert prompt.index("Clear") < prompt.index("UNTRUSTED DATA")
@@ -284,7 +297,7 @@ class TestRetryThenDegrade:
             return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
         monkeypatch.setattr(subprocess, "run", _success)
-        result = CopilotCliAdapter().review(_sample_request())
+        result = get_adapter("copilot-cli").review(_sample_request())
         assert result.degraded is False
         assert len(result.findings) == 1
         assert result.findings[0].path == "src/main.py"
@@ -303,7 +316,7 @@ class TestRetryThenDegrade:
             return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
         monkeypatch.setattr(subprocess, "run", _run)
-        result = CopilotCliAdapter().review(_sample_request())
+        result = get_adapter("copilot-cli").review(_sample_request())
         assert len(calls) == 2
         assert calls[1] is not None
         assert "fence" in calls[1].lower() or "parse" in calls[1].lower()
@@ -318,7 +331,7 @@ class TestRetryThenDegrade:
             return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
 
         monkeypatch.setattr(subprocess, "run", _run)
-        result = CopilotCliAdapter().review(_sample_request())
+        result = get_adapter("copilot-cli").review(_sample_request())
         assert result.degraded is True
         assert result.findings == []
         assert PROSE_REVIEW in result.summary_markdown
@@ -334,7 +347,7 @@ class TestRetryThenDegrade:
             return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
         monkeypatch.setattr(subprocess, "run", _success)
-        result = CopilotCliAdapter().review(_sample_request())
+        result = get_adapter("copilot-cli").review(_sample_request())
         assert result.degraded is True
         assert result.findings == []
         assert result.dropped_findings == 1
@@ -347,7 +360,7 @@ class TestRetryThenDegrade:
             return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
         monkeypatch.setattr(subprocess, "run", _success)
-        result = CopilotCliAdapter().review(_sample_request())
+        result = get_adapter("copilot-cli").review(_sample_request())
         assert result.degraded is False
         assert len(result.findings) == 1
         assert result.dropped_findings == 1
@@ -355,10 +368,12 @@ class TestRetryThenDegrade:
     def test_retry_skipped_when_retry_prompt_exceeds_limit(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        import prevue.engines.copilot_cli as copilot_cli
+        import prevue.engines.prompt as prompt_module
 
         prompt = _build_prompt(_sample_request())
-        monkeypatch.setattr(copilot_cli, "MAX_PROMPT_BYTES", len(prompt.encode("utf-8")) + 50)
+        small_limit = len(prompt.encode("utf-8")) + 50
+        # Patch the source module used by CliEngineAdapter (cli_adapter._prompt_module).
+        monkeypatch.setattr(prompt_module, "MAX_PROMPT_BYTES", small_limit)
         call_count = 0
 
         def _run(*_args, **_kwargs):
@@ -367,7 +382,7 @@ class TestRetryThenDegrade:
             return SimpleNamespace(returncode=0, stdout=PROSE_REVIEW, stderr="")
 
         monkeypatch.setattr(subprocess, "run", _run)
-        result = CopilotCliAdapter().review(_sample_request())
+        result = get_adapter("copilot-cli").review(_sample_request())
         assert call_count == 1
         assert result.degraded is True
         assert result.findings == []
@@ -385,7 +400,7 @@ class TestRetryThenDegrade:
             raise subprocess.TimeoutExpired(cmd=["copilot"], timeout=300)
 
         monkeypatch.setattr(subprocess, "run", _run)
-        result = CopilotCliAdapter().review(_sample_request())
+        result = get_adapter("copilot-cli").review(_sample_request())
         assert result.degraded is True
         assert result.summary_markdown == PROSE_REVIEW
         assert result.findings == []
@@ -404,7 +419,7 @@ class TestSuccessPath:
             return SimpleNamespace(returncode=0, stdout=_stdout_with_fence(), stderr="")
 
         monkeypatch.setattr(subprocess, "run", _success)
-        result = CopilotCliAdapter().review(_sample_request())
+        result = get_adapter("copilot-cli").review(_sample_request())
         assert result.summary_markdown == PROSE_REVIEW
         assert result.findings == []
         assert result.degraded is False
@@ -422,7 +437,7 @@ class TestSuccessPath:
 
         monkeypatch.setattr(subprocess, "run", _capture)
         req = _sample_request()
-        CopilotCliAdapter().review(req)
+        get_adapter("copilot-cli").review(req)
         cmd = captured["cmd"]
         assert cmd == ["copilot", "-s", "--no-ask-user"]
         assert not any(str(arg).startswith("--allow-tool") for arg in cmd)
@@ -439,7 +454,7 @@ class TestSuccessPath:
 
         monkeypatch.setattr(subprocess, "run", _capture)
         req = _sample_request()
-        CopilotCliAdapter().review(req)
+        get_adapter("copilot-cli").review(req)
         assert "-p" not in captured["cmd"]
         assert "src/main.py" in captured["input"]
 
@@ -454,7 +469,7 @@ class TestSuccessPath:
             return SimpleNamespace(returncode=0, stdout=_stdout_with_fence(), stderr="")
 
         monkeypatch.setattr(subprocess, "run", _capture)
-        CopilotCliAdapter().review(_sample_request())
+        get_adapter("copilot-cli").review(_sample_request())
         assert captured["cmd"] == ["copilot", "-s", "--no-ask-user"]
         assert captured["input"]
 
@@ -468,6 +483,6 @@ class TestSuccessPath:
         monkeypatch.setattr(subprocess, "run", _capture)
         req = _sample_request()
         req = req.model_copy(update={"model": "gpt-4.1"})
-        result = CopilotCliAdapter().review(req)
+        result = get_adapter("copilot-cli").review(req)
         assert captured_env.get("COPILOT_MODEL") == "gpt-4.1"
         assert result.engine_meta.get("model") == "gpt-4.1"
