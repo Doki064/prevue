@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-06-12)
 Phase: 10 (boundary-contracts) — COMPLETE
 Plan: 8 of 8
 Status: Phase 10 complete; all P0 UAT gaps closed
-Last activity: 2026-07-01 -- Completed 10-08-PLAN.md (gap closure)
+Last activity: 2026-07-01 - Completed quick task 260701-ju8: Fix thermos review findings except P3
 
 Progress: [██████████] 8/8 plans complete (Phase 10) — All 10 phases complete
 
@@ -248,6 +248,7 @@ None — all pre-v1 research risks resolved. Phase 1 spike confirmed Copilot CLI
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 260613-w0q | Fix Phase 6 Prevue self-review findings (#5 upsert, #2 fork guard, #4 config warn, #1 cursor install, #3/#6 docs) | 2026-06-13 | 8ee8968 | [260613-w0q-fix-phase-6-prevue-self-review-findings](./quick/260613-w0q-fix-phase-6-prevue-self-review-findings/) |
+| 260701-ju8 | Fix thermos review findings except P3 (T-01..T-12: classify tokens, unknown-engine skip, emit-before-publish, model-resolution dedup, adapter factory, duck-typing/envelope-unwrap/getattr cleanup, antigravity alias, shim deletion, review.py/flow.py split) | 2026-07-01 | b1145ed | [260701-ju8-fix-thermos-review-findings-except-p3](./quick/260701-ju8-fix-thermos-review-findings-except-p3/) |
 
 ## Deferred Items
 
