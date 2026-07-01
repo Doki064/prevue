@@ -81,6 +81,7 @@ def _cmd_review() -> int:
         return 1
     except Exception as exc:
         print(str(exc), file=sys.stderr)
+        _emit_hard_fail_output(exc)
         return 1
     return 0
 
@@ -97,6 +98,7 @@ def _cmd_command() -> int:
         return 1
     except Exception as exc:
         print(str(exc), file=sys.stderr)
+        _emit_hard_fail_output(exc)
         return 1
 
 
