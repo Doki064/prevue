@@ -11,6 +11,7 @@ from prevue.engines.errors import EngineFailure
 from prevue.engines.parsing import extract_json_fence, validate_findings
 from prevue.engines.prompt import _build_retry_prompt
 from prevue.engines.tokens import estimate_tokens
+from prevue.engines.usage import capture_usage
 from prevue.models import ReviewRequest, ReviewResult
 
 if TYPE_CHECKING:
@@ -176,6 +177,35 @@ def _degraded_result(
     )
 
 
+def _enrich_capture(
+    spec: CliEngineSpec | None,
+    stdout: str,
+    model_label: str,
+    pricing_override: dict | None,
+    otel_path: str | None,
+) -> dict[str, Any] | None:
+    """Capture real usage and attach cost_usd if not vendor-reported (Q-05, 10-THERMOS).
+
+    Extracted from the two identical capture+cost blocks in review_with_retry
+    (first invocation and retry). Returns the enriched capture dict or None.
+    """
+    if spec is None:
+        return None
+    captured = capture_usage(spec, stdout, otel_path=otel_path)
+    if (
+        captured is not None
+        and "cost_usd" not in captured
+        and model_label
+        and model_label != "default"
+    ):
+        from prevue.pricing import compute_cost
+
+        priced = compute_cost(spec.name, model_label, captured, override=pricing_override)
+        if priced is not None:
+            captured["cost_usd"] = priced
+    return captured
+
+
 def review_with_retry(
     req: ReviewRequest,
     *,
@@ -197,8 +227,6 @@ def review_with_retry(
     envelope; ``extract_json_fence`` must run on the ``result`` field, not raw
     stdout — otherwise every Claude review degrades to "no fence found".
     """
-    from prevue.engines.usage import capture_usage
-
     prompt = build_prompt(
         req,
         known_issues=req.known_issues,
@@ -221,21 +249,8 @@ def review_with_retry(
 
     raw_stdout = invoke(prompt)
 
-    # Capture real usage from the first invocation (PERF-03, D-04)
-    captured: dict[str, Any] | None = None
-    if spec is not None:
-        captured = capture_usage(spec, raw_stdout, otel_path=otel_path)
-        if (
-            captured is not None
-            and "cost_usd" not in captured
-            and model_label
-            and model_label != "default"
-        ):
-            from prevue.pricing import compute_cost
-
-            priced = compute_cost(spec.name, model_label, captured, override=pricing_override)
-            if priced is not None:
-                captured["cost_usd"] = priced
+    # Capture real usage from the first invocation (PERF-03, D-04, Q-05)
+    captured = _enrich_capture(spec, raw_stdout, model_label, pricing_override, otel_path)
 
     # Pitfall 3: for stdout-json engines, the fence lives inside the "result" field.
     # Guard: if stdout is not JSON or has no "result", fall back to raw stdout path.
@@ -288,23 +303,10 @@ def review_with_retry(
                 ),
             )
 
-        # Capture usage for retry invocation too
-        captured_retry: dict[str, Any] | None = None
-        if spec is not None:
-            captured_retry = capture_usage(spec, raw_retry_stdout, otel_path=otel_path)
-            if (
-                captured_retry is not None
-                and "cost_usd" not in captured_retry
-                and model_label
-                and model_label != "default"
-            ):
-                from prevue.pricing import compute_cost
-
-                priced_retry = compute_cost(
-                    spec.name, model_label, captured_retry, override=pricing_override
-                )
-                if priced_retry is not None:
-                    captured_retry["cost_usd"] = priced_retry
+        # Capture usage for retry invocation too (Q-05)
+        captured_retry = _enrich_capture(
+            spec, raw_retry_stdout, model_label, pricing_override, otel_path
+        )
 
         fence_retry_source = _resolve_fence_source(spec, raw_retry_stdout)
         prose, payload, fence_err = extract_json_fence(fence_retry_source)
