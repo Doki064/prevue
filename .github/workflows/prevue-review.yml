@@ -7,6 +7,10 @@ on:
         type: string
         required: false
         default: copilot-cli
+      model:
+        type: string
+        required: false
+        default: ""
       config-path:
         type: string
         required: false
@@ -136,6 +140,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           PREVUE_STICKY_OWNER_LOGINS: ${{ vars.PREVUE_STICKY_OWNER_LOGINS }}
           PREVUE_ENGINE: ${{ inputs.engine }}
+          # WKFL-05/T-10-08-24: empty (unset) inputs.model sets PREVUE_MODEL="" here, but
+          # resolve_review_model()/the classify-model call sites in review.py all use
+          # `env_model or ...` — an empty string is falsy in Python and falls through to
+          # COPILOT_MODEL env / models.review / engine.model in prevue.yml, so this never
+          # silently overrides a value already configured there (verified against
+          # src/prevue/config.py::resolve_review_model and src/prevue/review.py env reads).
+          PREVUE_MODEL: ${{ inputs.model }}
           PREVUE_CONSUMER_ROOT: ${{ github.workspace }}/consumer
           PREVUE_CONFIG_PATH: ${{ inputs.config-path }}
           COPILOT_GITHUB_TOKEN: ${{ inputs.engine == 'copilot-cli' && secrets.copilot-github-token || '' }}
