@@ -604,6 +604,15 @@ def run_review(
     # when `not adapter` (require_functional_adapter always returns CliEngineAdapter).
     if not adapter and config.engine_config.raw_args and isinstance(engine, CliEngineAdapter):
         engine.set_raw_args(config.engine_config.raw_args)
+    elif adapter and config.engine_config.raw_args:
+        # WR-04: a caller-supplied adapter silently skips raw_args threading (the
+        # guard above only fires when `not adapter`). Log so this isn't a silent
+        # "why did my raw_args stop applying" bug if a future call site starts
+        # passing a pre-built adapter.
+        print(
+            "prevue: custom adapter supplied; engine.raw_args from prevue.yml not applied",
+            file=sys.stderr,
+        )
 
     # Thread pricing override from base-ref engine_config into the adapter (D-06c).
     # Injected here alongside raw_args so the same base-ref sentinel gate applies.
@@ -613,6 +622,12 @@ def run_review(
         and isinstance(engine, CliEngineAdapter)
     ):
         engine.set_pricing_override(config.engine_config.pricing)
+    elif adapter and config.engine_config.pricing is not None:
+        # WR-04: same silent no-op risk as raw_args above, for the pricing override.
+        print(
+            "prevue: custom adapter supplied; engine.pricing from prevue.yml not applied",
+            file=sys.stderr,
+        )
 
     # Resolve per-role models (ENGN-09/D-11, Q-02): classify, review, consolidate.
     # Direct from EngineConfig — no fake raw-dict round-trip (resolve_engine_models_from_config).
