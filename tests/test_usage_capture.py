@@ -296,6 +296,39 @@ def test_copilot_otel_malformed_attributes_dict_skipped(tmp_path: Path) -> None:
     assert result is None, "No real span found — must degrade to None, not raise or fake zeros"
 
 
+def test_copilot_otel_partial_field_parse_failure_skips_whole_span(tmp_path: Path) -> None:
+    """CR-02 (10-REVIEW.md): a span whose numeric fields parse in order, then
+    hit a malformed field partway through, must not contribute a corrupted
+    partial total. The whole span is discarded — same as any other malformed
+    span — rather than reporting an inconsistent estimated=False result."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    lines = [
+        # input_tokens parses fine; output_tokens is malformed. A pre-fix
+        # implementation summed input before hitting the exception on output,
+        # producing {"input": 500, "output": 0, ...} tagged estimated=False.
+        json.dumps(
+            {
+                "type": "span",
+                "attributes": {
+                    "gen_ai.usage.input_tokens": 500,
+                    "gen_ai.usage.output_tokens": "garbage",
+                },
+            }
+        ),
+    ]
+    otel_path.write_text("\n".join(lines) + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is None, (
+        "The only span in the file has a malformed field — no real span was "
+        "fully parsed, so the parser must degrade to None, not report a "
+        "corrupted partial total as estimated=False"
+    )
+
+
 def test_copilot_otel_missing_attributes_key_skipped(tmp_path: Path) -> None:
     """A span-typed line with no 'attributes' key at all (or attributes:
     null) must be skipped (contributes zero tokens), not crash."""

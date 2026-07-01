@@ -276,14 +276,23 @@ def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
                     # Missing/null/malformed attributes (e.g. old list shape) — skip.
                     continue
 
-                span_count += 1
+                # Parse all four fields into locals first — only merge into the
+                # running totals (and count the span) if the whole span parses
+                # cleanly, so one malformed field can't produce a corrupted
+                # partial total that still gets reported as estimated=False.
                 try:
-                    total_input += int(attrs.get(_OTEL_INPUT_TOKENS, 0) or 0)
-                    total_output += int(attrs.get(_OTEL_OUTPUT_TOKENS, 0) or 0)
-                    total_cache_read += int(attrs.get(_OTEL_CACHE_READ_TOKENS, 0) or 0)
-                    total_cache_creation += int(attrs.get(_OTEL_CACHE_CREATION_TOKENS, 0) or 0)
+                    span_input = int(attrs.get(_OTEL_INPUT_TOKENS, 0) or 0)
+                    span_output = int(attrs.get(_OTEL_OUTPUT_TOKENS, 0) or 0)
+                    span_cache_read = int(attrs.get(_OTEL_CACHE_READ_TOKENS, 0) or 0)
+                    span_cache_creation = int(attrs.get(_OTEL_CACHE_CREATION_TOKENS, 0) or 0)
                 except (TypeError, ValueError):
                     continue  # skip malformed span (T-10-07)
+
+                span_count += 1
+                total_input += span_input
+                total_output += span_output
+                total_cache_read += span_cache_read
+                total_cache_creation += span_cache_creation
 
     except OSError:
         # T-10-07: file I/O error — degrade to None
