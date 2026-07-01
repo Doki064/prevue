@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from prevue.engines.errors import EngineFailure
@@ -16,6 +17,24 @@ from prevue.models import ReviewRequest, ReviewResult
 
 if TYPE_CHECKING:
     from prevue.engines.spec import CliEngineSpec
+
+
+@dataclass
+class InvocationResult:
+    """Bundle of everything one invoke()+capture+fence-extract pass produces.
+
+    T-06 (10-THERMOS quick task): return type of ``_run_invocation``, which
+    replaces the duplicated invoke -> _enrich_capture -> resolve fence source ->
+    extract_json_fence sequence that previously appeared inline for both the
+    first invocation and the retry invocation in ``review_with_retry``.
+    """
+
+    raw_stdout: str
+    captured: dict[str, Any] | None
+    prose: str
+    payload: list | dict | None
+    fence_err: str | None
+    fence_source: str
 
 
 def _estimated_cost_usd(
@@ -211,6 +230,89 @@ def _enrich_capture(
     return captured
 
 
+def _run_invocation(
+    prompt: str,
+    invoke: Callable[[str], str],
+    spec: CliEngineSpec | None,
+    model_label: str,
+    pricing_override: dict | None,
+    otel_path: str | None,
+) -> InvocationResult:
+    """Run one invoke() call and return the full invoke->capture->fence-extract bundle.
+
+    T-06 (10-THERMOS quick task): extracted from the identical sequence that
+    review_with_retry previously inlined twice (first invocation, retry
+    invocation) — invoke the engine, enrich the usage capture (Q-05), resolve
+    the fence source (Pitfall 3 — json_envelope engines need the "result"
+    field unwrapped first), then extract the JSON fence.
+    """
+    raw_stdout = invoke(prompt)
+    captured = _enrich_capture(spec, raw_stdout, model_label, pricing_override, otel_path)
+    fence_source = _resolve_fence_source(spec, raw_stdout)
+    prose, payload, fence_err = extract_json_fence(fence_source)
+    return InvocationResult(
+        raw_stdout=raw_stdout,
+        captured=captured,
+        prose=prose,
+        payload=payload,
+        fence_err=fence_err,
+        fence_source=fence_source,
+    )
+
+
+def _merge_retry_tokens(
+    prompt: str,
+    retry_prompt: str,
+    first: InvocationResult,
+    retry: InvocationResult | None,
+    *,
+    otel_accumulates: bool,
+    spec: CliEngineSpec | None,
+    model_label: str,
+    pricing_override: dict | None,
+) -> dict[str, int | bool]:
+    """Compute the final tokens dict for a (possibly retried) review.
+
+    T-06 (10-THERMOS quick task): centralizes the "which token-meta function to
+    call, with which captured dict, accounting for the otel-accumulates guard"
+    decision that was previously inlined at 3-4 separate call sites inside
+    review_with_retry (fence-err-first-attempt / retry-fence-err / retry-success).
+    Still delegates to the existing ``_token_meta``/``_retry_token_meta`` — their
+    names, signatures, and return shapes are unchanged since tests import them
+    directly.
+
+    *retry* is ``None`` when no retry was attempted (first invocation parsed
+    clean) — in that case this is just ``_token_meta`` on the first invocation.
+    When *retry* is provided but produced no output (EngineFailure before any
+    stdout), pass an ``InvocationResult`` with empty ``fence_source``/``captured``.
+    """
+    if retry is None:
+        return _token_meta(
+            prompt,
+            first.fence_source,
+            first.captured,
+            spec=spec,
+            model_label=model_label,
+            pricing_override=pricing_override,
+        )
+
+    # otel-jsonl: the JSONL dir accumulates spans from ALL invocations, so
+    # retry.captured already contains first+retry spans. Pass captured=None to
+    # _retry_token_meta to avoid double-counting the first invocation's spans.
+    captured_for_sum = None if otel_accumulates else first.captured
+    return _retry_token_meta(
+        prompt,
+        retry_prompt,
+        first.fence_source,
+        retry.fence_source,
+        captured_for_sum,
+        retry.captured,
+        spec=spec,
+        model_label=model_label,
+        pricing_override=pricing_override,
+    )
+
+
 def review_with_retry(
     req: ReviewRequest,
     *,
@@ -251,18 +353,14 @@ def review_with_retry(
     start = time.monotonic()
     retried = False
     retry_prompt = ""
+    retry: InvocationResult | None = None
+    _otel_accumulates = spec is not None and spec.usage_capture == "otel-jsonl"
 
-    raw_stdout = invoke(prompt)
-
-    # Capture real usage from the first invocation (PERF-03, D-04, Q-05)
-    captured = _enrich_capture(spec, raw_stdout, model_label, pricing_override, otel_path)
-
-    # Pitfall 3: for stdout-json engines, the fence lives inside the "result" field.
-    # Guard: if stdout is not JSON or has no "result", fall back to raw stdout path.
-    fence_source = _resolve_fence_source(spec, raw_stdout)
-    prose, payload, fence_err = extract_json_fence(fence_source)
-
-    first_stdout = fence_source  # used for token-meta size accounting
+    # T-06 (10-THERMOS quick task): first invocation via the shared helper —
+    # replaces the invoke -> _enrich_capture -> resolve fence source ->
+    # extract_json_fence sequence that used to be inlined here.
+    first = _run_invocation(prompt, invoke, spec, model_label, pricing_override, otel_path)
+    prose, payload, fence_err = first.prose, first.payload, first.fence_err
 
     if fence_err:
         retry_prompt = _build_retry_prompt(prompt, fence_err)
@@ -274,10 +372,12 @@ def review_with_retry(
                 start,
                 retried=False,
                 model_label=model_label,
-                tokens=_token_meta(
+                tokens=_merge_retry_tokens(
                     prompt,
-                    first_stdout,
-                    captured,
+                    retry_prompt,
+                    first,
+                    None,
+                    otel_accumulates=_otel_accumulates,
                     spec=spec,
                     model_label=model_label,
                     pricing_override=pricing_override,
@@ -289,6 +389,14 @@ def review_with_retry(
             raw_retry_stdout = invoke(retry_prompt)
         except EngineFailure:
             # Retry input was sent but produced no output before failing.
+            empty_retry = InvocationResult(
+                raw_stdout="",
+                captured=None,
+                prose=prose,
+                payload=None,
+                fence_err=fence_err,
+                fence_source="",
+            )
             return _degraded_result(
                 prose,
                 fence_err,
@@ -296,31 +404,33 @@ def review_with_retry(
                 start,
                 retried=True,
                 model_label=model_label,
-                tokens=_retry_token_meta(
+                tokens=_merge_retry_tokens(
                     prompt,
                     retry_prompt,
-                    first_stdout,
-                    "",
-                    captured,
+                    first,
+                    empty_retry,
+                    otel_accumulates=_otel_accumulates,
                     spec=spec,
                     model_label=model_label,
                     pricing_override=pricing_override,
                 ),
             )
 
-        # Capture usage for retry invocation too (Q-05).
-        # otel-jsonl: the JSONL dir accumulates spans from ALL invocations, so
-        # captured_retry already contains first+retry spans. Pass captured=None
-        # to _retry_token_meta to avoid double-counting first invocation's spans.
-        _otel_accumulates = spec is not None and spec.usage_capture == "otel-jsonl"
-        captured_retry = _enrich_capture(
+        # Capture usage for retry invocation too (Q-05) — same shared helper as
+        # the first invocation.
+        _enriched_retry_capture = _enrich_capture(
             spec, raw_retry_stdout, model_label, pricing_override, otel_path
         )
-        captured_for_sum = None if _otel_accumulates else captured
-
         fence_retry_source = _resolve_fence_source(spec, raw_retry_stdout)
         prose, payload, fence_err = extract_json_fence(fence_retry_source)
-        retry_stdout = fence_retry_source
+        retry = InvocationResult(
+            raw_stdout=raw_retry_stdout,
+            captured=_enriched_retry_capture,
+            prose=prose,
+            payload=payload,
+            fence_err=fence_err,
+            fence_source=fence_retry_source,
+        )
 
         if fence_err:
             return _degraded_result(
@@ -330,44 +440,29 @@ def review_with_retry(
                 start,
                 retried=True,
                 model_label=model_label,
-                tokens=_retry_token_meta(
+                tokens=_merge_retry_tokens(
                     prompt,
                     retry_prompt,
-                    first_stdout,
-                    retry_stdout,
-                    captured_for_sum,
-                    captured_retry,
+                    first,
+                    retry,
+                    otel_accumulates=_otel_accumulates,
                     spec=spec,
                     model_label=model_label,
                     pricing_override=pricing_override,
                 ),
             )
 
-        def _tokens() -> dict[str, int | bool]:
-            return _retry_token_meta(
-                prompt,
-                retry_prompt,
-                first_stdout,
-                retry_stdout,
-                captured_for_sum,
-                captured_retry,
-                spec=spec,
-                model_label=model_label,
-                pricing_override=pricing_override,
-            )
-
-    else:
-        retry_stdout = ""
-
-        def _tokens() -> dict[str, int | bool]:
-            return _token_meta(
-                prompt,
-                first_stdout,
-                captured,
-                spec=spec,
-                model_label=model_label,
-                pricing_override=pricing_override,
-            )
+    def _tokens() -> dict[str, int | bool]:
+        return _merge_retry_tokens(
+            prompt,
+            retry_prompt,
+            first,
+            retry,
+            otel_accumulates=_otel_accumulates,
+            spec=spec,
+            model_label=model_label,
+            pricing_override=pricing_override,
+        )
 
     valid, dropped = validate_findings(payload or [])
     if payload and not valid:
