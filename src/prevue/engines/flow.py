@@ -389,9 +389,14 @@ def review_with_retry(
 def _resolve_fence_source(spec: CliEngineSpec | None, raw_stdout: str) -> str:
     """Return the text to run extract_json_fence on.
 
-    For stdout-json engines (Claude Code): raw stdout is a JSON envelope whose
-    ``result`` field holds the review text (with the markdown fence inside it).
-    Running extract_json_fence on the envelope JSON would fail — Pitfall 3.
+    For json_envelope engines (Claude Code, Cursor CLI): raw stdout is a JSON
+    envelope whose ``result`` field holds the review text. Running
+    extract_json_fence on the envelope JSON would fail — Pitfall 3.
+
+    Q-03 (10-THERMOS): now keyed on ``spec.stdout_format == "json_envelope"``
+    instead of ``spec.usage_capture == "stdout-json"`` — the two axes are
+    independent. Cursor produces a JSON envelope (stdout_format="json_envelope")
+    but has no capturable token usage (usage_capture="none").
 
     Guard: if raw_stdout cannot be parsed as JSON or has no ``result`` field,
     fall back to raw_stdout so the normal degraded path fires gracefully.
@@ -400,7 +405,7 @@ def _resolve_fence_source(spec: CliEngineSpec | None, raw_stdout: str) -> str:
     with ``usage._parse_stdout_json`` so the two call sites cannot silently
     desync on JSON-parse tolerance (WR-02).
     """
-    if spec is None or spec.usage_capture != "stdout-json":
+    if spec is None or spec.stdout_format != "json_envelope":
         return raw_stdout
 
     from prevue.engines.usage import parse_envelope

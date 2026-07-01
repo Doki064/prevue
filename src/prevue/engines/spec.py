@@ -54,6 +54,14 @@ class CliEngineSpec(BaseModel):
     # Usage capture strategy (PERF-03, consumed in Plan 03)
     usage_capture: Literal["stdout-json", "otel-jsonl", "none"] = "none"
 
+    # Stdout envelope format — separate axis from usage_capture (Q-03, 10-THERMOS).
+    # "json_envelope": stdout is a JSON envelope; _resolve_fence_source unwraps the
+    #   "result" field before running extract_json_fence (Pitfall 3 / D-01).
+    # "plain": stdout is plain text; fence extraction runs on raw stdout.
+    # Cursor uses "json_envelope" for its output format even though usage_capture="none"
+    # (the envelope has no usage fields). Decoupled so the two axes evolve independently.
+    stdout_format: Literal["plain", "json_envelope"] = "plain"
+
     # Functional flag — False means skeleton/not-yet-implemented (D-03)
     functional: bool = True
 
@@ -122,20 +130,16 @@ CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
         model_flag="argv",
         model_argv_flag="--model",
         usage_capture="stdout-json",
+        stdout_format="json_envelope",
         functional=True,
     ),
     # Gap A (10-07 gap closure, T-10-07-G): official Cursor CLI docs
     # (cursor.com/docs/cli/reference/output-format) confirm the --output-format
     # json envelope schema is {type, subtype, is_error, duration_ms,
     # duration_api_ms, result, session_id, request_id} — no token/usage/cost
-    # fields exist. junhoyeo/tokscale (cited as "Cursor is definitely possible")
-    # reads Cursor's authenticated web billing API via a manually-extracted
-    # session cookie, NOT cursor-agent stdout — out of scope for an engine
-    # adapter. usage_capture="stdout-json" is reused purely for its JSON
-    # envelope-unwrap + graceful-no-usage-block degrade (identical to how
-    # _parse_stdout_json already returns None when no "usage" dict is present);
-    # cursor-cli's token usage remains estimated=True, now via the verified-
-    # correct code path instead of a disconnected "none" strategy.
+    # fields exist. Q-03 (10-THERMOS): stdout_format="json_envelope" decouples
+    # the fence-unwrap need from usage_capture — Cursor produces a JSON envelope
+    # but has no capturable token usage, so usage_capture="none" is now correct.
     CliEngineSpec(
         name="cursor-cli",
         cli_label="Cursor CLI",
@@ -148,7 +152,8 @@ CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
         model_flag="argv",
         model_argv_flag="-m",
         use_consumer_cwd=True,
-        usage_capture="stdout-json",
+        usage_capture="none",
+        stdout_format="json_envelope",
         functional=True,
     ),
     # Gap B (10-07 gap closure): official Antigravity CLI docs

@@ -254,6 +254,7 @@ def test_claude_stdout_json_fence_extraction_pitfall3() -> None:
         base_argv=("claude", "-p"),
         prompt_delivery="stdin",
         usage_capture="stdout-json",
+        stdout_format="json_envelope",  # Q-03: decoupled from usage_capture
     )
 
     # A Claude stdout-json envelope whose 'result' contains a fenced JSON review
