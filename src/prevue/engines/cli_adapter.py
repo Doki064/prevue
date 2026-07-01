@@ -25,6 +25,12 @@ from prevue.engines.subprocess_invoke import invoke_subprocess_text
 from prevue.models import ReviewRequest, ReviewResult
 
 
+def _extend_model_argv(cmd: list[str], spec: CliEngineSpec, model: str | None) -> None:
+    """Append model argv flag+value to cmd in-place — no-op when model not set (Q-06)."""
+    if spec.model_flag == "argv" and model and spec.model_argv_flag:
+        cmd.extend([spec.model_argv_flag, model])
+
+
 class CliEngineAdapter(EngineAdapter):
     """Single generic CLI engine adapter parameterized by a CliEngineSpec.
 
@@ -100,28 +106,30 @@ class CliEngineAdapter(EngineAdapter):
             if consumer_root and os.path.isdir(consumer_root):
                 cwd = consumer_root
 
-        # Prompt delivery
-        if spec.prompt_delivery == "stdin":
-            # Append model argv flag before invocation (model last for stdin engines)
-            if spec.model_flag == "argv" and model and spec.model_argv_flag:
-                cmd.extend([spec.model_argv_flag, model])
-            # raw_args appended LAST (ENGN-08/D-10)
-            if raw_args:
-                cmd.extend(raw_args)
+        # Q-06 (10-THERMOS): local closure captures shared invoke kwargs so each
+        # delivery branch only spells out the variation (input_text, cmd, env).
+        def _do_invoke(c: list[str], input_text: str | None = None, e: dict | None = None) -> str:
             return invoke_subprocess_text(
-                cmd,
-                env=env,
+                c,
+                env=e if e is not None else env,
                 secret=token,
                 budget_seconds=budget_seconds,
                 cli_label=spec.cli_label,
-                input_text=prompt,
+                input_text=input_text,
                 cwd=cwd,
             )
 
+        # Prompt delivery
+        if spec.prompt_delivery == "stdin":
+            # base_argv → model_argv → raw_args; prompt on stdin
+            _extend_model_argv(cmd, spec, model)
+            if raw_args:
+                cmd.extend(raw_args)
+            return _do_invoke(cmd, input_text=prompt)
+
         elif spec.prompt_delivery == "tempfile-arg":
-            # Write prompt to a NamedTemporaryFile, pass via tempfile_flag ("-f")
-            # Order: base_argv → tempfile_flag + path → model_argv_flag + model → raw_args
-            # (matches original cursor_cli.py:42-44 order; test_cursor_model_mapping asserts last 2)
+            # base_argv → tempfile_flag + path → model_argv → raw_args
+            # Order asserted by test_cursor_model_mapping (last 2 in cmd are -m <model>)
             tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
             tmp_path = tmp.name
             try:
@@ -129,19 +137,10 @@ class CliEngineAdapter(EngineAdapter):
                 tmp.close()
                 if spec.tempfile_flag:
                     cmd.extend([spec.tempfile_flag, tmp_path])
-                if spec.model_flag == "argv" and model and spec.model_argv_flag:
-                    cmd.extend([spec.model_argv_flag, model])
-                # raw_args appended LAST (ENGN-08/D-10)
+                _extend_model_argv(cmd, spec, model)
                 if raw_args:
                     cmd.extend(raw_args)
-                return invoke_subprocess_text(
-                    cmd,
-                    env=env,
-                    secret=token,
-                    budget_seconds=budget_seconds,
-                    cli_label=spec.cli_label,
-                    cwd=cwd,
-                )
+                return _do_invoke(cmd)
             finally:
                 try:
                     os.unlink(tmp_path)
@@ -149,62 +148,39 @@ class CliEngineAdapter(EngineAdapter):
                     pass
 
         else:  # prompt_delivery == "argv"
-            # Model flag appended first, then prompt as the final element, then raw_args
-            if spec.model_flag == "argv" and model and spec.model_argv_flag:
-                cmd.extend([spec.model_argv_flag, model])
+            # base_argv → model_argv → prompt (last) → raw_args
+            _extend_model_argv(cmd, spec, model)
             cmd.append(prompt)
-            # raw_args appended LAST (ENGN-08/D-10)
             if raw_args:
                 cmd.extend(raw_args)
 
             # Pitfall 2 (D-12 / T-10-21): some argv CLIs (e.g. agy) check isatty at
             # startup and silently drop output when running under GitHub Actions (non-TTY).
             # Wrap via `script -qec` to provide a pseudo-TTY, then strip ANSI + CR.
-            # Controlled by spec.argv_pty_wrap (Q-04, 10-THERMOS) — removes the
-            # hard-coded name check.
+            # Controlled by spec.argv_pty_wrap (Q-04, 10-THERMOS).
             #
             # Implementation: store prompt in env var _AGY_PROMPT and build the inner
             # shell command string using $var substitution — no shell-quoting of prompt
             # needed, so the wrapper is safe regardless of prompt content.
+            # $_AGY_PROMPT must be double-quoted so the shell expands it as a single
+            # arg regardless of spaces/globs. shlex.quote would single-quote it, which
+            # suppresses expansion. (shlex.quote-safe parts use shlex.quote; prompt only
+            # via env var, never shell-spliced.)
             #
             # Static assertion target: grep -Rq "script -qec" src/prevue/engines/
             if spec.argv_pty_wrap:
-                # Build the inner shell command referencing the prompt via env var.
-                # $_AGY_PROMPT must be double-quoted so the shell expands it as a
-                # single argument regardless of spaces/globs in the prompt content.
-                # shlex.quote would produce '$_AGY_PROMPT' (single-quoted), which
-                # suppresses expansion and delivers the literal five characters to agy.
-                inner_parts_to_quote = list(spec.base_argv)
-                if spec.model_flag == "argv" and model and spec.model_argv_flag:
-                    inner_parts_to_quote.extend([spec.model_argv_flag, model])
+                pty_cmd = list(spec.base_argv)
+                _extend_model_argv(pty_cmd, spec, model)
                 if raw_args:
-                    inner_parts_to_quote.extend(raw_args)
-                inner_cmd = (
-                    " ".join(shlex.quote(p) for p in inner_parts_to_quote) + ' "$_AGY_PROMPT"'
-                )
-                # Strip ANSI + CR after script output; pipe via shell
+                    pty_cmd.extend(raw_args)
+                inner_cmd = " ".join(shlex.quote(p) for p in pty_cmd) + ' "$_AGY_PROMPT"'
                 wrapper_cmd = (
                     f"script -qec {shlex.quote(inner_cmd)} /dev/null"
                     " | sed -r 's/\\x1B\\[[0-9;]*[A-Za-z]//g' | tr -d '\\r'"
                 )
-                wrapped_env = {**env, "_AGY_PROMPT": prompt}
-                return invoke_subprocess_text(
-                    ["bash", "-c", wrapper_cmd],
-                    env=wrapped_env,
-                    secret=token,
-                    budget_seconds=budget_seconds,
-                    cli_label=spec.cli_label,
-                    cwd=cwd,
-                )
+                return _do_invoke(["bash", "-c", wrapper_cmd], e={**env, "_AGY_PROMPT": prompt})
 
-            return invoke_subprocess_text(
-                cmd,
-                env=env,
-                secret=token,
-                budget_seconds=budget_seconds,
-                cli_label=spec.cli_label,
-                cwd=cwd,
-            )
+            return _do_invoke(cmd)
 
     # ------------------------------------------------------------------
     # EngineAdapter interface
