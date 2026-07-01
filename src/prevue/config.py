@@ -278,33 +278,19 @@ def _resolve_engine_models(raw: dict) -> dict[str, str | None]:
     — merge_findings stays the deterministic fingerprint-dedup merge (D-13).
     Phase 13 (QUAL-01) will wire the consolidate model into the merge step.
 
+    T-08 (10-THERMOS quick task): delegates to resolve_engine_models_from_config —
+    the single canonical role-resolution implementation — after building an
+    EngineConfig from the raw dict's ``engine:`` block. This function's
+    signature/return type is unchanged (dict[str, str | None] with keys
+    classify/review/consolidate) so existing raw-dict callers/tests stay green.
+
     Returns a dict with keys 'classify', 'review', 'consolidate'.
     """
     engine_block = raw.get("engine") or {}
     if not isinstance(engine_block, dict):
         engine_block = {}
-
-    # Single engine.model fallback (no env override — env model is applied at call-sites)
-    single_model: str | None = engine_block.get("model") or None
-    if single_model:
-        single_model = str(single_model)
-
-    # models sub-block: {classify: ..., review: ..., consolidate: ...}
-    models_block = engine_block.get("models") or {}
-    if not isinstance(models_block, dict):
-        models_block = {}
-
-    def _role(role: str) -> str | None:
-        val = models_block.get(role)
-        if val:
-            return str(val)
-        return single_model
-
-    return {
-        "classify": _role("classify"),
-        "review": _role("review"),
-        "consolidate": _role("consolidate"),  # D-13: reserved; consumed in Phase 13
-    }
+    engine_config = _build_engine_config({"engine": engine_block})
+    return resolve_engine_models_from_config(engine_config)
 
 
 def resolve_engine_models_from_config(engine_config: EngineConfig) -> dict[str, str | None]:
@@ -342,6 +328,21 @@ def resolve_review_model(review_model_from_config: str | None, env_model: str | 
     is the call-site env layer it defers to).
     """
     return env_model or review_model_from_config
+
+
+def resolve_classify_model(
+    classify_model: str | None,
+    fallback_model: str | None,
+    env_model: str | None,
+) -> str | None:
+    """Classify-model ladder, single canonical implementation (T-08 — 10-THERMOS).
+
+    Precedence: models.classify (yml, per-role) > classification.fallback.model
+    (yml) > PREVUE_MODEL/COPILOT_MODEL env. This was inlined identically at two
+    call sites in review.py (the LLM classify-fallback call and the skill-select
+    call) — this function is the single source of truth both call sites use.
+    """
+    return classify_model or fallback_model or env_model
 
 
 def _build_engine_config(raw: dict) -> EngineConfig:

@@ -158,6 +158,38 @@ def test_resolve_review_model_none_when_neither_set() -> None:
 
 
 # ---------------------------------------------------------------------------
+# T-08 (10-THERMOS quick task): resolve_classify_model — single canonical
+# classify-model ladder, replacing the two identical inline ladders in review.py.
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_classify_model_classify_wins() -> None:
+    from prevue.config import resolve_classify_model
+
+    assert resolve_classify_model("classify-model", "fallback-model", "env-model") == (
+        "classify-model"
+    )
+
+
+def test_resolve_classify_model_fallback_wins_when_classify_unset() -> None:
+    from prevue.config import resolve_classify_model
+
+    assert resolve_classify_model(None, "fallback-model", "env-model") == "fallback-model"
+
+
+def test_resolve_classify_model_env_wins_when_both_unset() -> None:
+    from prevue.config import resolve_classify_model
+
+    assert resolve_classify_model(None, None, "env-model") == "env-model"
+
+
+def test_resolve_classify_model_none_when_all_unset() -> None:
+    from prevue.config import resolve_classify_model
+
+    assert resolve_classify_model(None, None, None) is None
+
+
+# ---------------------------------------------------------------------------
 # Integration: load_config exposes resolved engine
 # ---------------------------------------------------------------------------
 

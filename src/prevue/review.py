@@ -25,6 +25,7 @@ from prevue.classify.models import CANONICAL_LABEL_ORDER, GENERAL_LABEL
 from prevue.classify.router import route
 from prevue.config import (
     load_config,
+    resolve_classify_model,
     resolve_consumer_config_path,
     resolve_engine_models_from_config,
     resolve_review_model,
@@ -657,10 +658,10 @@ def run_review(
         # LLM fallback on the pre-pack unmatched set.
         # Classify model: models.classify > engine.model > fallback.model (yml) > env
         # (env applied last — matches skill-select path at _skill_select_model below)
-        _effective_classify_model = (
-            _classify_model
-            or fallback_cfg.model
-            or os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
+        _effective_classify_model = resolve_classify_model(
+            _classify_model,
+            fallback_cfg.model,
+            os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL")),
         )
         fallback_labels, classification_disclosure, _classify_real_tokens = llm_classify(
             unmatched_pre_pack,
@@ -778,10 +779,10 @@ def run_review(
                     build_skill_select_prompt(_escalation_candidates, ("relevant", "irrelevant"))
                 )
                 # Use classify model (models.classify > engine.model > fallback.model > env)
-                _skill_select_model = (
-                    _classify_model
-                    or fallback_cfg.model
-                    or os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
+                _skill_select_model = resolve_classify_model(
+                    _classify_model,
+                    fallback_cfg.model,
+                    os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL")),
                 )
                 fetched = llm_select_skills(
                     _escalation_candidates,
