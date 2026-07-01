@@ -157,17 +157,18 @@ class CliEngineAdapter(EngineAdapter):
             if raw_args:
                 cmd.extend(raw_args)
 
-            # Pitfall 2 (D-12 / T-10-21): Antigravity `agy` checks isatty at startup
-            # and silently drops the final response when running under GitHub Actions
-            # (non-TTY). Wrap via `script -qec` to provide a pseudo-TTY, then strip
-            # ANSI escape codes from stdout.
+            # Pitfall 2 (D-12 / T-10-21): some argv CLIs (e.g. agy) check isatty at
+            # startup and silently drop output when running under GitHub Actions (non-TTY).
+            # Wrap via `script -qec` to provide a pseudo-TTY, then strip ANSI + CR.
+            # Controlled by spec.argv_pty_wrap (Q-04, 10-THERMOS) — removes the
+            # hard-coded name check.
             #
             # Implementation: store prompt in env var _AGY_PROMPT and build the inner
             # shell command string using $var substitution — no shell-quoting of prompt
             # needed, so the wrapper is safe regardless of prompt content.
             #
             # Static assertion target: grep -Rq "script -qec" src/prevue/engines/
-            if spec.name == "antigravity-cli":
+            if spec.argv_pty_wrap:
                 # Build the inner shell command referencing the prompt via env var.
                 # $_AGY_PROMPT must be double-quoted so the shell expands it as a
                 # single argument regardless of spaces/globs in the prompt content.

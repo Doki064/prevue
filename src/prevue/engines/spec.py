@@ -62,6 +62,13 @@ class CliEngineSpec(BaseModel):
     # (the envelope has no usage fields). Decoupled so the two axes evolve independently.
     stdout_format: Literal["plain", "json_envelope"] = "plain"
 
+    # argv_pty_wrap: wrap argv-delivery invocation in a `script -qec` pseudo-TTY
+    # (Q-04, 10-THERMOS). Extracted from the `if spec.name == "antigravity-cli"`
+    # name-check in cli_adapter._invoke so the hack is a declarative spec flag
+    # rather than a hard-coded engine name. Only meaningful when prompt_delivery="argv".
+    # See Pitfall 2 (D-12 / T-10-21): agy checks isatty and silently drops output.
+    argv_pty_wrap: bool = False
+
     # Functional flag — False means skeleton/not-yet-implemented (D-03)
     functional: bool = True
 
@@ -177,6 +184,7 @@ CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
         model_flag="argv",
         model_argv_flag="--model",
         usage_capture="none",
+        argv_pty_wrap=True,  # Q-04: agy checks isatty; wrap in script -qec pseudo-TTY
         functional=False,
     ),
 )
