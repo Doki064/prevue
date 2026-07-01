@@ -5,7 +5,7 @@ set -euo pipefail
 
 case "$PREVUE_ENGINE" in
   copilot-cli)
-    npm install -g @github/copilot@1.0.61
+    npm install -g @github/copilot@1.0.67
     command -v copilot
     ;;
   claude-code-cli)

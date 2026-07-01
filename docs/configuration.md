@@ -295,7 +295,7 @@ Each row must be a mapping (or `null`) of LiteLLM-style field names (`input_cost
 | `cursor-cli` | Functional | `cursor-api-key` | `CURSOR_API_KEY` |
 | `antigravity-cli` | Registered, not functional — no headless/non-interactive auth exists for the `agy` CLI per official docs; review attempts fail closed with a clear error | — | `ANTIGRAVITY_API_KEY` |
 
-Copilot CLI reports real (non-estimated) token usage via its OpenTelemetry JSONL file exporter (`COPILOT_OTEL_FILE_EXPORTER_PATH`, wired automatically by the reusable workflow to a per-run temp directory) as of CLI versions that ship OTEL export (confirmed present in `@github/copilot` v1.0.67+; verify against the pinned install version in "Engine install versions" below). When OTEL export is unavailable or the file is empty/missing, Copilot falls back to the same `~est` bytes/4 estimate as `cursor-cli`.
+Copilot CLI reports real (non-estimated) token usage via its OpenTelemetry JSONL file exporter (`COPILOT_OTEL_FILE_EXPORTER_PATH`, wired automatically by the reusable workflow to a per-run temp directory). The pinned install version (`1.0.67`, see "Engine install versions" below) ships OTEL export and matches the flat span-per-line schema `usage.py` parses. When OTEL export is unavailable or the file is empty/missing, Copilot falls back to the same `~est` bytes/4 estimate as `cursor-cli`.
 
 **Review model:** the recommended override is the reusable workflow's `model` input (`with: model: ...`), which threads into `PREVUE_MODEL` for you. Alternatively, set `PREVUE_MODEL` or `COPILOT_MODEL` directly in the workflow environment (e.g. via a repository variable, for consumers who prefer not to edit their caller `with:` block per-call) — `PREVUE_MODEL` takes precedence; `COPILOT_MODEL` is the fallback (Copilot adapter). This is separate from `classification.fallback.model`.
 
@@ -303,7 +303,7 @@ Copilot CLI reports real (non-estimated) token usage via its OpenTelemetry JSONL
 
 | Engine | Installed package | Version |
 |--------|-------------------|---------|
-| `copilot-cli` | `@github/copilot` (npm) | `1.0.61` |
+| `copilot-cli` | `@github/copilot` (npm) | `1.0.67` |
 | `claude-code-cli` | `@anthropic-ai/claude-code` (npm) | `2.1.177` |
 | `cursor-cli` | Official shell installer (`https://cursor.com/install`) | Not version-pinned — supply-chain risk; prefer `copilot-cli` or `claude-code-cli` where pinning matters |
 

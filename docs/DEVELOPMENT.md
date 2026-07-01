@@ -461,7 +461,7 @@ Prevue workflows are security-sensitive. CI enforces static checks; `tests/test_
 - **Least-privilege `permissions`** — caller jobs declare only what they need; the reusable workflow needs `contents: write`, `pull-requests: write`, `checks: write` for lifecycle GraphQL.
 - **Trusted checkout only** — consumer repo checked out at **base ref**, never PR head, for config/skills (`path: consumer`).
 - **Engine secrets** — map workflow secrets to env vars with an engine-conditional expression; keep `GITHUB_TOKEN` separate from engine tokens.
-- **Pin engine CLIs** — versions in `.github/scripts/install-engine-cli.sh` (e.g. `@github/copilot@1.0.61`, `@anthropic-ai/claude-code@2.1.177`).
+- **Pin engine CLIs** — versions in `.github/scripts/install-engine-cli.sh` (e.g. `@github/copilot@1.0.67`, `@anthropic-ai/claude-code@2.1.177`).
 - **Fork/draft guards** — job `if:` blocks skip fork PRs and drafts before spending runner time.
 
 ### Linting workflows
