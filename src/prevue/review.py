@@ -619,7 +619,12 @@ def run_review(
     if fallback_cfg.enabled and unmatched_pre_pack:
         # LLM fallback on the pre-pack unmatched set.
         # Classify model: models.classify > engine.model > fallback.model (yml) > env
-        _effective_classify_model = _classify_model or fallback_cfg.model
+        # (env applied last — matches skill-select path at _skill_select_model below)
+        _effective_classify_model = (
+            _classify_model
+            or fallback_cfg.model
+            or os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))
+        )
         fallback_labels, classification_disclosure = llm_classify(
             unmatched_pre_pack,
             engine,

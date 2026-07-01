@@ -206,6 +206,30 @@ class CliEngineAdapter(EngineAdapter):
             pricing_override=self._pricing_override,
         )
 
+    def _unwrap_classify_text(self, raw_stdout: str) -> str:
+        """Unwrap JSON envelope for stdout_format="json_envelope" engines (e.g. claude-code-cli).
+
+        Review uses _resolve_fence_source to extract the "result" field before parsing
+        the markdown fence. Classify has no fence — the model returns a bare JSON object —
+        so _extract_json_object gets handed the outer envelope and finds only "type",
+        "subtype", "result" keys, none of which are valid file paths → empty classify
+        result → llm fallback failed.
+
+        For "json_envelope" specs, extract the "result" string from the envelope and
+        return it so parse_classify_response/_extract_json_object can see the actual
+        path→label JSON. Falls through to raw_stdout when parsing fails (degrade path).
+        """
+        if self._spec.stdout_format != "json_envelope":
+            return raw_stdout
+        from prevue.engines.usage import parse_envelope
+
+        envelope = parse_envelope(raw_stdout)
+        if envelope is not None:
+            result_text = envelope.get("result")
+            if isinstance(result_text, str):
+                return result_text
+        return raw_stdout
+
     def classify(
         self,
         paths: list[str],
@@ -216,8 +240,8 @@ class CliEngineAdapter(EngineAdapter):
         token, env = self._build_env(model)
         prompt = build_classify_prompt(paths, allowed_labels)
         # raw_args not passed to classify — extra engine flags are review-only (D-10)
-        text = self._invoke(prompt, env, token, CLASSIFY_TIMEOUT_SECONDS, model)
-        return parse_classify_response(text, paths, allowed_labels)
+        raw = self._invoke(prompt, env, token, CLASSIFY_TIMEOUT_SECONDS, model)
+        return parse_classify_response(self._unwrap_classify_text(raw), paths, allowed_labels)
 
     def classify_skills(
         self,
@@ -234,5 +258,5 @@ class CliEngineAdapter(EngineAdapter):
             skills, allowed_labels, paths=paths, diff_excerpt=diff_excerpt
         )
         # raw_args not passed to classify_skills — extra engine flags are review-only (D-10)
-        text = self._invoke(prompt, env, token, CLASSIFY_TIMEOUT_SECONDS, model)
-        return parse_classify_response(text, names, allowed_labels)
+        raw = self._invoke(prompt, env, token, CLASSIFY_TIMEOUT_SECONDS, model)
+        return parse_classify_response(self._unwrap_classify_text(raw), names, allowed_labels)

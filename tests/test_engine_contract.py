@@ -315,6 +315,41 @@ def test_classify_drops_unknown_labels(
     assert result == {"src/main.py": "backend"}
 
 
+def test_classify_unwraps_json_envelope_for_claude_code_cli(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: claude-code-cli wraps classify output in --output-format json
+    envelope. _extract_json_object would parse the outer envelope dict (with
+    "type"/"result" keys) and find no valid path→label entries → empty dict →
+    llm fallback failed.
+
+    _unwrap_classify_text must extract the "result" field for json_envelope specs
+    before passing to parse_classify_response.
+    """
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test-key")
+    payload = {"src/main.py": "backend", "README.md": "frontend"}
+    envelope = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": json.dumps(payload),  # model output is the JSON dict as a string
+            "usage": {"input_tokens": 50, "output_tokens": 10},
+            "total_cost_usd": 0.001,
+        }
+    )
+
+    def _success(*_args, **_kwargs):
+        return SimpleNamespace(returncode=0, stdout=envelope, stderr="")
+
+    monkeypatch.setattr(subprocess, "run", _success)
+    adapter = get_adapter("claude-code-cli")
+    result = adapter.classify(["src/main.py", "README.md"], CANONICAL_LABEL_ORDER)
+    assert result == payload, (
+        f"classify must unwrap json_envelope for claude-code-cli; got: {result}"
+    )
+
+
 def test_classify_missing_credential_raises_auth_error(
     engine_name: str, adapter, monkeypatch: pytest.MonkeyPatch
 ) -> None:
