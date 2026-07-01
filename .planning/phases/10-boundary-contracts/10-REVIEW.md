@@ -1,8 +1,8 @@
 ---
 phase: 10-boundary-contracts
-reviewed: 2026-07-01T00:00:00Z
+reviewed: 2026-07-01T13:33:51Z
 depth: standard
-files_reviewed: 37
+files_reviewed: 34
 files_reviewed_list:
   - .github/scripts/install-engine-cli.sh
   - .github/workflows/prevue-command-run.yml
@@ -43,262 +43,225 @@ files_reviewed_list:
   - tests/test_reusable_workflow_yaml.py
   - tests/test_usage_capture.py
 findings:
-  critical: 2
-  warning: 4
+  critical: 0
+  warning: 2
   info: 2
-  total: 8
+  total: 4
 status: issues_found
 ---
 
 # Phase 10: Code Review Report
 
-**Reviewed:** 2026-07-01T00:00:00Z
+**Reviewed:** 2026-07-01T13:33:51Z
 **Depth:** standard
-**Files Reviewed:** 37
+**Files Reviewed:** 34
 **Status:** issues_found
 
 ## Summary
 
-This is a fresh pass over the current state of phase 10 (boundary contracts) — the config
-precedence ladder (`EngineConfig`: raw_args, per-role models, pricing override), the new
-spec-driven `CliEngineAdapter` that replaced the four per-engine adapter modules, the usage-capture
-/ pricing / cost pipeline, the reusable-workflow YAML contract, and the sticky-comment renderer.
-The `claude-code-oauth-token` documentation drift flagged in an earlier review iteration of this
-phase has since been fixed — `docs/configuration.md` now correctly documents
-`CLAUDE_CODE_OAUTH_TOKEN` throughout. The architecture (one generic adapter parameterized by a
-declarative `CliEngineSpec`, instead of four near-duplicate adapter classes) is sound, and the
-`script -qec` pseudo-TTY wrapper for Antigravity was traced end-to-end and confirmed to deliver
-the prompt via an environment variable (never shell-interpolated), so no command-injection risk
-exists there despite building a shell command string.
+This is a re-review of phase 10 (boundary contracts) against the current tree, after the
+prior `10-REVIEW.md` / `10-REVIEW-FIX.md` iteration (CR-01 pricing-shape validator, WR-01
+docs, WR-02 command-run secret wiring, WR-03 antigravity install exclusion). All four fixes
+from that iteration were verified correct in isolation: `EngineConfig.pricing` now has a
+`_validate_pricing` field validator that raises `ValidationError` on a non-dict `pricing`
+value or a non-dict/non-null row (confirmed by direct construction), `docs/configuration.md`
+now documents `engine.models`/`engine.raw_args`/`engine.pricing`, `prevue-command-run.yml`
+now wires `ANTIGRAVITY_API_KEY`/`GEMINI_API_KEY` into the `Prevue command` step, and
+`prevue-review.yml`'s "Install engine CLI" step now excludes `antigravity-cli`. The full
+in-scope pytest suite (807 tests) passes.
 
-The most serious findings this pass are two config-loading crash paths: `load_config()` is called
-in `run_review()` with **no exception handling**, while a sibling code path (consumer skill
-loading, ~190 lines later in the same function) explicitly catches `ValidationError` and fails
-closed with a structured check run instead of crashing. Two distinct, entirely plausible consumer
-YAML typos (`engine.models:` or `engine.raw_args:` left with an empty block, which YAML parses to
-`None`) raise an uncaught `pydantic.ValidationError` that propagates out of `run_review()` with no
-`prevue/review` check published and no sticky comment — a silent, undiagnosable job crash that
-directly contradicts the fail-closed design used everywhere else in this same function. A further
-finding shows the vendored pricing table's key format does not match plain Anthropic model
-strings, silently defeating the `update-pricing.yml` spot-check for the exact model name used
-throughout the docs and tests.
+This pass found that the WR-03 fix was applied to only one of the two workflow entry points
+that run the "Install engine CLI" step — `prevue-command-run.yml` has its own separate
+install step that still runs unconditionally for `antigravity-cli`, reproducing the exact
+waste/attack-surface issue WR-03 was meant to close, and reproducing the exact
+two-entry-points-drift failure mode that WR-02 (from the same review iteration) was meant to
+close. Additionally, the CR-01 pricing validator fix shipped with zero regression test
+coverage — no test asserts `EngineConfig.model_validate` actually rejects a malformed
+`engine.pricing` value, so a future refactor could silently regress it without any test
+failing. The remaining prior INFO findings (IN-01 defense-in-depth guard in
+`_lookup_row`/`compute_cost`, IN-02 placeholder summary fallback, IN-03 docstring/behavior
+mismatch) are unchanged and confirmed still present — they were explicitly out of scope for
+the prior fix pass (`fix_scope: critical_warning`) and remain accurately documented as such.
 
-## Critical Issues
+## Structural Findings (fallow)
 
-### CR-01: `load_config()` crashes the review job on a trivial consumer YAML typo
+None provided for this review invocation.
 
-**File:** `src/prevue/review.py:500`
-**Issue:** `run_review()` calls `config = load_config(str(consumer_path))` with no exception
-handling. `load_config` builds `EngineConfig.model_validate(engine_block)`
-(`_build_engine_config`, `src/prevue/config.py:334-339`), and `EngineConfig.models` is typed as
-`EngineModels` (no `| None`, no custom validator tolerating `None`). A completely ordinary
-consumer YAML typo — writing:
-```yaml
-engine:
-  name: copilot-cli
-  models:
-```
-with nothing indented underneath (valid YAML; parses to `{"models": None}`) — raises an uncaught
-`pydantic.ValidationError` that propagates out of `load_config()`, out of `run_review()`, and
-crashes the whole job. Verified directly against the current code:
-```
->>> EngineConfig.model_validate({"name": "x", "models": None})
-ValidationError: models — Input should be a valid dictionary or instance of EngineModels
-```
-This directly contradicts the framework's own fail-closed design: the sibling consumer-skill-load
-call a few dozen lines later (`src/prevue/review.py:690-716`) explicitly wraps its fallible call
-in `except (ValidationError, OSError, UnicodeDecodeError, yaml.YAMLError)` and publishes a
-structured failure check instead of crashing:
-```python
-except (ValidationError, OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
-    print(f"prevue: consumer skill load failed: {exc!r}", file=sys.stderr)
-    reason = (...)
-    _publish_skip(pr, ctx, diff.head_sha, reason=reason, conclusion="failure", title="review failed")
-    return
-```
-`load_config()` — the very first fallible, consumer-controlled operation in `run_review()` — gets
-no equivalent protection, even though `ValidationError` from a malformed `prevue.yml` is entirely
-foreseeable (it's precisely why `skip.skip_title_patterns`, `EngineConfig.raw_args`, and every
-other Pydantic field in this module validates and raises on purpose).
-**Fix:**
-```python
-consumer_path = resolve_consumer_config_path(
-    os.environ.get("PREVUE_CONFIG_PATH"),
-    consumer_root=os.environ.get("PREVUE_CONSUMER_ROOT"),
-)
-try:
-    config = load_config(str(consumer_path))
-except ValidationError as exc:
-    print(f"prevue: invalid prevue.yml config: {exc!r}", file=sys.stderr)
-    pr = get_authenticated_pull(ctx)  # needed for _publish_skip
-    _publish_skip(
-        pr, ctx, pr.head.sha,
-        reason=f"Invalid `prevue.yml` configuration ({type(exc).__name__}). See workflow logs.",
-        conclusion="failure",
-        title="review failed",
-    )
-    return
-```
-(`pr = get_authenticated_pull(ctx)` currently runs *after* `load_config()` in the unmodified flow;
-the fix must either move the pull fetch earlier or publish the failure via the checks API directly
-without a `pr` object.)
-
-### CR-02: `engine.raw_args:` left empty in YAML crashes `load_config()` the same way
-
-**File:** `src/prevue/config.py:126-152`, `src/prevue/review.py:500`
-**Issue:** Same failure class as CR-01, different field. `EngineConfig._validate_raw_args`
-(`mode="before"`) explicitly rejects any non-list value, including `None`:
-```
->>> EngineConfig.model_validate({"name": "x", "raw_args": None})
-ValidationError: raw_args — Value error, engine.raw_args must be a list of strings, got 'NoneType': None
-```
-Writing `engine:\n  raw_args:\n` (again, ordinary/plausible YAML — e.g. a consumer templating
-values in CI, or copy-pasting a docs example and deleting the list items) parses to
-`{"raw_args": None}` and raises the same uncaught `ValidationError` through the same unprotected
-`load_config()` call site as CR-01. Both findings share one root cause (no exception boundary
-around `load_config()`) and one fix location.
-**Fix:** Apply the same try/except from CR-01 around `load_config()` (fixes both CR-01 and CR-02
-simultaneously since both are `ValidationError` subtypes at the same call site). As defense in
-depth, also make the validator explicitly tolerate `None`:
-```python
-@field_validator("raw_args", mode="before")
-@classmethod
-def _validate_raw_args(cls, value: object) -> list[str]:
-    if value is None:
-        return []
-    ...
-```
-Note this addition alone does not fix CR-01 (the `models` field has no equivalent validator), so
-the `load_config()` try/except is required regardless.
+## Narrative Findings (AI reviewer)
 
 ## Warnings
 
-### WR-01: Vendored pricing table has no plain-key entry for Claude models — `compute_cost` silently returns `None`
+### WR-01: `prevue-command-run.yml`'s "Install engine CLI" step still runs for `antigravity-cli`, reproducing the issue WR-03 fixed only in `prevue-review.yml`
 
-**File:** `src/prevue/pricing/model_prices.json`, `src/prevue/pricing/__init__.py:64-79`,
-`.github/workflows/update-pricing.yml:33-47`
-**Issue:** The currently-vendored snapshot (2918 entries) has **no** `claude-3-5-sonnet-20241022`
-key — verified directly (`'claude-3-5-sonnet-20241022' in data` is `False`). Only
-provider-prefixed variants exist (`anthropic.claude-3-5-sonnet-20241022-v2:0`,
-`bedrock/invoke/anthropic.claude-3-5-sonnet-20240620-v1:0`, region-prefixed forms like
-`eu.anthropic....`, etc.), using a `.` separator and `bedrock/invoke/`/region prefixes that
-`_normalize_model()` does not know how to strip (it only strips `anthropic/`, `openai/`,
-`google/`, `vertex_ai/`, `azure/`, `bedrock/` as slash-suffixed prefixes). Two consequences:
-1. `update-pricing.yml`'s "Validate downloaded pricing JSON" spot-check uses
-   `if model in data: assert 0 < cost < 0.01` — since the key is simply absent, the `if` is never
-   entered and the assertion never runs. The spot-check has therefore never actually verified
-   Claude pricing in this snapshot; it silently degrades to a no-op for exactly the model it is
-   meant to catch regressions on.
-2. `compute_cost("claude-code-cli", "claude-3-5-sonnet-20241022", usage, ...)` against the real
-   vendored table (as opposed to the small test fixture, which *does* define this key) returns
-   `None` — "unknown model, no cost" — for the exact model name used throughout
-   `docs/configuration.md` and the test suite as the canonical example. In production this is
-   currently masked for `claude-code-cli` because `compute_cost` prefers `usage["cost_usd"]`
-   (Claude's vendor-reported `total_cost_usd`) before ever consulting the table — but the same
-   `_normalize_model`/table-lookup path is reused by `flow._estimated_cost_usd` for engines with no
-   vendor-reported cost, so any future model-name reuse across engines (or a Claude envelope
-   missing `total_cost_usd`) will silently produce no cost with no error surfaced anywhere.
-**Fix:** Extend `_normalize_model()` to strip the vendored table's actual prefix conventions
-(`anthropic.`, `bedrock/invoke/`, two-letter region prefixes like `eu.`/`apac.`) or add a
-suffix-aware fallback lookup, and change the `update-pricing.yml` spot-check from a silent `if` to
-an `assert model in data, f"pricing snapshot missing expected model {model}"` so a future snapshot
-update that actually removes/renames the key fails loudly instead of silently no-opping.
+**File:** `.github/workflows/prevue-command-run.yml:57-61`, `.github/workflows/prevue-review.yml:157-167`
 
-### WR-02: `docs/configuration.md` Secrets table omits `antigravity-api-key` and `gemini-api-key`
+**Issue:** The prior review's WR-03 finding ("Install engine CLI runs for antigravity-cli even
+though the engine is registered non-functional") was fixed by adding
+`inputs.engine != 'antigravity-cli'` to the `if:` condition of `prevue-review.yml`'s "Install
+engine CLI" step (line 164, with an explanatory comment referencing WR-03). But
+`prevue-command-run.yml` — the `/prevue` slash-command dispatch entry point into the exact
+same review pipeline — has its own, separate "Install engine CLI" step:
 
-**File:** `docs/configuration.md:273-280`
-**Issue:** The reusable workflow (`prevue-review.yml:34-44`) declares five `workflow_call` secrets
-(`copilot-github-token`, `claude-code-oauth-token`, `cursor-api-key`, `antigravity-api-key`,
-`gemini-api-key`), and `tests/test_reusable_workflow_yaml.py::test_antigravity_secret_in_workflow_call_secrets`
-asserts `antigravity-api-key` is present and `required: false`. The docs' "### Secrets" table,
-however, lists only three rows (`copilot-github-token`, `claude-code-oauth-token`,
-`cursor-api-key`). A consumer wanting to wire up `antigravity-cli` — a documented, registered
-engine per the "Available engines" table earlier in the same doc, even though currently
-non-functional — has no documented secret name or env-var mapping in the one place (`### Secrets`)
-they would look for it; they would need to read the workflow YAML or `cli_adapter.py` directly.
-**Fix:** Add the two missing rows, e.g.:
-```markdown
-| `antigravity-api-key` | No | `antigravity-cli` | API key for `agy` (registered, not yet functional). Maps to `ANTIGRAVITY_API_KEY` |
-| `gemini-api-key` | No | `antigravity-cli` | Documented alias for `antigravity-api-key`. Maps to `GEMINI_API_KEY` |
+```yaml
+- name: Install engine CLI
+  if: github.event.client_payload.needs_engine
+  env:
+    PREVUE_ENGINE: ${{ github.event.client_payload.engine }}
+  run: bash .prevue/.github/scripts/install-engine-cli.sh
 ```
 
-### WR-03: `_resolve_model()` is dead code — superseded by `_resolve_engine_models`/`resolve_review_model` but never removed
+This condition was never updated to exclude `antigravity-cli`. A `/prevue review` command
+dispatched with `engine: antigravity-cli` (and `needs_engine: true`) still runs the full
+`curl` + optional-checksum + `bash "$installer"` third-party install
+(`.github/scripts/install-engine-cli.sh`'s `antigravity-cli)` case) before
+`require_functional_adapter` rejects the engine downstream in `review.py` — exactly the
+wasted install/attack-surface spend WR-03 was written to close, now present in one of the two
+entry points but not the other.
 
-**File:** `src/prevue/config.py:241-257`
-**Issue:** `_resolve_model(raw)` implements a model-precedence ladder (`PREVUE_MODEL` env >
-`COPILOT_MODEL` env > `engine.model` yml > `None`), but no production code path calls it — a
-search for `_resolve_model(` outside its own definition finds only `tests/test_config_precedence.py`.
-Production code resolves models via `_resolve_engine_models()` (per-role: classify/review/
-consolidate) plus `resolve_review_model()` (the call-site env-override layer), a materially
-different and more capable contract (per-role overrides) that `_resolve_model` has no notion of.
-Keeping `_resolve_model` around risks a future maintainer either wiring it back in by mistake, or
-mistakenly treating `test_model_precedence_matrix` as documentation of the live model-resolution
-behavior when it in fact only documents this superseded, unused function.
-**Fix:** Delete `_resolve_model()` and its dedicated test parametrization (or, if it must be kept
-for historical/precedent reasons, add an explicit "not on the live call path — see
-`_resolve_engine_models`/`resolve_review_model` for the current model precedence contract"
-docstring note, matching the style already used for other retained-for-tests shims in this
-codebase, e.g. `copilot_cli.py`'s `CopilotCliAdapter` alias).
+This is also a second, fresh instance of the class of bug the *same review iteration's*
+WR-02 finding described ("a `/prevue` command-dispatch workflow ... missing ... wiring
+present in the primary reusable workflow ... a real drift between the two entry points into
+the same review pipeline") — WR-02 was fixed for secret wiring, but the parallel install-step
+gating fix (WR-03) was not mirrored to the second entry point at the same time, so the two
+workflows have drifted again on a different axis.
 
-### WR-04: `raw_args`/`pricing_override` threading silently no-ops when a caller supplies a custom `adapter`
+No test guards this: `tests/test_reusable_workflow_yaml.py` only loads and asserts against
+`prevue-review.yml` (`REUSABLE_WORKFLOW` constant, line 10-12); `prevue-command-run.yml` has
+no equivalent test file, so this class of two-workflow drift has no regression coverage at
+all in either direction.
 
-**File:** `src/prevue/review.py:582-598`
-**Issue:** The guard `if not adapter and config.engine_config.raw_args and isinstance(engine, CliEngineAdapter):`
-(and the analogous pricing-override guard immediately after) means that whenever `run_review()` is
-invoked with a non-`None` `adapter=`, the base-ref `prevue.yml`'s `engine.raw_args` and
-`engine.pricing` are silently dropped with no diagnostic, even though `config.engine_config` still
-carries the loaded values. Today this is masked in production: the only caller that passes
-`adapter` is `commands.py::run_command(adapter=...)`, which is itself always invoked with
-`adapter=None` from `cli.py:91` (`return run_command()`), so the guard's `not adapter` branch is
-always taken in the current call graph. But the gate exists and will silently fire the moment
-either call site changes — e.g. a future subcommand or test-harness wiring injects a pre-built
-adapter for some legitimate reason — producing a "why did my raw_args/pricing override silently
-stop applying" bug with zero log signal to explain it.
-**Fix:** Log a stderr notice on the else-branch when the values are present but skipped due to a
-custom adapter:
+**Fix:** Add the same `&& github.event.client_payload.engine != 'antigravity-cli'` exclusion
+to `prevue-command-run.yml`'s "Install engine CLI" step `if:` condition, mirroring
+`prevue-review.yml:164`:
+
+```yaml
+- name: Install engine CLI
+  if: >-
+    github.event.client_payload.needs_engine &&
+    github.event.client_payload.engine != 'antigravity-cli'
+  env:
+    PREVUE_ENGINE: ${{ github.event.client_payload.engine }}
+  run: bash .prevue/.github/scripts/install-engine-cli.sh
+```
+
+Consider also adding a shared regression test (or extending
+`test_reusable_workflow_yaml.py` to parametrize over both workflow files) that asserts both
+"Install engine CLI" steps exclude any engine with `functional=False` in `CLI_ENGINE_SPECS`,
+so this drift cannot silently reappear a third time as new non-functional engines are added.
+
+### WR-02: The `_validate_pricing` field validator (CR-01 fix) has no regression test coverage
+
+**File:** `src/prevue/config.py:160-184`, `tests/test_pricing.py`, `tests/test_raw_args.py`
+
+**Issue:** The prior review's CR-01 finding was fixed by adding a
+`field_validator("pricing", mode="before")` on `EngineConfig` that rejects a non-dict
+`pricing` value or a non-dict/non-null row within it. This validator is exercised manually
+here and confirmed to work correctly:
+
+```
+>>> EngineConfig.model_validate({"pricing": {"gpt-4o": "not-a-dict"}})
+pydantic.ValidationError: ... engine.pricing['gpt-4o'] must be a mapping or null ...
+```
+
+But no test in the repository calls it. `tests/test_pricing.py` only tests the pure
+`compute_cost`/`load_pricing_table` functions with hand-built `override`/`table` dicts — it
+never constructs an `EngineConfig` and never imports `_validate_pricing`. The sibling
+`raw_args` validator (`_validate_raw_args`), by contrast, has a full dedicated test file
+(`tests/test_raw_args.py`, 124 lines) covering the string-rejection, non-list-rejection,
+non-string-element-rejection, and `None`-tolerance cases. `_validate_pricing` mirrors that
+validator's logic and intent but has zero equivalent coverage — a future refactor of
+`EngineConfig` (e.g. accidentally dropping the `mode="before"` validator during a Pydantic
+version bump, or a copy-paste edit that loosens the `isinstance` check) would not be caught
+by any test, silently reopening the exact crash this phase's own review cycle flagged as
+CRITICAL.
+
+**Fix:** Add a `tests/test_pricing.py` (or new `test_engine_config_pricing.py`) section
+mirroring `test_raw_args.py`'s structure, e.g.:
+
 ```python
-elif adapter and (config.engine_config.raw_args or config.engine_config.pricing is not None):
-    print(
-        "prevue: custom adapter supplied; engine.raw_args/pricing from prevue.yml not applied",
-        file=sys.stderr,
+import pytest
+from pydantic import ValidationError
+from prevue.config import EngineConfig
+
+def test_pricing_rejects_non_dict_value():
+    with pytest.raises(ValidationError, match="mapping"):
+        EngineConfig.model_validate({"pricing": "not-a-dict"})
+
+def test_pricing_rejects_non_dict_row():
+    with pytest.raises(ValidationError, match="mapping or null"):
+        EngineConfig.model_validate({"pricing": {"gpt-4o": "not-a-dict"}})
+
+def test_pricing_accepts_none():
+    cfg = EngineConfig.model_validate({"pricing": None})
+    assert cfg.pricing is None
+
+def test_pricing_accepts_valid_row():
+    cfg = EngineConfig.model_validate(
+        {"pricing": {"gpt-4o": {"input_cost_per_token": 1e-6}}}
     )
+    assert cfg.pricing == {"gpt-4o": {"input_cost_per_token": 1e-6}}
 ```
 
 ## Info
 
-### IN-01: `EngineConfig.raw_args` validator docstring doesn't mention it also rejects `None`
+### IN-01: `_lookup_row`/`compute_cost` still has no defense-in-depth guard against non-dict pricing rows (carried forward, unfixed — correctly out of scope)
 
-**File:** `src/prevue/config.py:126-152`
-**Issue:** Directly related to CR-02: the validator's docstring explains at length *why*
-shell-strings and mixed-type lists are rejected (D-10 command-injection guard), but never mentions
-that `None` — the actual value produced by an empty `raw_args:` YAML block, and the actual trigger
-for CR-02 — is also rejected. A reader auditing "what inputs does this validator reject" would
-reasonably assume only shell-strings and non-string list elements are in scope.
-**Fix:** Add one line to the docstring, e.g.: "Also rejects `None` (an empty `raw_args:` YAML
-block parses to `None`, not `[]`) — this currently crashes `load_config()` uncaught; see the
-phase-10 review CR-02 finding for the fix."
+**File:** `src/prevue/pricing/__init__.py:105-141, 187-201`
 
-### IN-02: `config.py` module docstring's fallback-model precedence contradicts `review.py`'s actual behavior
+**Issue:** Unchanged from the prior review. `_lookup_row` and `compute_cost` still assume
+every value under `override`/`table` is a dict (`row.get(...)`) with no `isinstance` guard.
+The Pydantic-boundary fix (CR-01/`_validate_pricing`) closes the `prevue.yml`-sourced attack
+surface, but `compute_cost` remains a public function; called directly (as in
+`update-pricing.yml`'s validation step, or any future test/caller) with a malformed
+`override`/`table` dict built outside `EngineConfig`, it still crashes uncaught:
 
-**File:** `src/prevue/config.py:9-14`, `src/prevue/review.py:622-627,744-748`
-**Issue:** The `config.py` module docstring states the precedence ladder's third knob as:
-`3. fallback model: (no env override) > classification.fallback.model in yml > None`. But
-`review.py`'s actual classify-model and skill-select-model resolution
-(`_effective_classify_model`, `_skill_select_model`) both end with
-`or os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))` — i.e. there is an env
-override, applied last, directly contradicting the docstring's explicit "(no env override)"
-parenthetical. This is a deliberate, intentional deviation documented at the call site itself
-("env applied last — matches skill-select path at `_skill_select_model` below"), but the
-module-level docstring in `config.py` — the canonical machine-readable precedence reference this
-codebase leans on (`CONFIG_PRECEDENCE` constant, grep-tested) — was never updated to match, so the
-two docs now disagree on a load-bearing precedence claim for anyone auditing config resolution
-from `config.py` alone.
-**Fix:** Update the `config.py` docstring's knob-3 line to: `3. fallback model:
-PREVUE_MODEL/COPILOT_MODEL env (applied at the review.py call site) > classification.fallback.model
-in yml > None`.
+```
+>>> compute_cost("openai", "gpt-4o", {"input": 100, "output": 10},
+...              override={"gpt-4o": "not-a-dict"}, table={})
+AttributeError: 'str' object has no attribute 'get'
+```
+
+Confirmed still reproducible against the current code. This is intentionally unaddressed —
+the prior fix report explicitly scoped it out (`fix_scope: critical_warning`, IN-01 deferred
+to a future `--all` pass) — carried forward here for visibility, not as a new finding.
+
+**Fix:** (unchanged from prior review) Add `isinstance(row, dict)` guards in `_lookup_row`'s
+lookup branches (override exact/normalized, table exact/normalized, suffix-fallback) so a
+malformed row degrades to "skip this entry" rather than crashing, matching the defensive
+style already used in `usage.py`'s OTEL parsing.
+
+### IN-02: `combined_summary` in `review.py` still falls back to a bare, unlabeled placeholder heading (carried forward, unfixed — correctly out of scope)
+
+**File:** `src/prevue/review.py:1168`
+
+**Issue:** Unchanged from the prior review.
+`combined_summary = "\n\n".join(s for s in all_summaries if s) or "## Review\n"` still
+renders a bare, unlabeled `## Review` heading when every call result's `summary_markdown` is
+falsy, with no signal to the reader that this is a fallback rather than genuine (if terse)
+prose. Confirmed still present at the same line. Intentionally unaddressed per the prior fix
+report's scoping.
+
+**Fix:** (unchanged from prior review) Use a more descriptive fallback, e.g.
+`"_No review summary was returned by the engine._"`.
+
+### IN-03: `config.py` module docstring's fallback-model precedence still contradicts `review.py`'s actual behavior (carried forward, unfixed — correctly out of scope)
+
+**File:** `src/prevue/config.py:9-14`, `src/prevue/review.py:659,780,850`
+
+**Issue:** Unchanged from the prior review. The module docstring's precedence knob 3 still
+reads `(no env override) > classification.fallback.model in yml > None`, while
+`review.py`'s `_effective_classify_model` (line 659) and `_skill_select_model` (line 780)
+both end with `or os.environ.get("PREVUE_MODEL", os.environ.get("COPILOT_MODEL"))` — an env
+override applied last, directly contradicting the docstring's "(no env override)"
+parenthetical. Confirmed still present at the same lines. Intentionally unaddressed per the
+prior fix report's scoping.
+
+**Fix:** (unchanged from prior review) Update the `config.py` docstring's knob-3 line to:
+`3. fallback model: PREVUE_MODEL/COPILOT_MODEL env (applied at the review.py call site) >
+classification.fallback.model in yml > None`.
 
 ---
 
-_Reviewed: 2026-07-01T00:00:00Z_
+_Reviewed: 2026-07-01T13:33:51Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
