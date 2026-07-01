@@ -27,9 +27,7 @@ def test_pricing_rejects_non_dict_value() -> None:
 def test_pricing_rejects_non_dict_row() -> None:
     """Each row under engine.pricing must be a mapping or null."""
     with pytest.raises(ValidationError, match="mapping or null"):
-        EngineConfig.model_validate(
-            {"name": "copilot-cli", "pricing": {"gpt-4o": "not-a-dict"}}
-        )
+        EngineConfig.model_validate({"name": "copilot-cli", "pricing": {"gpt-4o": "not-a-dict"}})
 
 
 def test_pricing_accepts_none() -> None:
