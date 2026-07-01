@@ -9,8 +9,7 @@ from unittest.mock import patch
 import pytest
 
 from prevue.cli import main
-from prevue.engines.claude_code_cli import ClaudeAuthError
-from prevue.engines.errors import AuthError, EngineFailure
+from prevue.engines.errors import AuthError, ClaudeAuthError, EngineFailure
 
 
 def test_cli_catches_auth_error_subclass_exit_one(capsys: pytest.CaptureFixture[str]) -> None:

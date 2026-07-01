@@ -187,10 +187,6 @@ prevue/
 │   │   ├── registry.py               # Name → CliEngineSpec; DEFAULT_ENGINE, require_functional_adapter()
 │   │   ├── spec.py                   # CliEngineSpec table — one declarative entry per CLI engine
 │   │   ├── cli_adapter.py            # CliEngineAdapter(spec) — single generic adapter for all CLI engines
-│   │   ├── copilot_cli.py            # Re-export shim (test compat) — real spec lives in spec.py
-│   │   ├── claude_code_cli.py        # Re-export shim (test compat) — real spec lives in spec.py
-│   │   ├── cursor_cli.py             # Re-export shim (test compat) — real spec lives in spec.py
-│   │   ├── gemini_cli.py             # Re-export shim (test compat) — engine removed, antigravity-cli is the skeleton
 │   │   ├── flow.py                   # review_with_retry(): parse failure retry + degrade
 │   │   ├── prompt.py                 # _build_prompt(), OUTPUT_CONTRACT, untrusted-data fencing
 │   │   ├── parsing.py                # extract_json_fence(), validate_findings()

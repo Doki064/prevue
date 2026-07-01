@@ -173,10 +173,8 @@ prevue/
 │   │   ├── subprocess_invoke.py # Shared headless subprocess helper
 │   │   ├── tokens.py           # Token estimation (bytes / 4)
 │   │   ├── errors.py           # EngineFailure, AuthError, stderr sanitisation
-│   │   ├── copilot_cli.py      # Copilot CLI adapter (default)
-│   │   ├── claude_code_cli.py  # Claude Code CLI adapter
-│   │   ├── cursor_cli.py       # Cursor CLI adapter
-│   │   └── gemini_cli.py       # Gemini skeleton (not yet functional)
+│   │   ├── spec.py             # CliEngineSpec table — one declarative entry per CLI engine
+│   │   └── cli_adapter.py      # CliEngineAdapter(spec) — single generic adapter for all CLI engines
 │   └── github/
 │       ├── client.py           # PrContext, PR + repo auth helpers
 │       ├── diff.py             # Diff fetch, scope decision (full/incremental/noop)

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sys
-from collections import Counter
 from pathlib import Path
 
 import yaml
@@ -12,11 +11,10 @@ from github import GithubException
 from pathspec import GitIgnoreSpec
 from pydantic import ValidationError
 
+from prevue import review_classify, review_config, review_publish
 from prevue.classify.classifier import classify
 from prevue.classify.filter import filter_diff
 from prevue.classify.llm_fallback import (
-    FALLBACK_FAILED_GLOB,
-    FALLBACK_PARTIAL_GLOB,
     estimate_classify_tokens,
     llm_classify,
     llm_select_skills,
@@ -27,7 +25,6 @@ from prevue.config import (
     load_config,
     resolve_classify_model,
     resolve_consumer_config_path,
-    resolve_engine_models_from_config,
     resolve_review_model,
 )
 from prevue.dismiss import active_suppressed_fingerprints, parse_dismiss_block
@@ -46,7 +43,7 @@ from prevue.engines.registry import (
 )
 from prevue.engines.tokens import estimate_tokens
 from prevue.fingerprint import fingerprint
-from prevue.gate import SEVERITY_RANK, GateResult, PlacedFinding, apply_gate
+from prevue.gate import SEVERITY_RANK, GateResult, apply_gate
 from prevue.github.checks import conclude_review_check, conclude_skip_check
 from prevue.github.client import PrContext, get_authenticated_pull, get_repo, load_pr_context
 from prevue.github.comments import (
@@ -56,7 +53,8 @@ from prevue.github.comments import (
     derive_prior_findings,
     inline_location_key,
     parse_marker_sha,
-    post_inline_review,
+    post_inline_review,  # noqa: F401 — looked up via prevue.review.post_inline_review
+    # by review_publish.py (patched directly in tests; must stay module-level here)
     read_newest_trusted_sticky_body,
     resolve_outdated_prior_findings,
     upsert_skip_note,
@@ -76,21 +74,14 @@ from prevue.github.positions import (
 )
 from prevue.models import Finding, ReviewRequest, ReviewResult
 from prevue.multicall import CallGroup, execute_calls, merge_findings, split_into_calls
-from prevue.output import (  # noqa: F401 — re-exported for backward compat (Q-01, 10-THERMOS)
-    OUTPUT_SCHEMA_VERSION,
-    build_compact_output,
-    build_full_output,
-    emit_machine_output,
-)
+from prevue.output import emit_machine_output
 from prevue.pack import make_file_weight, pack_files, readmit_files, trim_packed_files
 from prevue.preflight import resolve_marker_for_scope
 from prevue.skills.loader import assemble_instructions, load_skills
 from prevue.skills.selection import (
     KEYWORD_THRESHOLD,
-    _dedup_sort,
     _supports_skill_classify,
     keyword_score,
-    select_skills_hybrid,
 )
 from prevue.skip import should_skip
 
@@ -135,61 +126,6 @@ def _consumer_skills_root() -> tuple[Path | None, str | None]:
     if not skills_dir.is_relative_to(root):
         return None, "consumer skills directory ignored (escapes checkout root — symlink guard)"
     return skills_dir, None
-
-
-def _skill_ratios(all_skills: list, matched: list) -> dict[str, tuple[int, int]]:
-    loaded = Counter(s.bundle for s in matched)
-    totals = Counter(s.bundle for s in all_skills)
-    return {bundle: (loaded[bundle], totals[bundle]) for bundle in totals}
-
-
-def _refresh_matched(
-    packed_files: list,
-    skills: list,
-    bundles: list[str],
-    *,
-    adapter,
-    llm_skill_names: set[str] | None,
-    model: str | None,
-    guardrail_keys: list[str] | None = None,
-) -> tuple[list, str, list]:
-    """Recompute (packed_paths, diff_text, matched) after any pack change.
-
-    Centralizes the repeated pattern:
-        packed_paths = [f.path for f in packed_files]
-        diff_text = "\\n".join(f.patch or "" for f in packed_files)
-        matched = select_skills_hybrid(skills, paths, diff_text, bundles, ...)
-
-    WR-01: ``guardrail_keys`` are ``bundle/filename`` skill keys that must load on
-    EVERY call (the documented ``review.guardrail_skills`` security backstop). They
-    are force-added to ``matched`` regardless of keyword score or routed bundle, so
-    a consumer's always-on security skill is never dropped by selection. Unknown
-    keys are ignored (a typo can't fabricate a skill).
-    """
-    packed_paths = [f.path for f in packed_files]
-    diff_text = "\n".join(f.patch or "" for f in packed_files)
-    matched = select_skills_hybrid(
-        skills,
-        packed_paths,
-        diff_text,
-        bundles,
-        adapter=adapter,
-        llm_skill_names=llm_skill_names,
-        model=model,
-    )
-    if guardrail_keys:
-        wanted = set(guardrail_keys)
-        present = {f"{s.bundle}/{s.filename}" for s in matched}
-        forced = [
-            s
-            for s in skills
-            if f"{s.bundle}/{s.filename}" in wanted and f"{s.bundle}/{s.filename}" not in present
-        ]
-        if forced:
-            # Re-run the shared dedup/sort so guardrail skills slot into the same
-            # canonical (bundle, filename) ordering as keyword/escalation matches.
-            matched = _dedup_sort([*matched, *forced])
-    return packed_paths, diff_text, matched
 
 
 def _inline_key(finding) -> tuple[str, int, str]:
@@ -591,11 +527,14 @@ def run_review(
     # time via require_functional_adapter's factory kwargs (gated by base-ref
     # engine_config, same SKIL-04/Pitfall 4 sentinel as before) — no post-
     # construction isinstance(engine, CliEngineAdapter) + setter-call mutation.
+    # T-05 (10-THERMOS quick task): require_functional_adapter itself is called
+    # HERE (not in review_config.py) because tests patch
+    # "prevue.review.require_functional_adapter" directly — the call site must
+    # stay in this module for that patch to take effect.
     try:
         engine = adapter or require_functional_adapter(
             config.engine,
-            raw_args=config.engine_config.raw_args or None,
-            pricing=config.engine_config.pricing,
+            **review_config.adapter_factory_kwargs(config.engine_config),
         )
     except (NonFunctionalEngineError, UnknownEngineError) as exc:
         _publish_skip(
@@ -628,7 +567,7 @@ def run_review(
     # Direct from EngineConfig — no fake raw-dict round-trip (resolve_engine_models_from_config).
     # The consolidate slot resolves but is unused this phase (D-13: Phase 13/QUAL-01 will
     # consume it for the multicall merge step).
-    _engine_models = resolve_engine_models_from_config(config.engine_config)
+    _engine_models = review_config.resolve_role_models(config.engine_config)
     # Classify model: models.classify > engine.model > env fallback (applied at call-site)
     _classify_model: str | None = _engine_models.get("classify")
     # Review model: models.review > engine.model > env (PREVUE_MODEL/COPILOT_MODEL)
@@ -658,55 +597,15 @@ def run_review(
             engine,
             model=_effective_classify_model,
         )
-        # Only bill classify tokens when classification actually produced usable
-        # labels — a fully degraded fallback ({GENERAL_LABEL: FALLBACK_FAILED_GLOB})
-        # obtained no real classification, so reporting a non-zero estimate would
-        # overstate the audit-trail cost (WR-02).
-        produced_real_labels = bool(fallback_labels.keys() - {GENERAL_LABEL})
-        if produced_real_labels:
-            # Prefer real token counts from json_envelope engines; fall back to estimate.
-            classify_tokens = (
-                _classify_real_tokens
-                if _classify_real_tokens is not None
-                else estimate_classify_tokens(unmatched_pre_pack)
-            )
-        for path_or_label, label_or_glob in fallback_labels.items():
-            is_degrade_general = path_or_label == GENERAL_LABEL and label_or_glob in {
-                FALLBACK_FAILED_GLOB,
-                FALLBACK_PARTIAL_GLOB,
-            }
-            if is_degrade_general:
-                result_cls.labels[GENERAL_LABEL] = label_or_glob
-                continue
-            if (
-                isinstance(path_or_label, str)
-                and isinstance(label_or_glob, str)
-                and label_or_glob in CANONICAL_LABEL_ORDER
-                and label_or_glob not in result_cls.labels
-            ):
-                result_cls.labels[label_or_glob] = path_or_label
-        if (
-            fallback_labels
-            and GENERAL_LABEL in result_cls.labels
-            and GENERAL_LABEL not in fallback_labels
-            and any(label != GENERAL_LABEL for label in result_cls.labels)
-        ):
-            result_cls.labels.pop(GENERAL_LABEL, None)
-
-        # Build path→label map for files classified by LLM so _file_bundle_map
-        # can assign the correct routed bundle without re-running glob matching.
-        _llm_path_labels = {
-            p: lbl
-            for p, lbl in fallback_labels.items()
-            if isinstance(p, str)
-            and p != GENERAL_LABEL
-            and isinstance(lbl, str)
-            and lbl in CANONICAL_LABEL_ORDER
-        }
-        # Remove successfully LLM-classified paths from unmatched so sticky
-        # metadata and disclosure don't report them as unresolved.
-        if _llm_path_labels:
-            result_cls.unmatched = [p for p in result_cls.unmatched if p not in _llm_path_labels]
+        # T-05 (10-THERMOS quick task): pure label-merge bookkeeping extracted to
+        # review_classify.py — no adapter/patched calls happen inside it.
+        classify_tokens, _llm_path_labels = review_classify.apply_fallback_labels(
+            result_cls,
+            fallback_labels,
+            unmatched_pre_pack,
+            _classify_real_tokens,
+            estimate_classify_tokens=estimate_classify_tokens,
+        )
 
     result_cls.bundles = route(list(result_cls.labels.keys()), ruleset.routing_map)
     result_cls.dropped_count = len(dropped)
@@ -853,7 +752,7 @@ def run_review(
         guardrail_keys=review_cfg.guardrail_skills,
     )
 
-    _, _, matched = _refresh_matched(packed_files, **_hybrid_kwargs)
+    _, _, matched = review_classify.refresh_matched(packed_files, **_hybrid_kwargs)
     instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
     trimmed, extra_skipped = trim_packed_files(
         packed_files,
@@ -869,8 +768,8 @@ def run_review(
                 "Files ranked by classification risk; whole files dropped when over token budget."
             )
     packed_files = trimmed
-    _, _, matched = _refresh_matched(packed_files, **_hybrid_kwargs)
-    skill_ratios = _skill_ratios(skills, matched)
+    _, _, matched = review_classify.refresh_matched(packed_files, **_hybrid_kwargs)
+    skill_ratios = review_classify.skill_ratios(skills, matched)
     instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
 
     # Re-admission pass: when actual matched-skill overhead is smaller than the
@@ -890,8 +789,8 @@ def run_review(
             if skipped_paths
             else None
         )
-        _, _, matched = _refresh_matched(packed_files, **_hybrid_kwargs)
-        skill_ratios = _skill_ratios(skills, matched)
+        _, _, matched = review_classify.refresh_matched(packed_files, **_hybrid_kwargs)
+        skill_ratios = review_classify.skill_ratios(skills, matched)
         instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
         # Second trim: re-admitted paths may activate new skills, growing instructions.
         packed_files, trim2_skipped = trim_packed_files(
@@ -906,8 +805,8 @@ def run_review(
             skipped_reason = (
                 "Files ranked by classification risk; whole files dropped when over token budget."
             )
-            _, _, matched = _refresh_matched(packed_files, **_hybrid_kwargs)
-            skill_ratios = _skill_ratios(skills, matched)
+            _, _, matched = review_classify.refresh_matched(packed_files, **_hybrid_kwargs)
+            skill_ratios = review_classify.skill_ratios(skills, matched)
             instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
 
     if not packed_files:
@@ -1007,8 +906,8 @@ def run_review(
         )
         packed_files = cap_packed
         # Refresh matched skills after cap-triggered repack
-        _, _, matched = _refresh_matched(packed_files, **_hybrid_kwargs)
-        skill_ratios = _skill_ratios(skills, matched)
+        _, _, matched = review_classify.refresh_matched(packed_files, **_hybrid_kwargs)
+        skill_ratios = review_classify.skill_ratios(skills, matched)
         instructions = assemble_instructions(BASELINE_INSTRUCTIONS, matched)
 
     # Build per-file bundle map from classification result for the splitter
@@ -1292,67 +1191,18 @@ def run_review(
         "partial_marker": gate.partial,
     }
 
-    # Post sticky first so the summary appears before inline comments in the PR timeline.
-    sticky, sticky_failed = _upsert_sticky_with_retry(
+    # T-05 (10-THERMOS quick task): sticky/inline/check/emit sequence extracted to
+    # review_publish.py (byte-identical logic, including the T-04 emit-before-raise fix).
+    review_publish.publish_review_result(
         pr,
-        result,
-        head_sha=diff.head_sha,
-        gate=gate,
-        **sticky_base_kwargs,
-    )
-
-    failed_inline_keys = post_inline_review(
-        pr,
+        ctx,
+        diff,
         gate,
-        in_scope_paths=reviewed_paths,
+        result,
+        sticky_base_kwargs,
+        reviewed_paths=reviewed_paths,
         regions_by_path=regions_by_path,
         owner=owner,
-        repo=repo_name,
-        resolve_outdated=False,
+        repo_name=repo_name,
+        skipped_files=skipped_files,
     )
-    if failed_inline_keys and gate.inline:
-        downgraded = [
-            PlacedFinding(
-                finding=placed.finding,
-                placement="summary-only"
-                if placed.placement == "inline"
-                and _inline_key(placed.finding) in failed_inline_keys
-                else placed.placement,
-            )
-            for placed in gate.placed
-        ]
-        gate = GateResult(
-            conclusion=gate.conclusion,
-            severity_counts=gate.severity_counts,
-            placed=downgraded,
-            inline=[
-                finding for finding in gate.inline if _inline_key(finding) not in failed_inline_keys
-            ],
-            config=gate.config,
-            degraded=gate.degraded,
-            dropped_findings=gate.dropped_findings,
-            partial=gate.partial,
-        )
-        # Re-upsert to reflect the downgraded placements caused by inline post failures.
-        sticky, sticky_failed = _upsert_sticky_with_retry(
-            pr,
-            result,
-            head_sha=diff.head_sha,
-            gate=gate,
-            **sticky_base_kwargs,
-        )
-    check_published = conclude_review_check(
-        get_repo(ctx),
-        diff.head_sha,
-        gate,
-        sticky_url=getattr(sticky, "html_url", None),
-        sticky_failed=sticky_failed,
-        skipped_count=len(skipped_files),
-    )
-    # T-04 (10-THERMOS quick task): emit machine output BEFORE the publish-failure
-    # raise so the real result/tokens/findings are always emitted, even when the
-    # check-run publish itself fails — the RuntimeError below still propagates
-    # afterward so callers still see (and exit non-zero on) the publish failure.
-    emit_machine_output(result, gate.conclusion)
-    if not check_published:
-        raise RuntimeError("Failed to publish review check run")
