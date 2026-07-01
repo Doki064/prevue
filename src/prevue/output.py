@@ -31,9 +31,11 @@ def build_compact_output(result: ReviewResult, conclusion: str) -> dict:
     """
     counts: Counter = Counter()
     for finding in result.findings:
-        sev = getattr(finding, "severity", None)
-        if sev is not None:
-            counts[str(sev)] += 1
+        # T-12 (10-THERMOS quick task): severity is a REQUIRED Literal field on
+        # the validated Finding model — never absent — so direct attribute
+        # access replaces the getattr-with-None-guard that treated a typed
+        # boundary as though the field could be missing.
+        counts[finding.severity] += 1
 
     token_meta = result.engine_meta.get("tokens")
     token_meta = token_meta if isinstance(token_meta, dict) else {}

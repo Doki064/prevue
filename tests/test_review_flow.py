@@ -9,6 +9,7 @@ import pytest
 from pydantic import ValidationError
 
 from prevue.config import NO_CONSUMER_CONFIG_SENTINEL, SkillsConfig, load_config
+from prevue.engines.base import EngineAdapter
 from prevue.engines.errors import EngineFailure
 from prevue.fingerprint import fingerprint
 from prevue.github.client import PrContext
@@ -108,7 +109,12 @@ class FailingEngine:
         raise EngineFailure("engine exploded")
 
 
-class FindingsEngine:
+class FindingsEngine(EngineAdapter):
+    """Inherits EngineAdapter so subclasses overriding only classify() still get
+    the base-class classify_with_tokens() default (T-09a — 10-THERMOS quick
+    task removed the hasattr duck-typing fallback in llm_fallback._classify_batch;
+    a plain test double without EngineAdapter as a base would AttributeError)."""
+
     name = "findings"
 
     def review(self, req: ReviewRequest) -> ReviewResult:

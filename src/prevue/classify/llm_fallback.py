@@ -53,19 +53,14 @@ def _classify_batch(
 ) -> tuple[dict[str, str], int | None]:
     """Run one adapter.classify() call; return (validated_labels, real_tokens | None)."""
     try:
-        if hasattr(adapter, "classify_with_tokens"):
-            raw, real_tokens = adapter.classify_with_tokens(
-                paths,
-                list(CANONICAL_LABEL_ORDER),
-                model=model,
-            )
-        else:
-            raw = adapter.classify(
-                paths,
-                list(CANONICAL_LABEL_ORDER),
-                model=model,
-            )
-            real_tokens = None
+        # T-09a (10-THERMOS quick task): classify_with_tokens has a universal
+        # base-class default (EngineAdapter.classify_with_tokens) — no more
+        # hasattr duck-typing needed here.
+        raw, real_tokens = adapter.classify_with_tokens(
+            paths,
+            list(CANONICAL_LABEL_ORDER),
+            model=model,
+        )
     except (
         NotImplementedError,
         AttributeError,

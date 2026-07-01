@@ -215,17 +215,15 @@ class CliEngineAdapter(EngineAdapter):
         For "json_envelope" specs, extract the "result" string from the envelope and
         return it so parse_classify_response/_extract_json_object can see the actual
         path→label JSON. Falls through to raw_stdout when parsing fails (degrade path).
-        """
-        if self._spec.stdout_format != "json_envelope":
-            return raw_stdout
-        from prevue.engines.usage import parse_envelope
 
-        envelope = parse_envelope(raw_stdout)
-        if envelope is not None:
-            result_text = envelope.get("result")
-            if isinstance(result_text, str):
-                return result_text
-        return raw_stdout
+        T-09b (10-THERMOS quick task): delegates to the single shared
+        ``usage.unwrap_envelope_result`` helper (also used by
+        ``flow._resolve_fence_source``) instead of duplicating the
+        parse_envelope + ``.get("result")`` + isinstance dance.
+        """
+        from prevue.engines.usage import unwrap_envelope_result
+
+        return unwrap_envelope_result(self._spec, raw_stdout)
 
     def classify(
         self,

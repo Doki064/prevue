@@ -34,6 +34,33 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from prevue.engines.spec import CliEngineSpec
 
+
+def unwrap_envelope_result(spec: CliEngineSpec | None, raw_stdout: str) -> str:
+    """Unwrap a ``stdout_format == "json_envelope"`` payload's ``result`` field.
+
+    T-09b (10-THERMOS quick task): single shared implementation of the
+    unwrap-or-fallback dance that was previously duplicated in
+    ``cli_adapter._unwrap_classify_text`` and ``flow._resolve_fence_source``.
+
+    For non-envelope specs (or ``spec is None``), returns *raw_stdout* unchanged.
+    For envelope specs, parses the envelope via ``parse_envelope`` and returns its
+    ``result`` field when it is a string; falls back to *raw_stdout* unchanged
+    when the envelope cannot be parsed or ``result`` is missing/non-string
+    (degrade path — the caller's normal fence-extraction/parse-failure handling
+    takes over from there).
+    """
+    if spec is None or spec.stdout_format != "json_envelope":
+        return raw_stdout
+
+    envelope = parse_envelope(raw_stdout)
+    if envelope is not None:
+        result_text = envelope.get("result")
+        if isinstance(result_text, str):
+            return result_text
+
+    return raw_stdout
+
+
 # OTEL attribute key names used by Copilot CLI
 _OTEL_PROMPT_TOKENS = "llm.usage.prompt_tokens"
 _OTEL_COMPLETION_TOKENS = "llm.usage.completion_tokens"
