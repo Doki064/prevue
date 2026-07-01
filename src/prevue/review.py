@@ -497,12 +497,29 @@ def run_review(
         os.environ.get("PREVUE_CONFIG_PATH"),
         consumer_root=os.environ.get("PREVUE_CONSUMER_ROOT"),
     )
-    config = load_config(str(consumer_path))
+    # Fetch the pull first so a malformed prevue.yml can still fail closed with a
+    # sticky comment + failure check instead of crashing with no `prevue/review`
+    # signal at all (CR-01/CR-02: a trivial consumer YAML typo like an empty
+    # `engine.models:` or `engine.raw_args:` block parses to `None` and raises an
+    # uncaught pydantic.ValidationError from load_config()).
+    pr = get_authenticated_pull(ctx)
+    try:
+        config = load_config(str(consumer_path))
+    except ValidationError as exc:
+        print(f"prevue: invalid prevue.yml config: {exc!r}", file=sys.stderr)
+        reason = f"Invalid `prevue.yml` configuration ({type(exc).__name__}). See workflow logs."
+        _publish_skip(
+            pr,
+            ctx,
+            pr.head.sha,
+            reason=reason,
+            conclusion="failure",
+            title="review failed",
+        )
+        return
     ruleset = config.ruleset
     review_cfg = config.review
     fallback_cfg = config.fallback
-
-    pr = get_authenticated_pull(ctx)
 
     skip_reason = should_skip(pr, config.skip)
     if skip_reason:

@@ -761,21 +761,43 @@ def test_fork_pr_creates_no_check() -> None:
     mock_skip_check.assert_not_called()
 
 
-def test_invalid_review_config_raises_before_fetch() -> None:
+def test_invalid_review_config_fails_closed_before_fetch() -> None:
+    """CR-01/CR-02: a malformed prevue.yml fails closed (sticky + failure check)
+    instead of crashing run_review() with an uncaught ValidationError."""
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
         patch(
             "prevue.review.load_config",
             side_effect=ValidationError.from_exception_data("ReviewConfig", []),
         ),
         patch("prevue.review.fetch_diff") as mock_fetch,
         patch("prevue.review.require_functional_adapter") as mock_get_adapter,
+        patch("prevue.review.upsert_skip_note") as mock_skip_note,
+        patch("prevue.review.conclude_skip_check", return_value=True) as mock_skip_check,
+        patch("prevue.review.upsert_sticky") as mock_sticky,
+        patch("prevue.review.conclude_review_check") as mock_check,
     ):
-        with pytest.raises(ValidationError):
-            run_review()
+        run_review()
 
     mock_fetch.assert_not_called()
     mock_get_adapter.assert_not_called()
+    mock_skip_note.assert_called_once()
+    reason = mock_skip_note.call_args.kwargs.get("reason", "")
+    assert "prevue.yml" in reason
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        mock_pr.head.sha,
+        conclusion="failure",
+        reason=reason,
+        title="review failed",
+    )
+    mock_sticky.assert_not_called()
+    mock_check.assert_not_called()
 
 
 def test_run_review_load_config_default_path(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

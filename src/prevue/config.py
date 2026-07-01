@@ -133,7 +133,13 @@ class EngineConfig(BaseModel):
         Exhaustive: any non-list, non-str scalar (int, float, bool, dict) is rejected here
         too, so callers always get the clean D-10 message instead of a generic Pydantic
         type-mismatch error.
+
+        ``None`` is tolerated as a defense-in-depth special case (rather than rejected):
+        an empty ``raw_args:`` YAML block parses to ``None``, not ``[]`` — a plausible
+        consumer typo, not an attack. Treated as "no extra args" (see phase-10 review CR-02).
         """
+        if value is None:
+            return []
         if isinstance(value, str):
             raise ValueError(
                 "engine.raw_args must be a list of strings (D-10: no shell string allowed). "
