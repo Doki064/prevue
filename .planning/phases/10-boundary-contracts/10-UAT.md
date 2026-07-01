@@ -1,14 +1,31 @@
 ---
-status: diagnosed
+status: testing
 phase: 10-boundary-contracts
-source: [10-01-SUMMARY.md, 10-02-SUMMARY.md, 10-03-SUMMARY.md, 10-04-SUMMARY.md, 10-05-SUMMARY.md, 10-06-SUMMARY.md, 10-07-SUMMARY.md]
+source: [10-01-SUMMARY.md, 10-02-SUMMARY.md, 10-03-SUMMARY.md, 10-04-SUMMARY.md, 10-05-SUMMARY.md, 10-06-SUMMARY.md, 10-07-SUMMARY.md, 10-08-SUMMARY.md, 10-09-SUMMARY.md, 10-VERIFICATION.md]
 started: 2026-07-01T09:51:21Z
-updated: 2026-07-01T11:05:00Z
+updated: 2026-07-01T19:35:00Z
 ---
 
 ## Current Test
 
-[testing complete]
+number: 1
+name: Copilot OTEL real-token spot-check (post-fix, post-review)
+expected: |
+  With engine: copilot-cli on a sandbox repo, using a real COPILOT_GITHUB_TOKEN secret
+  in actual GitHub Actions CI (not a local subprocess), the sticky Tokens line shows
+  real token counts WITHOUT the ~est label (estimated=False), confirming the full chain
+  (workflow env -> real Copilot CLI subprocess -> OTEL file write -> parser read) works
+  end-to-end in production against the now-1.0.67-pinned CLI.
+awaiting: user response
+
+Gaps 2 and 3 below (config-precedence workflow input, job-outputs propagation) were
+closed by gap-closure plans 10-07/10-08 and are now marked resolved — codebase
+inspection in this round confirmed `on.workflow_call.outputs:` exists in
+`.github/workflows/prevue-review.yml` and `PREVUE_MODEL: ${{ inputs.model }}` is wired
+in the Run review step's env block. Gap 1 (Copilot OTEL) had its code-level cause fixed
+by gap-closure plan 10-09 plus a follow-up code-review round (10-REVIEW.md/
+10-REVIEW-FIX.md, commits cdd96e8/4956f00) — only the live-CI spot-check itself remains
+open, tracked as the current test above.
 
 ## Tests
 
@@ -184,46 +201,35 @@ notes: |
 
 total: 8
 passed: 4
-issues: 3
-pending: 0
+issues: 1
+pending: 1
 skipped: 0
 blocked: 0
 
 ## Gaps
 
 - truth: "Copilot CLI's real (non-estimated) token usage is captured via COPILOT_OTEL_FILE_EXPORTER_PATH in CI"
-  status: failed
-  reason: "Live sandbox run shows copilot-cli still reports ~est tokens; COPILOT_OTEL_FILE_EXPORTER_PATH has no effect on @github/copilot@1.0.61 — no OTEL mention in --help, ~/.copilot never created, exporter directory never appears"
+  status: pending
+  reason: "Gap-closure plan 10-09 (commits 2a75168, 60daa3e) rewrote _parse_copilot_otel for the real flat span-per-line JSONL schema and flipped usage_capture back to otel-jsonl. A follow-up code-review round (10-REVIEW.md/10-REVIEW-FIX.md) found and fixed two more issues on top: CR-02 (commit cdd96e8, partial-field span parse could corrupt totals while still reporting estimated=False) and CR-01 (commit 4956f00, CI was still pinned to the CLI version — 1.0.61 — that OTEL was originally found inert on; bumped to 1.0.67, matching the version the fix was diagnosed against). 10-VERIFICATION.md independently reproduced the CR-02 exploit against current code and confirmed it now degrades to None. All code-level causes are closed; only the live-CI spot-check itself (real COPILOT_GITHUB_TOKEN, real Copilot CLI subprocess in actual GitHub Actions) remains — see Current Test above."
   severity: major
   test: 1
-  root_cause: "Either the env var name/mechanism is wrong for the currently-installed Copilot CLI version, or Copilot requires additional undocumented setup (config file, flag) to enable OTEL export at all. The 10-RESEARCH.md citation (ccusage.com/guide/copilot, MEDIUM-HIGH confidence) describing COPILOT_OTEL_FILE_EXPORTER_PATH may be stale or version-specific and was never live-verified against the pinned 1.0.61 CLI before being wired into prevue-review.yml."
+  root_cause: "Originally: _parse_copilot_otel parsed a fictitious nested resourceSpans->scopeSpans->spans OTLP shape the real Copilot CLI file exporter never produces (root-caused via local install of gh copilot v1.0.67 during plan 10-09). Now fixed at the code level; remaining root cause is simply that no live GitHub Actions run with a real token has exercised the fixed path yet."
   artifacts:
-    - src/prevue/engines/usage.py (_parse_copilot_otel — correctly handles dir-vs-file, but is never fed real data)
-    - .github/workflows/prevue-review.yml (COPILOT_OTEL_FILE_EXPORTER_PATH env wiring, Plan 05)
+    - src/prevue/engines/usage.py (_parse_copilot_otel — rewritten for the real flat-span schema, CR-02 partial-field-corruption fix applied)
+    - src/prevue/engines/spec.py (usage_capture flipped back to "otel-jsonl")
+    - .github/workflows/prevue-review.yml, .github/workflows/prevue-command-run.yml (COPILOT_OTEL_FILE_EXPORTER_PATH env wiring)
+    - .github/scripts/install-engine-cli.sh (Copilot CLI pin bumped 1.0.61 -> 1.0.67)
   missing:
-    - "Live verification of what actually enables OTEL export in @github/copilot 1.0.x (check official GitHub Copilot CLI docs directly, not third-party citation)"
-    - "If no CI-viable mechanism exists, flip copilot-cli's usage_capture to 'none' (honest estimate) matching the antigravity-cli precedent (D-03/functional-flag pattern), or find the correct enablement mechanism"
+    - "Live GitHub Actions run on a sandbox repo with a real COPILOT_GITHUB_TOKEN secret, confirming the sticky Tokens line shows real (non-estimated) counts end-to-end"
 
 - truth: "Consumers can override the review model via a workflow input/env, taking precedence over .github/prevue.yml, per the declared CONFIG_PRECEDENCE"
-  status: failed
-  reason: "The reusable workflow's public interface (workflow_call inputs + Run review step env block) never forwards PREVUE_MODEL or COPILOT_MODEL from anywhere reachable by a consumer — the 'workflow input' precedence tier is architecturally unreachable in production even though the resolution function (resolve_review_model) is implemented and unit-tested correctly"
+  status: resolved
+  reason: "Gap-closure plan 10-08 added PREVUE_MODEL: ${{ inputs.model }} to the Run review step's env block in prevue-review.yml, making the 'workflow input' precedence tier reachable. Confirmed present in codebase during this session's re-verification."
   severity: major
   test: 2
-  root_cause: "T-02 (10-THERMOS) fixed the *internal* precedence bug (yml no longer beats env when both are present in-process), but no one added a `model` input to workflow_call.inputs or PREVUE_MODEL/COPILOT_MODEL to the Run review step's env: block — so in-process env resolution is correct but nothing ever populates that env var for a real consumer invocation."
-  artifacts:
-    - .github/workflows/prevue-review.yml (workflow_call.inputs block, lines ~4-29; Run review step env block, lines ~135-156)
-    - src/prevue/config.py (resolve_review_model — correct logic, unreachable input)
-  missing:
-    - "Either a `model` input on workflow_call.inputs threaded into PREVUE_MODEL env for the Run review step, or explicit documentation that engine.model/engine.models.review in prevue.yml is the only supported override today (and CONFIG_PRECEDENCE's 'workflow input' tier should be removed or clarified)"
 
 - truth: "Downstream jobs in a consumer's own workflow can chain automation on prevue's job outputs (schema_version, conclusion, error_count, warning_count, info_count, tokens, cost_usd) via needs.<job>.outputs.*"
-  status: failed
-  reason: "Live test with a downstream probe job reading needs.prevue.outputs.* got empty strings for all 7 keys, despite the Run review step's own GITHUB_OUTPUT writes succeeding (confirmed via 'Set output' log lines for every key)"
+  status: resolved
+  reason: "Gap-closure plan 10-08 added the required top-level on.workflow_call.outputs: block to prevue-review.yml, re-mapping jobs.review.outputs.* so they propagate across the workflow_call boundary. Confirmed present in codebase during this session's re-verification."
   severity: major
   test: 5
-  root_cause: ".github/workflows/prevue-review.yml declares `jobs.review.outputs: {...}` but is missing the required top-level `on.workflow_call.outputs:` block that re-maps those same keys — this is a hard GitHub Actions requirement for reusable-workflow output propagation across the workflow_call boundary; job-level outputs alone never reach a caller's `needs.<job>.outputs`."
-  artifacts:
-    - .github/workflows/prevue-review.yml (missing on.workflow_call.outputs: block; jobs.review.outputs: exists but is orphaned)
-  missing:
-    - "Add: on.workflow_call.outputs: {schema_version: {value: ${{ jobs.review.outputs.schema_version }}}, conclusion: {...}, error_count: {...}, warning_count: {...}, info_count: {...}, tokens: {...}, cost_usd: {...}} to the reusable workflow's workflow_call block"
-    - "A live re-verification (downstream job reading needs.<job>.outputs.*) after the fix, since this exact bug class is easy to reintroduce"
