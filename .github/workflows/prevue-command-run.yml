@@ -91,4 +91,11 @@ jobs:
             ${{ github.event.client_payload.engine == 'claude-code-cli' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           CURSOR_API_KEY: >-
             ${{ github.event.client_payload.engine == 'cursor-cli' && secrets.CURSOR_API_KEY || '' }}
+          # ANTIGRAVITY_API_KEY: gated on engine == 'antigravity-cli'; GEMINI_API_KEY is a
+          # documented alias that the spec validator also honors (D-12 / T-10-20). Mirrors
+          # prevue-review.yml:183-188 (WR-02: keep both entry points in sync).
+          ANTIGRAVITY_API_KEY: >-
+            ${{ github.event.client_payload.engine == 'antigravity-cli' && secrets.ANTIGRAVITY_API_KEY || '' }}
+          GEMINI_API_KEY: >-
+            ${{ github.event.client_payload.engine == 'antigravity-cli' && secrets.GEMINI_API_KEY || '' }}
           PREVUE_RESULT_FILE: ${{ runner.temp }}/prevue-result.json
