@@ -39,11 +39,17 @@ jobs:
               data = json.load(f)
           assert isinstance(data, dict) and len(data) > 50, \
               f'Suspicious: only {len(data)} entries in pricing snapshot'
-          # Spot-check known models exist and have plausible pricing
+          # Spot-check known models exist and have plausible pricing (WR-01: a
+          # silent 'if model in data' previously let this degrade to a no-op —
+          # assert loudly instead so a snapshot update that drops/renames the
+          # key is caught here rather than only at review-cost-computation time.
+          sys.path.insert(0, 'src')
+          from prevue.pricing import _lookup_row
           for model in ['gpt-4o', 'claude-3-5-sonnet-20241022']:
-              if model in data:
-                  cost = data[model].get('input_cost_per_token', 0)
-                  assert 0 < cost < 0.01, f'Implausible input cost for {model}: {cost}'
+              row = _lookup_row(model, None, data)
+              assert row is not None, f'pricing snapshot missing expected model {model}'
+              cost = row.get('input_cost_per_token', 0)
+              assert 0 < cost < 0.01, f'Implausible input cost for {model}: {cost}'
           print(f'OK: {len(data)} model entries, spot-check passed')
           "
 

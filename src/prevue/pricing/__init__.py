@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import functools
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -79,6 +80,28 @@ def _normalize_model(model: str) -> str:
     return model
 
 
+# Suffix appended to bedrock/region-prefixed table keys that plain model names
+# never carry, e.g. "anthropic.claude-3-5-sonnet-20241022-v2:0" (WR-01). Stripped
+# only during the suffix-aware fallback lookup below, never from the caller's
+# input model string itself.
+_BEDROCK_VERSION_SUFFIX_RE = re.compile(r"-v\d+:\d+$")
+
+
+def _table_key_suffix_matches(key: str, norm_model: str) -> bool:
+    """True when *key* is a dotted/slash-prefixed, optionally version-suffixed
+    variant of *norm_model* (e.g. vendored bedrock/region table keys like
+    "anthropic.claude-3-5-sonnet-20241022-v2:0" or
+    "eu.anthropic.claude-3-5-sonnet-20241022-v2:0" for plain
+    "claude-3-5-sonnet-20241022") — WR-01: the vendored table's actual prefix
+    conventions (dotted provider/region prefixes, bedrock version suffixes)
+    differ from the slash-prefix stripping ``_normalize_model`` already does.
+    """
+    key = key.lower()
+    tail = key.rsplit(".", 1)[-1].rsplit("/", 1)[-1]
+    tail = _BEDROCK_VERSION_SUFFIX_RE.sub("", tail)
+    return tail == norm_model
+
+
 def _lookup_row(
     model: str,
     override: dict[str, Any] | None,
@@ -87,22 +110,33 @@ def _lookup_row(
     """Return the pricing row for *model*, honouring override precedence (D-06c).
 
     The override map is checked first; falls back to the pricing table.
-    Tries exact key, then normalized key.  Returns None when absent from both.
+    Tries exact key, then normalized key, then a suffix-aware fallback that
+    matches the vendored table's dotted bedrock/region-prefixed, version-suffixed
+    key conventions (WR-01). Returns None when absent from all of the above.
     """
+    norm = _normalize_model(model)
+
     # D-06c: engine.pricing override takes precedence
     if override:
         if model in override:
             return override[model]
-        norm = _normalize_model(model)
         if norm in override:
             return override[norm]
 
     # Vendored / injected table
     if model in table:
         return table[model]
-    norm = _normalize_model(model)
     if norm in table:
         return table[norm]
+
+    # Suffix-aware fallback: vendored snapshot keys are frequently
+    # provider/region-prefixed and version-suffixed (e.g.
+    # "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    # "eu.anthropic.claude-3-5-sonnet-20241022-v2:0") for a plain model name
+    # like "claude-3-5-sonnet-20241022" that never carries that suffix.
+    for key, row in table.items():
+        if _table_key_suffix_matches(key, norm):
+            return row
 
     return None
 
