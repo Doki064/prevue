@@ -159,9 +159,11 @@ def test_cursor_install_supports_optional_sha256_pin() -> None:
 
 # ---------------------------------------------------------------------------
 # OUTP-05 / D-08/D-09: job outputs, artifact upload (Plan 05). Copilot's OTEL env
-# wiring (formerly asserted here) was removed by gap-closure Plan 08 — Copilot now
-# uses the honest ~est bytes/4 estimate path (usage_capture="none") since no CI-viable
-# OTEL enablement mechanism exists on @github/copilot@1.0.61 (10-UAT.md gap 1).
+# wiring was removed by gap-closure Plan 08 (stale "no CI-viable OTEL" conclusion),
+# then restored by gap-closure Plan 09 after a local gh copilot v1.0.67 install
+# confirmed OTEL export is real — see test_otel_env_end_to_end_capture below and
+# the COPILOT_OTEL_FILE_EXPORTER_PATH env line in prevue-review.yml/
+# prevue-command-run.yml.
 # ---------------------------------------------------------------------------
 
 
