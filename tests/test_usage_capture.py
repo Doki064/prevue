@@ -7,7 +7,10 @@ must satisfy the exact shape asserted here.
 Strategy matrix (from 10-RESEARCH.md Per-Engine Token Reporting Matrix):
   - Claude Code: stdout-json envelope -> real tokens, estimated=False
   - Cursor: stdout JSON but no token fields -> None -> caller estimates
-  - Copilot: OTEL JSONL file -> sum per-call tokens, estimated=False
+  - Copilot: OTEL JSONL file -> flat per-line {"type": "span"|"metric",
+    "attributes": {...}} records; sum gen_ai.usage.* token attrs from
+    span-typed records only -> real tokens, estimated=False (10-09 gap
+    closure; root-caused against a local gh copilot v1.0.67 install)
   - Antigravity: plain text, no reliable token reporting -> None -> caller estimates
 """
 
@@ -109,7 +112,9 @@ def test_fallback_estimated_antigravity() -> None:
 
 
 def test_copilot_otel(tmp_path: Path) -> None:
-    """Copilot OTEL JSONL: parse + sum per-call tokens from fixture, estimated=False."""
+    """Copilot OTEL JSONL: parse + sum per-call tokens from the real flat
+    span-per-line fixture (type/attributes-as-dict/gen_ai.usage.* keys),
+    estimated=False."""
     _require_import()
     spec = _FakeSpec("otel-jsonl")
     # Copy fixture to tmp_path to simulate COPILOT_OTEL_FILE_EXPORTER_PATH
@@ -117,7 +122,7 @@ def test_copilot_otel(tmp_path: Path) -> None:
     otel_path = tmp_path / "copilot-usage.jsonl"
     otel_path.write_bytes(otel_fixture.read_bytes())
 
-    # The fixture has 2 JSONL lines:
+    # The fixture has 2 flat-span JSONL lines:
     #   line 1: input=1200, output=180, cache_read=600
     #   line 2: input=900,  output=120, cache_read=450
     # Summed: input=2100, output=300, cache_read=1050
@@ -128,6 +133,74 @@ def test_copilot_otel(tmp_path: Path) -> None:
     assert result["input"] == 2100
     assert result["output"] == 300
     assert result["cache_read"] == 1050
+
+
+def test_copilot_otel_cache_creation_tokens(tmp_path: Path) -> None:
+    """A flat-span line whose attributes dict includes
+    gen_ai.usage.cache_creation.input_tokens must have that value summed into
+    result["cache_creation"] (PERF-03/D-04: pricing.py already consumes this
+    token category)."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    otel_path.write_text(
+        json.dumps(
+            {
+                "type": "span",
+                "attributes": {
+                    "gen_ai.usage.input_tokens": 500,
+                    "gen_ai.usage.output_tokens": 50,
+                    "gen_ai.usage.cache_read.input_tokens": 0,
+                    "gen_ai.usage.cache_creation.input_tokens": 300,
+                },
+            }
+        )
+        + "\n"
+    )
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is not None
+    assert result["estimated"] is False
+    assert result["cache_creation"] == 300
+
+
+def test_copilot_otel_ignores_metric_type_records(tmp_path: Path) -> None:
+    """A JSONL file containing both span-typed and metric-typed records must
+    only sum the span-typed lines' tokens — metric records carry no per-call
+    token attributes and must be skipped, not mis-summed or crashed on."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    lines = [
+        json.dumps(
+            {
+                "type": "span",
+                "attributes": {
+                    "gen_ai.usage.input_tokens": 100,
+                    "gen_ai.usage.output_tokens": 20,
+                    "gen_ai.usage.cache_read.input_tokens": 0,
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "type": "metric",
+                "attributes": {
+                    "gen_ai.usage.input_tokens": 99999,
+                    "gen_ai.usage.output_tokens": 99999,
+                },
+            }
+        ),
+    ]
+    otel_path.write_text("\n".join(lines) + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is not None
+    assert result["estimated"] is False
+    assert result["input"] == 100, "metric-typed record tokens must not be summed"
+    assert result["output"] == 20
 
 
 def test_copilot_otel_directory_path_globs_jsonl_files(tmp_path: Path) -> None:
@@ -178,10 +251,10 @@ def test_otel_empty_file_returns_none(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# CR-01 regression (iteration 3): non-dict-shaped decoded JSONL must not crash
-# _parse_copilot_otel with an uncaught AttributeError. Per T-10-07, malformed
-# (but JSON-decodable) lines must degrade gracefully, same as a JSON decode
-# failure.
+# CR-01 regression (iteration 3, updated 10-09 for the flat schema): malformed
+# decoded JSONL must not crash _parse_copilot_otel with an uncaught exception.
+# Per T-10-07/T-10-09-01, malformed (but JSON-decodable) lines must degrade
+# gracefully, same as a JSON decode failure.
 # ---------------------------------------------------------------------------
 
 
@@ -190,9 +263,8 @@ def test_copilot_otel_non_dict_top_level_line_skipped(tmp_path: Path) -> None:
     array) must be skipped, not raise AttributeError.
 
     T-09 (10-THERMOS): no real span was ever found in this file, so the
-    parser now degrades to None (caller falls back to bytes/4 estimate)
-    instead of reporting a misleading estimated=False zeroed dict. The
-    original crash-prevention intent (no AttributeError) is unchanged.
+    parser degrades to None (caller falls back to bytes/4 estimate) instead
+    of reporting a misleading estimated=False zeroed dict.
     """
     _require_import()
     spec = _FakeSpec("otel-jsonl")
@@ -204,18 +276,37 @@ def test_copilot_otel_non_dict_top_level_line_skipped(tmp_path: Path) -> None:
     assert result is None, "No real span found — must degrade to None, not a fake zeroed dict"
 
 
-def test_copilot_otel_non_dict_resource_span_element_skipped(tmp_path: Path) -> None:
-    """A resourceSpans array containing a non-dict element must be skipped,
-    not raise AttributeError when walking scopeSpans/spans/attributes.
-
-    T-09 (10-THERMOS): no real span was ever found, so this degrades to
-    None (caller falls back to bytes/4 estimate) instead of a misleading
-    estimated=False zeroed dict. The crash-prevention intent is unchanged.
-    """
+def test_copilot_otel_malformed_attributes_dict_skipped(tmp_path: Path) -> None:
+    """A span-typed line whose 'attributes' value is not a dict (e.g. the OLD
+    list-of-{key,value} OTLP shape, or a plain string) must be skipped
+    without raising — same T-10-07 graceful-degrade contract, adapted to the
+    new flat-attributes-dict shape (no more resourceSpans/scopeSpans nesting
+    to test malformed elements of)."""
     _require_import()
     spec = _FakeSpec("otel-jsonl")
     otel_path = tmp_path / "copilot-usage.jsonl"
-    otel_path.write_text(json.dumps({"resourceSpans": ["not-a-dict"]}) + "\n")
+    lines = [
+        json.dumps({"type": "span", "attributes": [{"key": "gen_ai.usage.input_tokens"}]}),
+        json.dumps({"type": "span", "attributes": "not-a-dict"}),
+    ]
+    otel_path.write_text("\n".join(lines) + "\n")
+
+    result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
+
+    assert result is None, "No real span found — must degrade to None, not raise or fake zeros"
+
+
+def test_copilot_otel_missing_attributes_key_skipped(tmp_path: Path) -> None:
+    """A span-typed line with no 'attributes' key at all (or attributes:
+    null) must be skipped (contributes zero tokens), not crash."""
+    _require_import()
+    spec = _FakeSpec("otel-jsonl")
+    otel_path = tmp_path / "copilot-usage.jsonl"
+    lines = [
+        json.dumps({"type": "span"}),
+        json.dumps({"type": "span", "attributes": None}),
+    ]
+    otel_path.write_text("\n".join(lines) + "\n")
 
     result = capture_usage(spec, stdout="", otel_path=str(otel_path))  # type: ignore[misc]
 

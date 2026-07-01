@@ -7,12 +7,15 @@ Dispatches to the appropriate capture strategy based on ``spec.usage_capture``:
                        ``estimated=False``.  Review text for fence extraction is
                        the envelope's ``result`` field (Pitfall 3 — raw stdout
                        is the envelope JSON, not the review text).
-  - ``otel-jsonl``   — Copilot CLI: read + sum OTEL spans from the JSONL file at
-                       ``otel_path`` (``COPILOT_OTEL_FILE_EXPORTER_PATH``).
-                       Returns real tokens with ``estimated=False``.
-                       WARNING 3: Copilot reports ``estimated=True`` until Plan 05
-                       wires the env var into the workflow.  When ``otel_path`` is
-                       unset / empty / missing, returns ``None`` → caller falls
+  - ``otel-jsonl``   — Copilot CLI: read + sum OTEL spans from the JSONL file(s)
+                       at ``otel_path`` (``COPILOT_OTEL_FILE_EXPORTER_PATH``).
+                       Returns real tokens with ``estimated=False``.  Each line
+                       is a FLAT record (``{"type": "span"|"metric",
+                       "attributes": {...}}``) — see ``_parse_copilot_otel`` for
+                       the real schema (root-caused 2026-07-01 against a local
+                       install of ``gh copilot`` v1.0.67; 10-09 gap closure).
+                       When ``otel_path`` is unset / empty / missing / contains
+                       no real span records, returns ``None`` → caller falls
                        back to ``estimate_tokens`` with ``estimated=True``.
   - ``none``         — Cursor / Antigravity: no reliable token reporting.
                        Always returns ``None`` → caller estimates with bytes/4.
@@ -61,10 +64,12 @@ def unwrap_envelope_result(spec: CliEngineSpec | None, raw_stdout: str) -> str:
     return raw_stdout
 
 
-# OTEL attribute key names used by Copilot CLI
-_OTEL_PROMPT_TOKENS = "llm.usage.prompt_tokens"
-_OTEL_COMPLETION_TOKENS = "llm.usage.completion_tokens"
-_OTEL_CACHE_READ_TOKENS = "llm.usage.cache_read_tokens"
+# OTEL attribute key names used by the real Copilot CLI file exporter (flat
+# per-line ``attributes`` dict — see _parse_copilot_otel docstring).
+_OTEL_INPUT_TOKENS = "gen_ai.usage.input_tokens"
+_OTEL_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
+_OTEL_CACHE_READ_TOKENS = "gen_ai.usage.cache_read.input_tokens"
+_OTEL_CACHE_CREATION_TOKENS = "gen_ai.usage.cache_creation.input_tokens"
 
 
 def capture_usage(
@@ -183,30 +188,49 @@ def _parse_stdout_json(stdout: str) -> dict[str, Any] | None:
 
 
 def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
-    """Parse + sum Copilot OTEL JSONL spans for real token counts.
+    """Parse + sum the real Copilot CLI OTEL file-exporter JSONL for real
+    token counts.
 
-    Each line in the JSONL file is a resource-span object.  We walk the
-    attribute list on each span and accumulate llm.usage.* token counts.
+    Root-caused 2026-07-01 (10-09 gap closure) against a local install of the
+    real Copilot CLI (``gh copilot``, v1.0.67): the file exporter does NOT
+    emit the deeply-nested OTLP resource/scope/span hierarchy that a naive
+    OTLP-spec reading might assume. It writes FLAT per-line JSON records, one
+    record per line:
 
-    WARNING 3 (cross-wave dependency): Copilot reports ``estimated=True``
-    until Plan 05 wires ``COPILOT_OTEL_FILE_EXPORTER_PATH`` into the workflow.
-    When ``otel_path`` is None / empty / missing, this function returns None
-    and the engine falls back to bytes/4 (``estimated=True``).
+    ::
 
-    T-10-07: wraps all I/O and JSON parsing in try/except.
+        {"type": "span", "attributes": {"gen_ai.usage.input_tokens": 1200,
+         "gen_ai.usage.output_tokens": 180,
+         "gen_ai.usage.cache_read.input_tokens": 600,
+         "gen_ai.usage.cache_creation.input_tokens": 0,
+         "github.copilot.cost": 0.0084, ...}}
+        {"type": "metric", ...}
+
+    ``attributes`` is a plain dict (not a list of ``{key, value}`` pairs).
+    Records of ``type != "span"`` (e.g. ``"metric"``) carry no per-call token
+    attributes and are skipped, not summed. ``github.copilot.cost`` is
+    intentionally NOT read here — cost is derived from token counts via the
+    existing ``pricing.compute_cost`` seam in ``flow._enrich_capture``, to
+    keep a single, auditable cost-computation path (T-10-09-02).
+
+    T-10-07 / T-10-09-01: wraps all I/O and JSON parsing in try/except; every
+    record requires ``isinstance(record, dict)`` and
+    ``isinstance(attributes, dict)`` before field access; every token-field
+    coercion is wrapped in its own try/except. No single malformed line can
+    raise an uncaught exception.
 
     T-01 (10-THERMOS): ``otel_path`` may be a directory (Copilot's file
     exporter writes one or more ``*.jsonl`` files under the configured
     path rather than treating it as a single file). When ``otel_path`` is
     a directory, glob and sum spans across every ``*.jsonl`` file inside
-    it; when it is a file, read it directly (prior behavior unchanged).
+    it; when it is a file, read it directly.
 
     Returns:
         dict with summed ``input``, ``output``, ``cache_read``,
-        and ``estimated=False``.
-        None when path unset/missing/malformed → caller estimates.
+        ``cache_creation``, and ``estimated=False``.
+        None when path unset/missing/malformed/no real span records found →
+        caller falls back to the bytes/4 estimate.
     """
-    # WARNING 3: OTEL path unset — expected until Plan 05 wires the env
     if not otel_path:
         return None
 
@@ -222,6 +246,7 @@ def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
     total_input = 0
     total_output = 0
     total_cache_read = 0
+    total_cache_creation = 0
     span_count = 0  # T-09 (10-THERMOS): distinguishes "no real spans found" from a
     # genuine zero-token span — only the latter should report estimated=False.
 
@@ -241,58 +266,40 @@ def _parse_copilot_otel(otel_path: str | None) -> dict[str, Any] | None:
                     # T-10-07: non-dict top-level JSON value — skip, don't crash
                     continue
 
-                # Walk resourceSpans → scopeSpans → spans → attributes
-                for resource_span in record.get("resourceSpans", []):
-                    if not isinstance(resource_span, dict):
-                        continue  # T-10-07: malformed resourceSpans element
-                    for scope_span in resource_span.get("scopeSpans", []):
-                        if not isinstance(scope_span, dict):
-                            continue  # T-10-07: malformed scopeSpans element
-                        for span in scope_span.get("spans", []):
-                            if not isinstance(span, dict):
-                                continue  # T-10-07: malformed spans element
-                            span_count += 1
-                            attrs = {
-                                a["key"]: _extract_attr_value(a)
-                                for a in span.get("attributes", [])
-                                if isinstance(a, dict) and "key" in a
-                            }
-                            try:
-                                total_input += int(attrs.get(_OTEL_PROMPT_TOKENS) or 0)
-                                total_output += int(attrs.get(_OTEL_COMPLETION_TOKENS) or 0)
-                                total_cache_read += int(attrs.get(_OTEL_CACHE_READ_TOKENS) or 0)
-                            except (TypeError, ValueError):
-                                continue  # skip malformed span (T-10-07)
+                if record.get("type") != "span":
+                    # Metric-typed (or unknown/missing type) records carry no
+                    # per-call token attributes — skip, don't mis-sum.
+                    continue
+
+                attrs = record.get("attributes")
+                if not isinstance(attrs, dict):
+                    # Missing/null/malformed attributes (e.g. old list shape) — skip.
+                    continue
+
+                span_count += 1
+                try:
+                    total_input += int(attrs.get(_OTEL_INPUT_TOKENS, 0) or 0)
+                    total_output += int(attrs.get(_OTEL_OUTPUT_TOKENS, 0) or 0)
+                    total_cache_read += int(attrs.get(_OTEL_CACHE_READ_TOKENS, 0) or 0)
+                    total_cache_creation += int(attrs.get(_OTEL_CACHE_CREATION_TOKENS, 0) or 0)
+                except (TypeError, ValueError):
+                    continue  # skip malformed span (T-10-07)
 
     except OSError:
         # T-10-07: file I/O error — degrade to None
         return None
 
     if span_count == 0:
-        # T-09 (10-THERMOS): empty file / all lines malformed / no resourceSpans
-        # matched — there is no real usage data here, so degrade to None (caller
-        # falls back to bytes/4 estimate) rather than reporting a misleading
-        # estimated=False zeroed dict.
+        # T-09 (10-THERMOS): empty file / all lines malformed / metric-only /
+        # no real span records matched — there is no real usage data here,
+        # so degrade to None (caller falls back to bytes/4 estimate) rather
+        # than reporting a misleading estimated=False zeroed dict.
         return None
 
     return {
         "input": total_input,
         "output": total_output,
         "cache_read": total_cache_read,
+        "cache_creation": total_cache_creation,
         "estimated": False,
     }
-
-
-def _extract_attr_value(attr: dict[str, Any]) -> int | str | float | bool | None:
-    """Extract the scalar value from an OTEL attribute value dict.
-
-    OTEL attributes use ``{"key": "...", "value": {"intValue": N}}`` shapes.
-    Use explicit key presence check — ``or`` suppresses falsy values (0, False, "").
-    """
-    value = attr.get("value", {})
-    if not isinstance(value, dict):
-        return None
-    for key in ("intValue", "doubleValue", "stringValue", "boolValue"):
-        if key in value:
-            return value[key]
-    return None
