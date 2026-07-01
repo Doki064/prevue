@@ -81,6 +81,8 @@ Go to **Settings → Secrets and variables → Actions → New repository secret
 
 The secret name in your repository settings must match the name in the `secrets:` block of your caller workflow exactly.
 
+> **Migrating from an older Anthropic-API-key setup?** The Claude engine's secret was renamed from `anthropic-api-key`/`ANTHROPIC_API_KEY` to `claude-code-oauth-token`/`CLAUDE_CODE_OAUTH_TOKEN`. See [Breaking: Claude secret rename](./consumer-setup.md#breaking-claude-secret-rename) in `consumer-setup.md` for migration steps.
+
 ## Step 3 — Add the Prevue config file
 
 Create `.github/prevue.yml` on your **default branch** (not just on a feature branch — Prevue reads config from the PR base ref for security).
