@@ -147,11 +147,6 @@ jobs:
           # D-12: GEMINI_API_KEY alias — consumers who store their key under this name
           # can pass it as gemini-api-key secret; cli_adapter.py reads it as fallback.
           GEMINI_API_KEY: ${{ inputs.engine == 'antigravity-cli' && secrets.gemini-api-key || '' }}
-          # WARNING 3 (Plan 03 cross-wave): Copilot OTEL log path wired here so that
-          # capture_usage(otel-jsonl) in flow.py can read real token counts from the OTEL
-          # spans file. Without this env var, capture_usage returns None → estimated=True.
-          # Set in the review step env (not globally) so it is scoped to Copilot invocations.
-          COPILOT_OTEL_FILE_EXPORTER_PATH: ${{ runner.temp }}/copilot-otel
           # OUTP-05: full ReviewResult JSON written here; uploaded as artifact below.
           PREVUE_RESULT_FILE: ${{ runner.temp }}/prevue-result.json
 

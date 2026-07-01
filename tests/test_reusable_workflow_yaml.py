@@ -158,7 +158,10 @@ def test_cursor_install_supports_optional_sha256_pin() -> None:
 
 
 # ---------------------------------------------------------------------------
-# OUTP-05 / D-08/D-09: job outputs, artifact upload, OTEL env (Plan 05)
+# OUTP-05 / D-08/D-09: job outputs, artifact upload (Plan 05). Copilot's OTEL env
+# wiring (formerly asserted here) was removed by gap-closure Plan 08 — Copilot now
+# uses the honest ~est bytes/4 estimate path (usage_capture="none") since no CI-viable
+# OTEL enablement mechanism exists on @github/copilot@1.0.61 (10-UAT.md gap 1).
 # ---------------------------------------------------------------------------
 
 
@@ -215,25 +218,6 @@ def test_upload_artifact_step_present() -> None:
     # Must upload prevue-result.json (or reference it)
     path = str((step.get("with") or {}).get("path", ""))
     assert "prevue-result" in path, f"upload-artifact must upload prevue-result.json; path={path}"
-
-
-def test_otel_env_set_in_run_review_step() -> None:
-    """WARNING 3 (cross-wave): COPILOT_OTEL_FILE_EXPORTER_PATH must be in Run review env.
-
-    Without this, flow.py's capture_usage(otel-jsonl) cannot read the OTEL spans file
-    and falls back to estimated=True (bytes/4). Plan 05 wires this so real-token capture
-    (Plan 03) functions end-to-end in CI.
-    """
-    wf = _load_reusable_workflow()
-    steps = wf["jobs"]["review"]["steps"]
-    run_review_steps = [s for s in steps if s.get("id") == "run-review"]
-    assert run_review_steps, "run-review step not found"
-    step = run_review_steps[0]
-    env = step.get("env") or {}
-    assert "COPILOT_OTEL_FILE_EXPORTER_PATH" in env, (
-        "COPILOT_OTEL_FILE_EXPORTER_PATH must be set in the Run review step env "
-        "so Copilot OTEL token capture (Plan 03) functions in CI (WARNING 3)"
-    )
 
 
 # ---------------------------------------------------------------------------

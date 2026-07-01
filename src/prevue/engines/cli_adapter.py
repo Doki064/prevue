@@ -189,9 +189,10 @@ class CliEngineAdapter(EngineAdapter):
     def review(self, req: ReviewRequest) -> ReviewResult:
         token, env = self._build_env(req.model)
         # Pass spec so flow can capture real per-engine usage (PERF-03, D-04).
-        # For otel-jsonl engines (copilot-cli), flow reads COPILOT_OTEL_FILE_EXPORTER_PATH
-        # from the environment post-invocation (WARNING 3: env is unset until Plan 05
-        # wires it into the workflow — Copilot falls back to bytes/4 until then).
+        # otel-jsonl remains valid, tested infrastructure (usage.py/_parse_copilot_otel)
+        # but is currently unreached: copilot-cli uses usage_capture="none" (10-08 gap
+        # closure) since no CI-viable OTEL enablement mechanism exists on the pinned
+        # @github/copilot CLI — it falls back to the honest bytes/4 ~est estimate.
         raw_args = self._raw_args  # capture for lambda
         return flow.review_with_retry(
             req,
