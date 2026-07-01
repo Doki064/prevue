@@ -235,6 +235,57 @@ engine:
 
 **Precedence:** `PREVUE_ENGINE` environment variable overrides `engine.name`; both override the framework default (`copilot-cli`). Source: `_resolve_engine()` in `src/prevue/config.py`.
 
+### `engine.models` — per-role model overrides
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `engine.models.classify` | string \| null | `null` | Model used for the classify call; falls back to `engine.model` when unset |
+| `engine.models.review` | string \| null | `null` | Model used for the review call; falls back to `engine.model` when unset |
+| `engine.models.consolidate` | string \| null | `null` | Reserved for Phase 13 (QUAL-01); not consumed by the review pipeline today |
+
+```yaml
+engine:
+  name: copilot-cli
+  models:
+    classify: gpt-4o-mini
+    review: gpt-4o
+```
+
+Each role resolves as: `engine.models.<role>` else `engine.model` else the framework/engine default. `EngineModels` uses `extra="forbid"` — unknown keys under `models:` are rejected at config-load time.
+
+### `engine.raw_args` — extra CLI flags
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `engine.raw_args` | list of strings | `[]` | Extra CLI flags appended after the framework's own argv when invoking the engine adapter |
+
+```yaml
+engine:
+  raw_args:
+    - "--some-flag"
+    - "value"
+```
+
+List form only — a shell string (e.g. `raw_args: "--foo bar"`) is rejected with a `ValidationError` (D-10: command-injection guard; no shell parsing, no `shell=True`). Every element must be a string; non-string elements (`None`, numbers, booleans) are also rejected rather than silently coerced.
+
+### `engine.pricing` — cost-table override
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `engine.pricing.<model>` | mapping \| null | `null` | Per-model pricing row that shadows the vendored pricing table when computing review cost |
+
+```yaml
+engine:
+  pricing:
+    gpt-4o:
+      input_cost_per_token: 0.0000025
+      output_cost_per_token: 0.00001
+```
+
+Each row must be a mapping (or `null`) of LiteLLM-style field names (`input_cost_per_token`, `output_cost_per_token`, `cache_read_input_token_cost`, `cache_creation_input_token_cost`); a malformed row (e.g. a scalar instead of a mapping) is rejected with a `ValidationError` at config-load time rather than crashing the review run.
+
+`engine.raw_args` and `engine.pricing` are read from the same base-ref-only gated `load_config()` path as the rest of `prevue.yml` (SKIL-04): a PR-head `prevue.yml` cannot supply raw CLI flags or fake pricing data — only the base-ref (trusted) config is honored.
+
 ### Available engines
 
 | Engine name | Status | Required secret | Auth env var |
