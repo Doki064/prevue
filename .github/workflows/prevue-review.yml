@@ -155,12 +155,8 @@ jobs:
           fi
 
       - name: Install engine CLI
-        # WR-03 (phase-10 review): antigravity-cli is registered but not yet functional
-        # (spec.py functional=False; require_functional_adapter rejects it downstream in
-        # review.py). Skip the third-party installer entirely for it so an unsupported-
-        # engine selection fails fast without the network/subprocess spend of a curl +
-        # checksum-verify + bash install. Remove this exclusion once antigravity-cli
-        # ships headless auth and spec.py flips functional=True (see spec.py:184-186).
+        # antigravity-cli not yet functional — see spec.py functional=False; mirrored
+        # in prevue-command-run.yml's "Install engine CLI" step.
         if: steps.preflight.outputs.noop != 'true' && inputs.engine != 'antigravity-cli'
         env:
           PREVUE_ENGINE: ${{ inputs.engine }}

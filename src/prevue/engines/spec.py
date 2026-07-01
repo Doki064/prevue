@@ -35,6 +35,12 @@ class CliEngineSpec(BaseModel):
     secret_env: str
     auth_error: type  # CopilotAuthError | ClaudeAuthError | ...  (test compat — Pitfall 5)
     validate_secret: Callable[[str], str]  # returns secret or raises auth_error
+    # secret_env_aliases (T-10 / D-12, 10-THERMOS quick task): env vars checked, in
+    # order, when secret_env is unset — e.g. antigravity-cli accepts GEMINI_API_KEY
+    # as a documented alias for ANTIGRAVITY_API_KEY. Declarative spec data replaces
+    # the `spec.name == "antigravity-cli"` name-check that previously lived in
+    # cli_adapter._build_env (same anti-pattern argv_pty_wrap/D-01 avoid elsewhere).
+    secret_env_aliases: tuple[str, ...] = ()
 
     # Subprocess argv
     base_argv: tuple[str, ...]
@@ -187,10 +193,12 @@ CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
     CliEngineSpec(
         name="antigravity-cli",
         cli_label="Antigravity CLI",
+        secret_env="ANTIGRAVITY_API_KEY",
         # D-12: GEMINI_API_KEY is accepted as an alias; primary var is ANTIGRAVITY_API_KEY.
         # validate_secret checks ANTIGRAVITY_API_KEY env; consumer may also set GEMINI_API_KEY
-        # as a documented alias (see registry.py — registry keys on the spec name, not env alias).
-        secret_env="ANTIGRAVITY_API_KEY",
+        # as a documented alias. Declarative spec data (T-10, 10-THERMOS quick task) — no
+        # `spec.name ==` name-check in cli_adapter._build_env.
+        secret_env_aliases=("GEMINI_API_KEY",),
         auth_error=AntigravityAuthError,
         validate_secret=_validate_nonempty_secret(AntigravityAuthError, "ANTIGRAVITY_API_KEY"),
         base_argv=("agy", "-p"),

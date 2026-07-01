@@ -64,9 +64,13 @@ class CliEngineAdapter(EngineAdapter):
         """Validate secret, build subprocess env. Raises spec.auth_error on failure."""
         spec = self._spec
         raw_token = os.environ.get(spec.secret_env, "")
-        # D-12: GEMINI_API_KEY is accepted as an alias for ANTIGRAVITY_API_KEY
-        if not raw_token and spec.name == "antigravity-cli":
-            raw_token = os.environ.get("GEMINI_API_KEY", "")
+        # T-10 (10-THERMOS quick task): secret_env_aliases is declarative spec data
+        # (e.g. antigravity-cli's GEMINI_API_KEY alias, D-12) — no name-check here.
+        if not raw_token:
+            for alias in spec.secret_env_aliases:
+                raw_token = os.environ.get(alias, "")
+                if raw_token:
+                    break
         # validate_secret raises spec.auth_error if invalid; returns token on success
         token = spec.validate_secret(raw_token)
         env = {**os.environ, spec.secret_env: token}
