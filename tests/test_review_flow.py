@@ -9,8 +9,8 @@ import pytest
 from pydantic import ValidationError
 
 from prevue.config import NO_CONSUMER_CONFIG_SENTINEL, SkillsConfig, load_config
+from prevue.engines.base import EngineAdapter
 from prevue.engines.errors import EngineFailure
-from prevue.engines.registry import UnknownEngineError
 from prevue.fingerprint import fingerprint
 from prevue.github.client import PrContext
 from prevue.github.comments import PARTIAL_MARKER, render_body
@@ -109,7 +109,12 @@ class FailingEngine:
         raise EngineFailure("engine exploded")
 
 
-class FindingsEngine:
+class FindingsEngine(EngineAdapter):
+    """Inherits EngineAdapter so subclasses overriding only classify() still get
+    the base-class classify_with_tokens() default (T-09a — 10-THERMOS quick
+    task removed the hasattr duck-typing fallback in llm_fallback._classify_batch;
+    a plain test double without EngineAdapter as a base would AttributeError)."""
+
     name = "findings"
 
     def review(self, req: ReviewRequest) -> ReviewResult:
@@ -192,7 +197,7 @@ def test_run_review_happy_path_calls_upsert_once(fake_engine) -> None:
     assert [f.path for f in req.diff.files] == [f.path for f in sample_diff.files]
     assert req.instructions.startswith(BASELINE_INSTRUCTIONS)
     assert "## Skill:" in req.instructions
-    assert req.budget_seconds == 300
+    assert req.budget_seconds == 600
 
     loaded = mock_upsert.call_args.kwargs.get("loaded_skills")
     assert loaded
@@ -761,21 +766,43 @@ def test_fork_pr_creates_no_check() -> None:
     mock_skip_check.assert_not_called()
 
 
-def test_invalid_review_config_raises_before_fetch() -> None:
+def test_invalid_review_config_fails_closed_before_fetch() -> None:
+    """CR-01/CR-02: a malformed prevue.yml fails closed (sticky + failure check)
+    instead of crashing run_review() with an uncaught ValidationError."""
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
         patch(
             "prevue.review.load_config",
             side_effect=ValidationError.from_exception_data("ReviewConfig", []),
         ),
         patch("prevue.review.fetch_diff") as mock_fetch,
         patch("prevue.review.require_functional_adapter") as mock_get_adapter,
+        patch("prevue.review.upsert_skip_note") as mock_skip_note,
+        patch("prevue.review.conclude_skip_check", return_value=True) as mock_skip_check,
+        patch("prevue.review.upsert_sticky") as mock_sticky,
+        patch("prevue.review.conclude_review_check") as mock_check,
     ):
-        with pytest.raises(ValidationError):
-            run_review()
+        run_review()
 
     mock_fetch.assert_not_called()
     mock_get_adapter.assert_not_called()
+    mock_skip_note.assert_called_once()
+    reason = mock_skip_note.call_args.kwargs.get("reason", "")
+    assert "prevue.yml" in reason
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        mock_pr.head.sha,
+        conclusion="failure",
+        reason=reason,
+        title="review failed",
+    )
+    mock_sticky.assert_not_called()
+    mock_check.assert_not_called()
 
 
 def test_run_review_load_config_default_path(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -912,7 +939,7 @@ def test_fallback_classifies_full_reduced_set_including_budget_skipped() -> None
         patch("prevue.review.conclude_review_check", return_value=True),
         patch(
             "prevue.review.llm_classify",
-            return_value=({"data/mystery_a.bin": "backend"}, None),
+            return_value=({"data/mystery_a.bin": "backend"}, None, None),
         ) as mock_llm,
     ):
         run_review(adapter=FindingsEngine())
@@ -1018,7 +1045,7 @@ def test_run_review_classify_tokens_zero_on_full_degrade() -> None:
         patch("prevue.review.conclude_review_check", return_value=True),
         patch(
             "prevue.review.llm_classify",
-            return_value=({GENERAL_LABEL: FALLBACK_FAILED_GLOB}, FALLBACK_DISCLOSURE),
+            return_value=({GENERAL_LABEL: FALLBACK_FAILED_GLOB}, FALLBACK_DISCLOSURE, None),
         ) as mock_llm,
     ):
         run_review(adapter=FindingsEngine())
@@ -1026,6 +1053,40 @@ def test_run_review_classify_tokens_zero_on_full_degrade() -> None:
     mock_llm.assert_called_once()
     token_meta = mock_upsert.call_args.kwargs["token_meta"]
     assert token_meta["classify"] == 0
+
+
+def test_run_review_compact_output_includes_classify_tokens() -> None:
+    """T-01 (10-THERMOS quick task): emit_machine_output's tokens must include the
+    LLM-fallback classify cost, not just review cost — build_compact_output already
+    sums tokens["classify"] into the total; the bug was that classify was never
+    written into engine_meta["tokens"] in the first place."""
+    from prevue.output import build_compact_output
+
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_mixed_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=True),
+        patch(
+            "prevue.review.llm_classify",
+            return_value=({"mystery.bin": "backend"}, None, None),
+        ) as mock_llm,
+        patch("prevue.review.emit_machine_output") as mock_emit,
+    ):
+        run_review(adapter=FindingsEngine())
+
+    mock_llm.assert_called_once()
+    emitted_result, conclusion = mock_emit.call_args.args
+    assert emitted_result.engine_meta["tokens"]["classify"] > 0
+    compact = build_compact_output(emitted_result, conclusion)
+    assert compact["tokens"] >= emitted_result.engine_meta["tokens"]["classify"]
 
 
 def test_run_review_classify_tokens_nonzero_on_real_labels() -> None:
@@ -1044,7 +1105,7 @@ def test_run_review_classify_tokens_nonzero_on_real_labels() -> None:
         patch("prevue.review.conclude_review_check", return_value=True),
         patch(
             "prevue.review.llm_classify",
-            return_value=({"mystery.bin": "backend"}, None),
+            return_value=({"mystery.bin": "backend"}, None, None),
         ) as mock_llm,
     ):
         run_review(adapter=FindingsEngine())
@@ -1081,6 +1142,7 @@ def test_run_review_partial_degrade_bills_routes_and_retains_general() -> None:
             return_value=(
                 {"mystery.bin": "backend", GENERAL_LABEL: FALLBACK_PARTIAL_GLOB},
                 partial_disclosure,
+                None,
             ),
         ) as mock_llm,
     ):
@@ -1117,17 +1179,34 @@ def test_engine_selection_via_prevue_engine(monkeypatch: pytest.MonkeyPatch) -> 
     ):
         mock_get_adapter.return_value = FindingsEngine()
         run_review()
-        mock_get_adapter.assert_called_once_with("copilot-cli")
+        # T-07 (10-THERMOS quick task): raw_args/pricing are now threaded at
+        # construction time via require_functional_adapter's factory kwargs.
+        mock_get_adapter.assert_called_once_with("copilot-cli", raw_args=None, pricing=None)
 
+    # T-03 (10-THERMOS quick task): a bad PREVUE_ENGINE value must degrade to the
+    # same graceful failure-conclusion skip path as NonFunctionalEngineError,
+    # rather than propagating UnknownEngineError uncaught.
     monkeypatch.setenv("PREVUE_ENGINE", "nope")
     with (
         patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
         patch("prevue.review.fetch_diff", return_value=_sample_diff()),
         patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
         patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.upsert_skip_note") as mock_skip_note,
+        patch("prevue.review.conclude_skip_check", return_value=True) as mock_skip_check,
     ):
-        with pytest.raises(UnknownEngineError, match="nope"):
-            run_review()
+        run_review()
+
+    mock_skip_note.assert_called_once()
+    reason = mock_skip_note.call_args.kwargs.get("reason", "")
+    assert "nope" in reason
+    mock_skip_check.assert_called_once_with(
+        mock_repo,
+        HEAD_SHA,
+        conclusion="failure",
+        reason=reason,
+        title="review failed",
+    )
 
 
 def test_engine_failure_propagates_without_upsert() -> None:
@@ -1167,6 +1246,33 @@ def test_run_review_raises_when_review_check_not_published() -> None:
     ):
         with pytest.raises(RuntimeError, match="review check run"):
             run_review(adapter=FindingsEngine())
+
+
+def test_run_review_emits_machine_output_before_check_publish_failure() -> None:
+    """T-04 (10-THERMOS quick task): emit_machine_output must run even when the
+    check-run publish step fails — the real result/tokens/findings must not be
+    lost behind a synthetic failure summary just because conclude_review_check
+    returned False."""
+    mock_pr = MagicMock()
+    mock_repo = _mock_repo()
+    mock_sticky = _mock_sticky()
+
+    with (
+        patch("prevue.review.load_pr_context", return_value=_sample_ctx()),
+        patch("prevue.review.fetch_diff", return_value=_sample_diff()),
+        patch("prevue.review.get_authenticated_pull", return_value=mock_pr),
+        patch("prevue.review.get_repo", return_value=mock_repo),
+        patch("prevue.review.post_inline_review", return_value=set()),
+        patch("prevue.review.upsert_sticky", return_value=mock_sticky),
+        patch("prevue.review.conclude_review_check", return_value=False),
+        patch("prevue.review.emit_machine_output") as mock_emit,
+    ):
+        with pytest.raises(RuntimeError, match="review check run"):
+            run_review(adapter=FindingsEngine())
+
+    mock_emit.assert_called_once()
+    emitted_result = mock_emit.call_args.args[0]
+    assert emitted_result.engine_meta
 
 
 def test_consumer_skills_root_skips_workspace_fallback_in_actions(
@@ -2960,7 +3066,7 @@ def test_llm_fallback_label_triggers_bundle_selection() -> None:
         # LLM fallback returns 'data' label for the unmatched path
         patch(
             "prevue.review.llm_classify",
-            return_value=({"data/billing.bin": "data"}, None),
+            return_value=({"data/billing.bin": "data"}, None, None),
         ) as mock_llm,
         patch("prevue.review.post_inline_review", return_value=set()),
         patch("prevue.review.upsert_sticky", return_value=mock_sticky),

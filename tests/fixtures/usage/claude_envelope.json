@@ -1,0 +1,15 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "is_error": false,
+  "duration_ms": 12345,
+  "session_id": "sess-abc123",
+  "result": "Here is my review of the code changes:\n\n- Line 42: Use `with` statement for resource management\n- Line 55: Missing null check before dereference",
+  "usage": {
+    "input_tokens": 1500,
+    "output_tokens": 250,
+    "cache_read_input_tokens": 800,
+    "cache_creation_input_tokens": 200
+  },
+  "total_cost_usd": 0.007125
+}

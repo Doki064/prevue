@@ -76,7 +76,7 @@ def test_review_request_requires_diff_and_instructions() -> None:
         files=[],
     )
     req = ReviewRequest(diff=bundle, instructions="Review carefully.")
-    assert req.budget_seconds == 300
+    assert req.budget_seconds == 600
     assert req.model is None
 
 
