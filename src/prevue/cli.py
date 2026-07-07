@@ -6,10 +6,11 @@ import argparse
 import sys
 
 from prevue.commands import run_command
-from prevue.engines.errors import AuthError, EngineFailure
 from prevue.gate_validate import run_gate_revalidate, run_materialize_comment_event
+from prevue.models import ReviewResult
+from prevue.output import emit_machine_output
 from prevue.preflight import run_preflight_noop_check
-from prevue.review import ForkPrUnsupported, run_review
+from prevue.review import CheckRunPublishFailure, ForkPrUnsupported, run_review
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -50,17 +51,28 @@ def main(argv: list[str] | None = None) -> int:
     return args.func()
 
 
+def _emit_hard_fail_output(exc: Exception) -> None:
+    """Emit machine output when review/command fails before the normal publish path."""
+    try:
+        emit_machine_output(ReviewResult(summary_markdown=str(exc)), conclusion="failure")
+    except Exception as emit_exc:
+        print(f"prevue: failed to emit machine output on hard failure: {emit_exc}", file=sys.stderr)
+
+
 def _cmd_review() -> int:
     try:
         run_review()
     except ForkPrUnsupported as exc:
         print(str(exc), file=sys.stderr)
         return 0
-    except (EngineFailure, AuthError) as exc:
+    except CheckRunPublishFailure as exc:
+        # Machine output was already emitted with the real result before this was
+        # raised — do not overwrite it with a minimal hard-fail summary.
         print(str(exc), file=sys.stderr)
         return 1
     except Exception as exc:
         print(str(exc), file=sys.stderr)
+        _emit_hard_fail_output(exc)
         return 1
     return 0
 
@@ -71,11 +83,12 @@ def _cmd_command() -> int:
     except ForkPrUnsupported as exc:
         print(str(exc), file=sys.stderr)
         return 0
-    except (EngineFailure, AuthError) as exc:
+    except CheckRunPublishFailure as exc:
         print(str(exc), file=sys.stderr)
         return 1
     except Exception as exc:
         print(str(exc), file=sys.stderr)
+        _emit_hard_fail_output(exc)
         return 1
 
 
