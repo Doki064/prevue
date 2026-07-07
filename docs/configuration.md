@@ -235,22 +235,77 @@ engine:
 
 **Precedence:** `PREVUE_ENGINE` environment variable overrides `engine.name`; both override the framework default (`copilot-cli`). Source: `_resolve_engine()` in `src/prevue/config.py`.
 
+### `engine.models` — per-role model overrides
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `engine.models.classify` | string \| null | `null` | Model used for the classify call; falls back to `engine.model` when unset |
+| `engine.models.review` | string \| null | `null` | Model used for the review call; falls back to `engine.model` when unset |
+| `engine.models.consolidate` | string \| null | `null` | Reserved for Phase 13 (QUAL-01); not consumed by the review pipeline today |
+
+```yaml
+engine:
+  name: copilot-cli
+  models:
+    classify: gpt-4o-mini
+    review: gpt-4o
+```
+
+Each role resolves as: `engine.models.<role>` else `engine.model` else the framework/engine default. `EngineModels` uses `extra="forbid"` — unknown keys under `models:` are rejected at config-load time.
+
+### `engine.raw_args` — extra CLI flags
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `engine.raw_args` | list of strings | `[]` | Extra CLI flags appended after the framework's own argv when invoking the engine adapter |
+
+```yaml
+engine:
+  raw_args:
+    - "--some-flag"
+    - "value"
+```
+
+List form only — a shell string (e.g. `raw_args: "--foo bar"`) is rejected with a `ValidationError` (D-10: command-injection guard; no shell parsing, no `shell=True`). Every element must be a string; non-string elements (`None`, numbers, booleans) are also rejected rather than silently coerced.
+
+### `engine.pricing` — cost-table override
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `engine.pricing.<model>` | mapping \| null | `null` | Per-model pricing row that shadows the vendored pricing table when computing review cost |
+
+```yaml
+engine:
+  pricing:
+    gpt-4o:
+      input_cost_per_token: 0.0000025
+      output_cost_per_token: 0.00001
+```
+
+Each row must be a mapping (or `null`) of LiteLLM-style field names (`input_cost_per_token`, `output_cost_per_token`, `cache_read_input_token_cost`, `cache_creation_input_token_cost`); a malformed row (e.g. a scalar instead of a mapping) is rejected with a `ValidationError` at config-load time rather than crashing the review run.
+
+`engine.raw_args` and `engine.pricing` are read from the same base-ref-only gated `load_config()` path as the rest of `prevue.yml` (SKIL-04): a PR-head `prevue.yml` cannot supply raw CLI flags or fake pricing data — only the base-ref (trusted) config is honored.
+
 ### Available engines
 
 | Engine name | Status | Required secret | Auth env var |
 |-------------|--------|-----------------|-------------|
 | `copilot-cli` | Functional (default) | `copilot-github-token` | `COPILOT_GITHUB_TOKEN` — must be a fine-grained user-owned PAT (`github_pat_…`) with Copilot Requests permission |
-| `claude-code-cli` | Functional | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
+| `claude-code-cli` | Functional | `claude-code-oauth-token` | `CLAUDE_CODE_OAUTH_TOKEN` — long-lived token from `claude setup-token` |
 | `cursor-cli` | Functional | `cursor-api-key` | `CURSOR_API_KEY` |
-| `gemini-cli` | Registered skeleton — not yet functional for review | — | `GEMINI_API_KEY` (planned) |
+| `antigravity-cli` | Registered, not functional — no headless/non-interactive auth exists for the `agy` CLI per official docs; review attempts fail closed with a clear error | — | `ANTIGRAVITY_API_KEY` |
 
-**Review model:** set `PREVUE_MODEL` or `COPILOT_MODEL` in the workflow environment. `PREVUE_MODEL` takes precedence; `COPILOT_MODEL` is the fallback (Copilot adapter). This is separate from `classification.fallback.model`.
+Copilot CLI reports real (non-estimated) token usage via its OpenTelemetry JSONL file exporter (`COPILOT_OTEL_FILE_EXPORTER_PATH`, wired automatically by the reusable workflow to a per-run temp directory). The pinned install version (`1.0.67`, see "Engine install versions" below) ships OTEL export and matches the flat span-per-line schema `usage.py` parses. Copilot's CLI only emits OTEL data when invoked in `-p`/non-interactive-prompt mode, so Prevue uses `-p` for review prompts that fit under a conservative size ceiling (64 KiB) to reach real-token capture, falling back to piping the prompt via stdin (the same estimate-only path already used for larger PRs) once the assembled review prompt exceeds that ceiling — so very large PRs will still show the `~est` label even with Copilot as the engine, which is expected and not a bug. When OTEL export is unavailable or the file is empty/missing, Copilot falls back to the same `~est` bytes/4 estimate as `cursor-cli`.
+
+**Known gap (WR-02, 10-boundary-contracts):** the classify and skill-select LLM-fallback calls (`classification.fallback`, skill escalation) go through the same `-p` invocation path as review and can trigger the same real, billed Copilot OTEL usage described above, but that usage is not read back — real-token capture for those calls only applies to JSON-envelope engines (e.g. `claude-code-cli`). When Copilot classification fallback or skill-select escalation fires, actual Copilot spend for that portion is silently omitted from the sticky comment's `Tokens:`/`Cost:` lines. No data is lost or corrupted; the reported cost is simply an undercount in that scenario.
+
+**Review model:** the recommended override is the reusable workflow's `model` input (`with: model: ...`), which threads into `PREVUE_MODEL` for you. Alternatively, set `PREVUE_MODEL` or `COPILOT_MODEL` directly in the workflow environment (e.g. via a repository variable, for consumers who prefer not to edit their caller `with:` block per-call) — `PREVUE_MODEL` takes precedence; `COPILOT_MODEL` is the fallback (Copilot adapter). This is separate from `classification.fallback.model`.
 
 **Engine install versions** (from `.github/scripts/install-engine-cli.sh`):
 
 | Engine | Installed package | Version |
 |--------|-------------------|---------|
-| `copilot-cli` | `@github/copilot` (npm) | `1.0.61` |
+| `copilot-cli` | `@github/copilot` (npm) | `1.0.67` |
 | `claude-code-cli` | `@anthropic-ai/claude-code` (npm) | `2.1.177` |
 | `cursor-cli` | Official shell installer (`https://cursor.com/install`) | Not version-pinned — supply-chain risk; prefer `copilot-cli` or `claude-code-cli` where pinning matters |
 
@@ -263,6 +318,7 @@ The reusable workflow (`prevue-review.yml`) exposes these `workflow_call` inputs
 | Input | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
 | `engine` | string | No | `copilot-cli` | Engine adapter name (`copilot-cli`, `claude-code-cli`, `cursor-cli`) |
+| `model` | string | No | `""` | Review engine model override; equivalent to setting `PREVUE_MODEL`, takes precedence over `engine.model`/`engine.models.review` in `prevue.yml` |
 | `config-path` | string | No | `.github/prevue.yml` | Path to `prevue.yml` relative to the consumer root (no `..`) |
 | `prevue-ref` | string | No | `""` (→ `main`) | Prevue framework branch, tag, or SHA for self-checkout |
 | `pr-head-sha` | string | No | `""` | PR head SHA; falls back to `github.event.pull_request.head.sha` |
@@ -274,8 +330,10 @@ The reusable workflow (`prevue-review.yml`) exposes these `workflow_call` inputs
 | Secret | Required | Engine | Description |
 |--------|----------|--------|-------------|
 | `copilot-github-token` | No | `copilot-cli` | Fine-grained user PAT (`github_pat_…`) with Copilot Requests permission. Maps to `COPILOT_GITHUB_TOKEN` |
-| `anthropic-api-key` | No | `claude-code-cli` | Anthropic API key. Maps to `ANTHROPIC_API_KEY` |
+| `claude-code-oauth-token` | No | `claude-code-cli` | Long-lived OAuth token (`claude setup-token`). Maps to `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cursor-api-key` | No | `cursor-cli` | Cursor API key. Maps to `CURSOR_API_KEY` |
+| `antigravity-api-key` | No | `antigravity-cli` | API key for `agy` (registered, not yet functional). Maps to `ANTIGRAVITY_API_KEY` |
+| `gemini-api-key` | No | `antigravity-cli` | Documented alias for `antigravity-api-key`. Maps to `GEMINI_API_KEY` |
 
 Pass only the secret for your chosen engine. Do **not** use `secrets: inherit`.
 
@@ -309,7 +367,7 @@ Workflow/runtime variables that affect config resolution (not set in `prevue.yml
 | `PREVUE_MODEL` | Optional | — | Review engine model; `COPILOT_MODEL` is the Copilot adapter fallback |
 | `COPILOT_MODEL` | Optional | — | Copilot-specific model override; superseded by `PREVUE_MODEL` if both set |
 | `COPILOT_GITHUB_TOKEN` | Engine-dependent | — | Fine-grained PAT (`github_pat_…`) for `copilot-cli` |
-| `ANTHROPIC_API_KEY` | Engine-dependent | — | API key for `claude-code-cli` |
+| `CLAUDE_CODE_OAUTH_TOKEN` | Engine-dependent | — | OAuth token for `claude-code-cli` (`claude setup-token`) |
 | `CURSOR_API_KEY` | Engine-dependent | — | API key for `cursor-cli` |
 
 ## Validation

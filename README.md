@@ -84,7 +84,7 @@ The reusable workflow (`.github/workflows/prevue-review.yml`) checks out the Pre
 | **Diff packing** | Files sorted by label rank and skill coverage; lowest-priority files dropped first when over `review.max_input_tokens` |
 | **Inline comments** | Findings placed on changed lines via unified-diff positions; capped by `review.max_inline_comments` |
 | **Merge gate** | `prevue/review` check run — pass/fail driven by `review.min_severity_to_fail`, evaluated against all findings |
-| **Multi-engine** | Pluggable adapters: Copilot CLI, Claude Code CLI, Cursor CLI (Gemini CLI registered but not yet functional) |
+| **Multi-engine** | Pluggable adapters: Copilot CLI, Claude Code CLI, Cursor CLI (Antigravity CLI registered but not yet functional) |
 | **Multi-call** | `review.max_review_calls` splits large diffs across parallel engine calls; findings merged and deduplicated |
 | **Incremental review** | Diff scoped to changes since last reviewed SHA; outdated threads resolved automatically |
 | **`/prevue` commands** | Optional issue-comment workflow for force re-review, dismiss findings, resolve threads |
@@ -120,7 +120,7 @@ Pass only the secret for the engine you use — never `secrets: inherit`.
 | Engine | Workflow secret | Environment variable |
 |--------|-----------------|----------------------|
 | `copilot-cli` | `copilot-github-token` | `COPILOT_GITHUB_TOKEN` |
-| `claude-code-cli` | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
+| `claude-code-cli` | `claude-code-oauth-token` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cursor-cli` | `cursor-api-key` | `CURSOR_API_KEY` |
 
 Copilot CLI requires a **fine-grained, user-owned PAT** with **Copilot Requests** permission (prefix `github_pat_`), not the Actions `GITHUB_TOKEN`. Details in [docs/consumer-setup.md](docs/consumer-setup.md).

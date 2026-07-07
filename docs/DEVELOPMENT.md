@@ -173,10 +173,8 @@ prevue/
 │   │   ├── subprocess_invoke.py # Shared headless subprocess helper
 │   │   ├── tokens.py           # Token estimation (bytes / 4)
 │   │   ├── errors.py           # EngineFailure, AuthError, stderr sanitisation
-│   │   ├── copilot_cli.py      # Copilot CLI adapter (default)
-│   │   ├── claude_code_cli.py  # Claude Code CLI adapter
-│   │   ├── cursor_cli.py       # Cursor CLI adapter
-│   │   └── gemini_cli.py       # Gemini skeleton (not yet functional)
+│   │   ├── spec.py             # CliEngineSpec table — one declarative entry per CLI engine
+│   │   └── cli_adapter.py      # CliEngineAdapter(spec) — single generic adapter for all CLI engines
 │   └── github/
 │       ├── client.py           # PrContext, PR + repo auth helpers
 │       ├── diff.py             # Diff fetch, scope decision (full/incremental/noop)
@@ -250,57 +248,40 @@ When `review.max_review_calls > 1`, `split_into_calls()` partitions packed files
 
 ## Adding an engine adapter
 
-Engines implement the `EngineAdapter` port in `src/prevue/engines/base.py`. The three functional adapters — `CopilotCliAdapter`, `ClaudeCodeAdapter`, `CursorAdapter` — are the reference implementations.
+All CLI engines (`copilot-cli`, `claude-code-cli`, `cursor-cli`, `antigravity-cli`) share one
+generic adapter, `CliEngineAdapter` (`src/prevue/engines/cli_adapter.py`), parameterized by a
+declarative `CliEngineSpec` (`src/prevue/engines/spec.py`). There is no adapter subclass to
+write — adding an engine is one `CliEngineSpec` data entry.
 
 ### Steps
 
-1. **Create the adapter** — e.g. `src/prevue/engines/my_engine_cli.py`. Subclass `EngineAdapter`, set a unique `name`, implement `review()`. Reuse `engines/flow.py` (`review_with_retry`), `engines/prompt.py` (`build_prompt`), and `engines/subprocess_invoke.py` (`invoke_subprocess_text`).
+1. **Add a `CliEngineSpec` entry** to `CLI_ENGINE_SPECS` in `spec.py`:
 
    ```python
-   class MyEngineAdapter(EngineAdapter):
-       name = "my-engine"
-
-       def review(self, req: ReviewRequest) -> ReviewResult:
-           key = os.environ.get("MY_ENGINE_API_KEY", "")
-           if not key:
-               raise AuthError("MY_ENGINE_API_KEY is not set.")
-           env = {**os.environ, "MY_ENGINE_API_KEY": key}
-           return flow.review_with_retry(
-               req,
-               invoke=lambda p: invoke_subprocess_text(
-                   ["my-engine-cli", "--prompt-stdin"],
-                   env=env, secret=key,
-                   budget_seconds=req.budget_seconds,
-                   cli_label="My Engine",
-                   input_text=p,
-               ),
-               secret=key,
-               build_prompt=build_prompt,
-               max_prompt_bytes=MAX_PROMPT_BYTES,
-               model_label=req.model or "default",
-           )
-
-       def classify(self, paths, allowed_labels, *, model=None) -> dict[str, str]:
-           """Implement for hybrid classification fallback support."""
-           ...
-
-       def classify_skills(self, skills, allowed_labels, *, model=None) -> dict[str, str]:
-           """Implement for hybrid skill-selection support."""
-           ...
+   CliEngineSpec(
+       name="my-engine",
+       cli_label="My Engine",
+       secret_env="MY_ENGINE_API_KEY",
+       auth_error=MyEngineAuthError,
+       validate_secret=_validate_nonempty_secret(MyEngineAuthError, "MY_ENGINE_API_KEY"),
+       base_argv=("my-engine-cli",),
+       prompt_delivery="stdin",
+       usage_capture="none",
+       functional=True,
+   )
    ```
 
-2. **Register in `registry.py`** — add the class to `ENGINES`:
+   Other relevant optional fields: `model_flag`/`model_env`/`model_argv_flag` for model
+   selection, `stdout_format="json_envelope"` for CLIs that wrap output in a JSON envelope
+   (extract the `result` field), `argv_pty_wrap` for the non-TTY stdout-drop workaround
+   (`script -qec` wrapper — see `cursor-cli`/`antigravity-cli` for prior art).
 
-   ```python
-   from prevue.engines.my_engine_cli import MyEngineAdapter
+   If the adapter is not yet functional, set `functional=False` (same as `antigravity-cli`) so
+   `require_functional_adapter()` rejects it at review time with a clear error.
 
-   ENGINES: dict[str, type[EngineAdapter]] = {
-       ...
-       MyEngineAdapter.name: MyEngineAdapter,
-   }
-   ```
-
-   If the adapter is not yet functional, add its name to `SKELETON_ENGINES` (same as `gemini-cli`) so `require_functional_adapter()` rejects it at review time with a clear error.
+2. **No `registry.py` edit needed** — `ENGINES: dict[str, CliEngineSpec]` auto-populates from
+   `CLI_ENGINE_SPECS`, and `get_adapter()`/`require_functional_adapter()` construct
+   `CliEngineAdapter(spec, raw_args=..., pricing_override=...)` from it.
 
 3. **Wire CLI install** — add a `case` branch in `.github/scripts/install-engine-cli.sh` with a **pinned** package version:
 
@@ -424,7 +405,7 @@ There is no local CLI shortcut that replaces the full Actions environment. To ru
 
    ```bash
    export GITHUB_TOKEN="github_pat_..."     # read PR data + post comments
-   export COPILOT_GITHUB_TOKEN="github_pat_..."  # or ANTHROPIC_API_KEY / CURSOR_API_KEY
+   export COPILOT_GITHUB_TOKEN="github_pat_..."  # or CLAUDE_CODE_OAUTH_TOKEN / CURSOR_API_KEY
    export PREVUE_ENGINE="copilot-cli"        # or claude-code-cli, cursor-cli
    export GITHUB_REPOSITORY="owner/repo"
    export GITHUB_EVENT_PATH="/path/to/event.json"   # pull_request event payload
@@ -463,7 +444,7 @@ Prevue workflows are security-sensitive. CI enforces static checks; `tests/test_
 - **Least-privilege `permissions`** — caller jobs declare only what they need; the reusable workflow needs `contents: write`, `pull-requests: write`, `checks: write` for lifecycle GraphQL.
 - **Trusted checkout only** — consumer repo checked out at **base ref**, never PR head, for config/skills (`path: consumer`).
 - **Engine secrets** — map workflow secrets to env vars with an engine-conditional expression; keep `GITHUB_TOKEN` separate from engine tokens.
-- **Pin engine CLIs** — versions in `.github/scripts/install-engine-cli.sh` (e.g. `@github/copilot@1.0.61`, `@anthropic-ai/claude-code@2.1.177`).
+- **Pin engine CLIs** — versions in `.github/scripts/install-engine-cli.sh` (e.g. `@github/copilot@1.0.67`, `@anthropic-ai/claude-code@2.1.177`).
 - **Fork/draft guards** — job `if:` blocks skip fork PRs and drafts before spending runner time.
 
 ### Linting workflows
