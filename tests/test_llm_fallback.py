@@ -52,16 +52,17 @@ def _file(path: str) -> ChangedFile:
 
 def test_no_call_when_all_matched() -> None:
     adapter = RecordingAdapter()
-    labels, disclosure = llm_classify([], adapter)
+    labels, disclosure, tokens = llm_classify([], adapter)
     assert labels == {}
     assert disclosure is None
+    assert tokens is None
     assert adapter.calls == []
 
 
 def test_unmatched_only() -> None:
     adapter = RecordingAdapter()
     unmatched = ["README.txt", "notes.org"]
-    labels, disclosure = llm_classify(unmatched, adapter, model="cheap-model")
+    labels, disclosure, tokens = llm_classify(unmatched, adapter, model="cheap-model")
     assert disclosure is None
     assert set(labels.keys()) == set(unmatched)
     assert len(adapter.calls) == 1
@@ -86,16 +87,17 @@ def test_degrade_to_general() -> None:
         ) -> dict[str, str]:
             raise NotImplementedError("no classify")
 
-    labels, disclosure = llm_classify(["mystery.bin"], FailingAdapter())
+    labels, disclosure, tokens = llm_classify(["mystery.bin"], FailingAdapter())
     assert disclosure is not None
     assert labels == {GENERAL_LABEL: "(llm fallback failed)"}
+    assert tokens is None
 
 
 def test_batches_many_unmatched_paths() -> None:
     adapter = RecordingAdapter()
     unmatched = [f"file-{i}.txt" for i in range(CLASSIFY_BATCH_SIZE + 25)]
 
-    labels, disclosure = llm_classify(unmatched, adapter, batch_size=CLASSIFY_BATCH_SIZE)
+    labels, disclosure, tokens = llm_classify(unmatched, adapter, batch_size=CLASSIFY_BATCH_SIZE)
 
     assert disclosure is None
     assert set(labels.keys()) == set(unmatched)
@@ -129,7 +131,7 @@ def test_batch_failure_degrades_remaining_paths() -> None:
     adapter = PartialFailAdapter()
     unmatched = [f"ok-{i}.txt" for i in range(3)] + [f"fail-{i}.txt" for i in range(3)]
 
-    labels, disclosure = llm_classify(unmatched, adapter, batch_size=3)
+    labels, disclosure, tokens = llm_classify(unmatched, adapter, batch_size=3)
 
     assert adapter.calls == 2
     assert labels["ok-0.txt"] == "backend"

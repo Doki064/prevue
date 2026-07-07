@@ -32,7 +32,7 @@ def sample_request() -> ReviewRequest:
 @pytest.fixture
 def set_all_engine_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("COPILOT_GITHUB_TOKEN", VALID_TOKEN)
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-key")
+    monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-test-key")
     monkeypatch.setenv("CURSOR_API_KEY", "cur_test_key")
 
 

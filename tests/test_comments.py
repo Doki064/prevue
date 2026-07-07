@@ -1016,6 +1016,48 @@ class TestStickyWithGate:
         assert "frontend 1/4" in body
         assert "backend 0/3" in body
 
+    def test_cost_line_renders_with_known_cost(self) -> None:
+        """PERF-03 / D-05: cost line appears beside tokens when cost_usd is present."""
+        body = render_body(
+            _sample_result(),
+            token_meta={
+                "review": 1500,
+                "classify": 80,
+                "review_estimated": False,
+                "classify_estimated": True,
+                "cost_usd": 0.002345,
+            },
+        )
+        assert "Cost:" in body
+        assert "$" in body
+        # cost_usd is present and review tokens are not estimated — no ~est label
+        assert "Cost: $" in body
+        assert "~est" not in body.split("Cost:")[1].split("\n")[0]
+
+    def test_cost_line_labeled_estimated_when_tokens_estimated(self) -> None:
+        """PERF-03 / D-05: cost line carries ~est label when review tokens are estimated."""
+        body = render_body(
+            _sample_result(),
+            token_meta={
+                "review": 1500,
+                "review_estimated": True,
+                "cost_usd": 0.001234,
+            },
+        )
+        assert "Cost:" in body
+        assert "~est" in body.split("Cost:")[1].split("\n")[0]
+
+    def test_cost_line_absent_when_cost_usd_none(self) -> None:
+        """PERF-03: cost line must not appear when cost_usd is absent (unknown model)."""
+        body = render_body(
+            _sample_result(),
+            token_meta={
+                "review": 1500,
+                "review_estimated": False,
+            },
+        )
+        assert "Cost:" not in body
+
 
 class TestInlineTemplate:
     def _finding(self, **overrides) -> Finding:
