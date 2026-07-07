@@ -1,4 +1,22 @@
-"""Single-read consumer config loader for .github/prevue.yml (WKFL-03, D-05/D-07/D-08)."""
+"""Single-read consumer config loader for .github/prevue.yml (WKFL-03, D-05/D-07/D-08).
+
+Config Resolution Precedence (WKFL-05 / D-07)
+===============================================
+Three knobs have a caller-override layer above the consumer prevue.yml:
+
+  workflow input > .github/prevue.yml > built-in defaults
+
+Concretely, for each knob:
+
+  1. engine:       PREVUE_ENGINE env  >  engine.name in yml  >  DEFAULT_ENGINE constant
+  2. model:        PREVUE_MODEL env   >  COPILOT_MODEL env   >  engine.model in yml  >  None
+  3. fallback model: (no env override)  >  classification.fallback.model in yml  >  None
+
+``raw_args`` and ``pricing`` are parsed from the same single ``load_config`` read as
+all other fields — they are therefore gated by ``resolve_consumer_config_path``'s
+base-ref-only sentinel (SKIL-04/Pitfall 4).  A PR-head prevue.yml cannot inject CLI
+flags or fake pricing data.
+"""
 
 from __future__ import annotations
 
@@ -66,6 +84,134 @@ class SkillsConfig(BaseModel):
     max_consumer_skills: int = Field(default=50, ge=1)
 
 
+class EngineModels(BaseModel):
+    """Per-role model overrides (ENGN-09 / D-11).
+
+    Each role resolves: models.<role> else engine.model else None (engine default).
+    Roles: classify, review, consolidate.  The consolidate slot is reserved for
+    Phase 13 (QUAL-01) and is not consumed by the review pipeline today (D-13).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    classify: str | None = None
+    review: str | None = None
+    consolidate: str | None = None  # D-13: reserved; Phase 13 (QUAL-01) will consume this
+
+
+class EngineConfig(BaseModel):
+    """Typed engine block from prevue.yml (ENGN-08/09, D-10/D-11).
+
+    Parsed from the ``engine:`` YAML key in the single ``load_config`` read.
+    Fields ``raw_args`` and ``pricing`` are base-ref-only (same gated read path —
+    SKIL-04/Pitfall 4: PR-head prevue.yml cannot supply raw CLI flags or fake pricing).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = None
+    model: str | None = None
+    # models.<role> sub-block; stored as EngineModels or None when block absent.
+    models: EngineModels = Field(default_factory=EngineModels)
+    # raw_args: list[str] appended after framework argv (ENGN-08/D-10).
+    # A shell string is rejected; list form only — no shell parsing, no shell=True.
+    raw_args: list[str] = Field(default_factory=list)
+    pricing: dict | None = None
+
+    @field_validator("raw_args", mode="before")
+    @classmethod
+    def _validate_raw_args(cls, value: object) -> list[str]:
+        """Reject a string raw_args; list[str] only (D-10: command injection guard).
+
+        Also rejects lists with non-string elements (None, int, etc.) — Pydantic v2
+        would silently coerce them (None → "None", 42 → "42"), producing invalid CLI flags.
+        Exhaustive: any non-list, non-str scalar (int, float, bool, dict) is rejected here
+        too, so callers always get the clean D-10 message instead of a generic Pydantic
+        type-mismatch error.
+
+        ``None`` is tolerated as a defense-in-depth special case (rather than rejected):
+        an empty ``raw_args:`` YAML block parses to ``None``, not ``[]`` — a plausible
+        consumer typo, not an attack. Treated as "no extra args" (see phase-10 review CR-02).
+        """
+        if value is None:
+            return []
+        if isinstance(value, str):
+            raise ValueError(
+                "engine.raw_args must be a list of strings (D-10: no shell string allowed). "
+                f"Got str: {value!r}"
+            )
+        if not isinstance(value, list):
+            raise ValueError(
+                f"engine.raw_args must be a list of strings, "
+                f"got {type(value).__name__!r}: {value!r}"
+            )
+        for i, item in enumerate(value):
+            if not isinstance(item, str):
+                raise ValueError(
+                    f"engine.raw_args[{i}] must be a string, got {type(item).__name__!r}: {item!r}"
+                )
+        return value
+
+    @field_validator("pricing", mode="before")
+    @classmethod
+    def _validate_pricing(cls, value: object) -> dict | None:
+        """Reject a malformed engine.pricing override (CR-01: phase-10 review).
+
+        Mirrors ``_validate_raw_args``'s intent: catch consumer-YAML shape
+        mistakes at the Pydantic boundary rather than letting them crash
+        uncaught deep inside ``compute_cost``/``_lookup_row``. ``None`` (an
+        absent/empty ``pricing:`` block) is tolerated as "no override", same
+        as the field's declared default.
+
+        Also rejects non-numeric leaf field values (4th-pass review CR-01):
+        outer-shape validation alone let a row like
+        ``{"input_cost_per_token": "1e-06"}`` through — a very plausible
+        consumer mistake, since PyYAML parses unquoted scientific notation
+        without a decimal point (e.g. ``1e-06``, the exact style LiteLLM's
+        vendored pricing JSON uses) as a *string*, not a float. Such a row
+        previously crashed ``compute_cost`` with an uncaught ``TypeError``
+        deep inside the review pipeline instead of failing here at config
+        load, bypassing the project's fail-closed sticky-comment/check
+        pattern. ``bool`` is explicitly excluded even though it is an
+        ``int`` subclass in Python — a pricing rate of ``True``/``False``
+        is never a valid cost value. Negative values are rejected too (5th-pass
+        review): a typo like ``-1.0`` is a numeric type, so it slipped past the
+        original type-only check and produced a silently-negative computed cost
+        instead of failing here. Zero is allowed — a free/promotional rate is
+        a legitimate value.
+        """
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError(
+                f"engine.pricing must be a mapping of model -> pricing row, "
+                f"got {type(value).__name__!r}: {value!r}"
+            )
+        for model, row in value.items():
+            if row is None:
+                continue
+            if not isinstance(row, dict):
+                raise ValueError(
+                    f"engine.pricing[{model!r}] must be a mapping or null, "
+                    f"got {type(row).__name__!r}: {row!r}"
+                )
+            for field, field_value in row.items():
+                if field_value is None:
+                    continue
+                if (
+                    isinstance(field_value, bool)
+                    or not isinstance(field_value, (int, float))
+                    or field_value < 0
+                ):
+                    raise ValueError(
+                        f"engine.pricing[{model!r}][{field!r}] must be a non-negative number "
+                        f"or null, got {type(field_value).__name__!r}: {field_value!r} "
+                        "(YAML tip: unquoted scientific notation without a decimal "
+                        "point, e.g. 1e-06, parses as a string — write 1.0e-06 instead)"
+                    )
+        return value
+
+
 class PrevueConfig(BaseModel):
     """Typed bundle from one prevue.yml read."""
 
@@ -74,7 +220,8 @@ class PrevueConfig(BaseModel):
     skip: SkipConfig
     fallback: FallbackConfig
     skills: SkillsConfig
-    engine: str
+    engine: str  # resolved engine name (back-compat — PREVUE_ENGINE > yml > default)
+    engine_config: EngineConfig = Field(default_factory=EngineConfig)  # full engine block
 
 
 def resolve_consumer_config_path(
@@ -151,6 +298,98 @@ def _resolve_engine(raw: dict) -> str:
     return DEFAULT_ENGINE
 
 
+def _resolve_engine_models(raw: dict) -> dict[str, str | None]:
+    """Per-role model resolution for classify / review / consolidate (ENGN-09/D-11).
+
+    Resolution per role: models.<role> (yml) else engine.model (yml) else None.
+    The consolidate role is resolved (slot reserved) but nothing consumes it this phase
+    — merge_findings stays the deterministic fingerprint-dedup merge (D-13).
+    Phase 13 (QUAL-01) will wire the consolidate model into the merge step.
+
+    T-08 (10-THERMOS quick task): delegates to resolve_engine_models_from_config —
+    the single canonical role-resolution implementation — after building an
+    EngineConfig from the raw dict's ``engine:`` block. This function's
+    signature/return type is unchanged (dict[str, str | None] with keys
+    classify/review/consolidate) so existing raw-dict callers/tests stay green.
+
+    Returns a dict with keys 'classify', 'review', 'consolidate'.
+    """
+    engine_block = raw.get("engine") or {}
+    if not isinstance(engine_block, dict):
+        engine_block = {}
+    engine_config = _build_engine_config({"engine": engine_block})
+    return resolve_engine_models_from_config(engine_config)
+
+
+def resolve_engine_models_from_config(engine_config: EngineConfig) -> dict[str, str | None]:
+    """Direct EngineConfig → per-role model dict (Q-02, 10-THERMOS).
+
+    Replaces the review.py round-trip that reconstructed a fake raw YAML dict from
+    EngineConfig fields just to pass it into _resolve_engine_models() — the round-trip
+    existed because _resolve_engine_models() was designed for the raw YAML dict from
+    load_config, not for the already-parsed typed model. This function takes the typed
+    model directly.
+
+    Resolution per role: models.<role> else engine.model else None (env override
+    deliberately omitted — applied at call-sites per _resolve_engine_models docstring).
+    """
+    single_model = engine_config.model or None
+    em = engine_config.models
+
+    def _role(val: str | None) -> str | None:
+        return val or single_model
+
+    return {
+        "classify": _role(em.classify),
+        "review": _role(em.review),
+        "consolidate": _role(em.consolidate),
+    }
+
+
+def resolve_review_model(review_model_from_config: str | None, env_model: str | None) -> str | None:
+    """Review-model precedence: PREVUE_MODEL/COPILOT_MODEL env > models.review/engine.model."""
+    return env_model or review_model_from_config
+
+
+def resolve_classify_model(
+    classify_model: str | None,
+    fallback_model: str | None,
+    env_model: str | None,
+) -> str | None:
+    """Classify-model precedence: models.classify > classification.fallback.model > env."""
+    return classify_model or fallback_model or env_model
+
+
+def _build_engine_config(raw: dict) -> EngineConfig:
+    """Parse the engine block from an already-loaded config dict (no second file read)."""
+    engine_block = raw.get("engine") or {}
+    if not isinstance(engine_block, dict):
+        engine_block = {}
+    return EngineConfig.model_validate(engine_block)
+
+
+# WR-03: known top-level prevue.yml keys. load_config() reads these individually
+# rather than validating the whole raw dict with a pydantic model, so a typo'd
+# top-level key (e.g. "revie" instead of "review") is otherwise silently
+# dropped and the corresponding section falls back to defaults with no signal.
+_KNOWN_TOP_LEVEL_KEYS = frozenset(
+    {"ignore", "labels", "routing", "review", "skip", "classification", "skills", "engine"}
+)
+
+
+def _warn_unknown_top_level_keys(raw: dict) -> None:
+    # key=repr: a non-string top-level key (YAML allows `true:`/`123:` as keys) would
+    # otherwise crash sorted() with "'<' not supported between instances of 'str' and
+    # 'bool'" before the ValidationError fail-closed guard in review.py ever runs.
+    unknown = sorted((set(raw) - _KNOWN_TOP_LEVEL_KEYS), key=repr)
+    for key in unknown:
+        print(
+            f"prevue: unrecognized top-level prevue.yml key {key!r} — ignored "
+            f"(known keys: {', '.join(sorted(_KNOWN_TOP_LEVEL_KEYS))})",
+            file=sys.stderr,
+        )
+
+
 def load_config(consumer_path: str | None = None) -> PrevueConfig:
     """Load all prevue.yml sections from a single yaml.safe_load (D-08).
 
@@ -175,6 +414,7 @@ def load_config(consumer_path: str | None = None) -> PrevueConfig:
             file=sys.stderr,
         )
 
+    _warn_unknown_top_level_keys(raw)
     ruleset = _ruleset_from_raw(raw)
     review = ReviewConfig.model_validate(raw.get("review", {}))
     skip = SkipConfig.model_validate(raw.get("skip", {}))
@@ -184,6 +424,7 @@ def load_config(consumer_path: str | None = None) -> PrevueConfig:
     fallback = FallbackConfig.model_validate(classification.get("fallback", {}))
     skills = SkillsConfig.model_validate(raw.get("skills", {}))
     engine = _resolve_engine(raw)
+    engine_config = _build_engine_config(raw)
 
     return PrevueConfig(
         ruleset=ruleset,
@@ -192,4 +433,5 @@ def load_config(consumer_path: str | None = None) -> PrevueConfig:
         fallback=fallback,
         skills=skills,
         engine=engine,
+        engine_config=engine_config,
     )

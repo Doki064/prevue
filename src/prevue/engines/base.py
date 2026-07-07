@@ -26,6 +26,25 @@ class EngineAdapter(ABC):
         """Label-only classification for ambiguous file paths (D-11)."""
         raise NotImplementedError(f"{self.name} does not implement classify()")
 
+    def classify_with_tokens(
+        self,
+        paths: list[str],
+        allowed_labels: tuple[str, ...] | list[str],
+        *,
+        model: str | None = None,
+    ) -> tuple[dict[str, str], int | None]:
+        """Classify with a real-token-count companion (T-09a — 10-THERMOS).
+
+        Default implementation delegates to ``classify()`` and reports no real
+        token count (``None`` — caller estimates). Adapters that CAN report real
+        usage (e.g. ``CliEngineAdapter`` for json_envelope engines) override this
+        with real-token-returning behavior. Having a universal default here means
+        callers (``llm_fallback._classify_batch``) never need a ``hasattr`` duck-
+        typing check — every adapter has a working ``classify_with_tokens``.
+        """
+        labels = self.classify(paths, allowed_labels, model=model)
+        return labels, None
+
     def classify_skills(
         self,
         skills: list,

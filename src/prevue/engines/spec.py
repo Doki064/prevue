@@ -1,0 +1,224 @@
+"""Declarative engine specifications + CLI_ENGINE_SPECS registry list (ENGN-10, D-01/D-03)."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict
+
+# AuthError subclasses are defined in errors.py to avoid circular imports.
+# Per-engine modules re-export them for test backward compat.
+from prevue.engines.errors import (
+    AntigravityAuthError,
+    AuthError,  # noqa: F401 — re-exported for convenience
+    ClaudeAuthError,
+    CopilotAuthError,
+    CursorAuthError,
+)
+
+
+class CliEngineSpec(BaseModel):
+    """Frozen, declarative spec for a CLI-backed engine adapter (D-01).
+
+    Adding a CLI engine = one CliEngineSpec entry in CLI_ENGINE_SPECS.
+    No subclass, no duplicated adapter methods.
+    """
+
+    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+
+    # Identity
+    name: str
+    cli_label: str
+
+    # Auth
+    secret_env: str
+    auth_error: type  # CopilotAuthError | ClaudeAuthError | ...  (test compat — Pitfall 5)
+    validate_secret: Callable[[str], str]  # returns secret or raises auth_error
+    # secret_env_aliases (T-10 / D-12, 10-THERMOS quick task): env vars checked, in
+    # order, when secret_env is unset — e.g. antigravity-cli accepts GEMINI_API_KEY
+    # as a documented alias for ANTIGRAVITY_API_KEY. Declarative spec data replaces
+    # the `spec.name == "antigravity-cli"` name-check that previously lived in
+    # cli_adapter._build_env (same anti-pattern argv_pty_wrap/D-01 avoid elsewhere).
+    secret_env_aliases: tuple[str, ...] = ()
+
+    # Subprocess argv
+    base_argv: tuple[str, ...]
+
+    # Prompt delivery: stdin | tempfile-arg | argv (prompt appended after -p) |
+    # stdin-or-argv (size-gated: -p under argv_prompt_max_bytes, else stdin — D-13,
+    # 10-10 gap closure)
+    prompt_delivery: Literal["stdin", "tempfile-arg", "argv", "stdin-or-argv"]
+    tempfile_flag: str | None = None  # "-f" for cursor-agent
+    # argv_prompt_max_bytes: size ceiling for "stdin-or-argv" delivery (D-13, 10-10 gap
+    # closure); None = not applicable. See copilot-cli's entry for the rationale.
+    argv_prompt_max_bytes: int | None = None
+
+    # Model flag: env (copilot sets COPILOT_MODEL) | argv (--model/-m flag) | none
+    model_flag: Literal["env", "argv", "none"] = "none"
+    model_env: str | None = None  # "COPILOT_MODEL"
+    model_argv_flag: str | None = None  # "--model" | "-m"
+
+    # Behaviour flags
+    use_consumer_cwd: bool = False  # cursor: use PREVUE_CONSUMER_ROOT as cwd
+
+    # Usage capture strategy (PERF-03, consumed in Plan 03)
+    usage_capture: Literal["stdout-json", "otel-jsonl", "none"] = "none"
+
+    # Stdout envelope format — separate axis from usage_capture (Q-03, 10-THERMOS).
+    # "json_envelope": stdout is a JSON envelope; _resolve_fence_source unwraps the
+    #   "result" field before running extract_json_fence (Pitfall 3 / D-01).
+    # "plain": stdout is plain text; fence extraction runs on raw stdout.
+    # Cursor uses "json_envelope" for its output format even though usage_capture="none"
+    # (the envelope has no usage fields). Decoupled so the two axes evolve independently.
+    stdout_format: Literal["plain", "json_envelope"] = "plain"
+
+    # argv_pty_wrap: wrap argv-delivery invocation in a `script -qec` pseudo-TTY
+    # (Q-04, 10-THERMOS). Extracted from the `if spec.name == "antigravity-cli"`
+    # name-check in cli_adapter._invoke so the hack is a declarative spec flag
+    # rather than a hard-coded engine name. Only meaningful when prompt_delivery="argv".
+    # See Pitfall 2 (D-12 / T-10-21): agy checks isatty and silently drops output.
+    argv_pty_wrap: bool = False
+
+    # Functional flag — False means skeleton/not-yet-implemented (D-03)
+    functional: bool = True
+
+
+# ---------------------------------------------------------------------------
+# Per-engine validate_secret helpers
+# ---------------------------------------------------------------------------
+
+
+def _validate_copilot_secret(token: str) -> str:
+    """Validate COPILOT_GITHUB_TOKEN is a fine-grained PAT."""
+    if not token.startswith("github_pat_"):
+        raise CopilotAuthError(
+            "COPILOT_GITHUB_TOKEN must be a fine-grained, user-owned PAT "
+            "(github_pat_…) with the Copilot Requests permission."
+        )
+    return token
+
+
+def _validate_nonempty_secret(error_class: type, env_var: str) -> Callable[[str], str]:
+    """Return a validator that raises error_class when token is empty."""
+
+    def _validate(token: str) -> str:
+        if not token:
+            raise error_class(f"{env_var} is not set.")
+        return token
+
+    return _validate
+
+
+# ---------------------------------------------------------------------------
+# CLI_ENGINE_SPECS — the authoritative list of all CLI engine specs
+# ---------------------------------------------------------------------------
+
+CLI_ENGINE_SPECS: tuple[CliEngineSpec, ...] = (
+    # Gap 1 (10-10 gap closure, recurrence) — SUPERSEDED 2026-07-05: the 10-09
+    # parser fix (usage.py::_parse_copilot_otel) was necessary but not sufficient.
+    # .planning/debug/copilot-otel-real-capture-recurrence.md confirms the real
+    # remaining root cause: Copilot CLI 1.0.67 only initializes/writes OpenTelemetry
+    # (including COPILOT_OTEL_FILE_EXPORTER_PATH) when invoked with an explicit
+    # -p/--prompt flag (non-interactive argv-prompt mode) — repeated local
+    # reproduction against the exact CI-pinned CLI confirmed `copilot -s
+    # --no-ask-user -p "<prompt>"` reliably creates the OTEL file while
+    # `echo "<prompt>" | copilot -s --no-ask-user` never does. Plain stdin
+    # delivery (prompt_delivery="stdin") therefore never reached the OTEL-emitting
+    # code path in production, regardless of the parser fix.
+    # prompt_delivery="stdin-or-argv" with argv_prompt_max_bytes=65_536 (64 KiB)
+    # reaches the -p/OTEL path for prompts that fit safely under a conservative
+    # ceiling (the common small-to-medium PR case), while preserving the
+    # Phase-1-proven stdin fallback (01-07-SUMMARY.md: real ARG_MAX / Errno 7
+    # crash on a large PR diff when -p carried the full prompt) for anything
+    # larger — never reintroducing that crash class. OPEN FOLLOW-UP: a live CI
+    # spot-check with a real COPILOT_GITHUB_TOKEN confirming estimated=False
+    # end-to-end on an actual small-diff GitHub Actions run remains unverified —
+    # see 10-VERIFICATION.md's human_verification entry.
+    CliEngineSpec(
+        name="copilot-cli",
+        cli_label="Copilot CLI",
+        secret_env="COPILOT_GITHUB_TOKEN",
+        auth_error=CopilotAuthError,
+        validate_secret=_validate_copilot_secret,
+        base_argv=("copilot", "-s", "--no-ask-user"),
+        prompt_delivery="stdin-or-argv",
+        argv_prompt_max_bytes=65_536,
+        model_flag="env",
+        model_env="COPILOT_MODEL",
+        usage_capture="otel-jsonl",
+        functional=True,
+    ),
+    CliEngineSpec(
+        name="claude-code-cli",
+        cli_label="Claude Code CLI",
+        # CLAUDE_CODE_OAUTH_TOKEN: long-lived token from `claude setup-token`, for CI pipelines.
+        # --bare mode blocks CLAUDE_CODE_OAUTH_TOKEN (OAuth/keychain never read in --bare),
+        # so we omit --bare here (T-08 / 10-THERMOS — see SECURITY.md for the tradeoff:
+        # tried --safe-mode as a "fast + OAuth-compatible" middle ground, but measured
+        # CI run showed the 283s/300s budget usage was real Claude generation time on a
+        # large diff, not --bare-vs-unflagged startup overhead — so budget was raised
+        # instead; --safe-mode added no measurable benefit and was reverted).
+        # Subscription users (Pro/Max/Team/Enterprise) use this path; ANTHROPIC_API_KEY
+        # is Console-only (pay-per-use API) and belongs to the future direct-API engine.
+        secret_env="CLAUDE_CODE_OAUTH_TOKEN",
+        auth_error=ClaudeAuthError,
+        validate_secret=_validate_nonempty_secret(ClaudeAuthError, "CLAUDE_CODE_OAUTH_TOKEN"),
+        base_argv=("claude", "-p", "--output-format", "json"),
+        prompt_delivery="stdin",
+        model_flag="argv",
+        model_argv_flag="--model",
+        usage_capture="stdout-json",
+        stdout_format="json_envelope",
+        functional=True,
+    ),
+    # Gap A (10-07 gap closure, T-10-07-G): official Cursor CLI docs
+    # (cursor.com/docs/cli/reference/output-format) confirm the --output-format
+    # json envelope schema is {type, subtype, is_error, duration_ms,
+    # duration_api_ms, result, session_id, request_id} — no token/usage/cost
+    # fields exist. Q-03 (10-THERMOS): stdout_format="json_envelope" decouples
+    # the fence-unwrap need from usage_capture — Cursor produces a JSON envelope
+    # but has no capturable token usage, so usage_capture="none" is now correct.
+    CliEngineSpec(
+        name="cursor-cli",
+        cli_label="Cursor CLI",
+        secret_env="CURSOR_API_KEY",
+        auth_error=CursorAuthError,
+        validate_secret=_validate_nonempty_secret(CursorAuthError, "CURSOR_API_KEY"),
+        base_argv=("cursor-agent", "-p", "--output-format", "json"),
+        prompt_delivery="tempfile-arg",
+        tempfile_flag="-f",
+        model_flag="argv",
+        model_argv_flag="-m",
+        use_consumer_cwd=True,
+        usage_capture="none",
+        stdout_format="json_envelope",
+        functional=True,
+    ),
+    # Gap B (10-07 gap closure): official Antigravity CLI docs
+    # (antigravity.google/docs/cli/install) confirm no API-key / non-interactive
+    # auth mode exists for `agy`. The engine stays registered (get_adapter still
+    # resolves it for future use if Antigravity ships headless auth) but
+    # require_functional_adapter must reject it — closes the UAT gap where
+    # functional=True shipped on an unconfirmed checkpoint that was never
+    # closed (10-06-PLAN.md Task 3).
+    CliEngineSpec(
+        name="antigravity-cli",
+        cli_label="Antigravity CLI",
+        secret_env="ANTIGRAVITY_API_KEY",
+        # D-12: GEMINI_API_KEY is accepted as an alias; primary var is ANTIGRAVITY_API_KEY.
+        # validate_secret checks ANTIGRAVITY_API_KEY env; consumer may also set GEMINI_API_KEY
+        # as a documented alias. Declarative spec data (T-10, 10-THERMOS quick task) — no
+        # `spec.name ==` name-check in cli_adapter._build_env.
+        secret_env_aliases=("GEMINI_API_KEY",),
+        auth_error=AntigravityAuthError,
+        validate_secret=_validate_nonempty_secret(AntigravityAuthError, "ANTIGRAVITY_API_KEY"),
+        base_argv=("agy", "-p"),
+        prompt_delivery="argv",
+        model_flag="argv",
+        model_argv_flag="--model",
+        usage_capture="none",
+        argv_pty_wrap=True,  # Q-04: agy checks isatty; wrap in script -qec pseudo-TTY
+        functional=False,
+    ),
+)

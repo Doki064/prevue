@@ -26,7 +26,11 @@ class DiffBundle(BaseModel):
 class ReviewRequest(BaseModel):
     diff: DiffBundle
     instructions: str
-    budget_seconds: int = 300
+    # 600s (was 300s — 10-THERMOS T-08): a self-dogfood CI run on a large diff
+    # measured 283s of real Claude generation time alone, leaving near-zero
+    # headroom at 300s. Not yet consumer-configurable — TODO: expose via
+    # prevue.yml/env if larger-diff timeouts recur (tracked alongside T-08).
+    budget_seconds: int = 600
     model: str | None = None
     known_issues: list[tuple[str, int, str]] = Field(default_factory=list)
     max_known_issues: int = 20
