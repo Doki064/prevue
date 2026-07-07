@@ -251,7 +251,7 @@ Treat this as **mandatory, not optional**, when enabling merge gates.
 | Engine | Secret name | Maps to |
 |--------|-------------|---------|
 | `copilot-cli` | `copilot-github-token` | `COPILOT_GITHUB_TOKEN` |
-| `claude-code-cli` | `anthropic-api-key` | `ANTHROPIC_API_KEY` |
+| `claude-code-cli` | `claude-code-oauth-token` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | `cursor-cli` | `cursor-api-key` | `CURSOR_API_KEY` |
 
 ### Cursor CLI supply-chain note
@@ -267,8 +267,32 @@ jobs:
     with:
       engine: claude-code-cli
     secrets:
-      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+      claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
 ```
+
+## Breaking: Claude secret rename
+
+Older setups used a Console pay-per-use API key for the Claude engine. That convention has been replaced:
+
+| | Secret name | Env var | Token source |
+|---|---|---|---|
+| **Old (pre-migration)** | `anthropic-api-key` | `ANTHROPIC_API_KEY` | Anthropic Console pay-per-use API key |
+| **Current** | `claude-code-oauth-token` | `CLAUDE_CODE_OAUTH_TOKEN` | Long-lived OAuth token from `claude setup-token`, for subscription (Pro/Max/Team/Enterprise) CI users |
+
+`ANTHROPIC_API_KEY` is **not read** by the `claude-code-cli` engine spec (`secret_env="CLAUDE_CODE_OAUTH_TOKEN"` in `src/prevue/engines/spec.py`) — a leftover `ANTHROPIC_API_KEY` secret does nothing.
+
+**Migration steps:**
+
+1. Run `claude setup-token` to mint a `CLAUDE_CODE_OAUTH_TOKEN`.
+2. Create or rename the repository secret to `CLAUDE_CODE_OAUTH_TOKEN` (**Settings → Secrets and variables → Actions**).
+3. Update your caller workflow's `secrets:` block key from `anthropic-api-key:` to:
+   ```yaml
+   secrets:
+     claude-code-oauth-token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+   ```
+4. Remove any leftover `ANTHROPIC_API_KEY` secret/reference — it is inert under the current convention.
+
+**Symptom if not migrated:** the review step fails with `ClaudeAuthError: CLAUDE_CODE_OAUTH_TOKEN is not set.` in the Action log — not a YAML/config error, since the workflow's `secrets:` block key mismatch surfaces only when the subprocess actually runs.
 
 ## Skip ≠ auto-merge
 

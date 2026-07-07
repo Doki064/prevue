@@ -13,7 +13,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **WKFL-02**: Reusable workflow self-checkouts the Prevue repo (pinned ref) and the consumer repo, then runs the pipeline via a single CLI invocation
 - [x] **WKFL-03**: Consumer can configure run behavior via workflow inputs and a `.github/prevue.yml` config file read from the trusted base ref
 - [x] **WKFL-04**: Workflow runs with minimal token scopes (read contents, write PR comments/checks) and documents required permissions
-- [ ] **WKFL-05** *(Phase 10)*: Declared config precedence for `prevue.yml` — define and test a single resolution order (workflow input > `.github/prevue.yml` > built-in defaults) before consumers depend on ambiguous behavior; precedence is hard to change once relied upon.
+- [x] **WKFL-05** *(Phase 10)*: Declared config precedence for `prevue.yml` — define and test a single resolution order (workflow input > `.github/prevue.yml` > built-in defaults) before consumers depend on ambiguous behavior; precedence is hard to change once relied upon.
   - *Promoted v2 → v1 on 2026-06-25 (Phase 10 — Boundary Contracts). Source: bobmatnyc/ai-code-review config precedence hierarchy.*
 
 ### Diff Fetching
@@ -48,11 +48,11 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **ENGN-02**: GitHub Copilot CLI adapter runs headless on Actions runners (`copilot -p ... -s --no-ask-user`, auth via `COPILOT_GITHUB_TOKEN`, minimal `--allow-tool` set)
 - [x] **ENGN-03**: Engine output is schema-validated with retry-then-degrade handling; a parse failure produces a neutral check, never a crash or false block
 - [x] **ENGN-04**: Additional engine adapters (Claude Code CLI, Cursor CLI, Gemini CLI) implement the same pluggable interface and are selectable via config, validating the engine abstraction beyond Copilot (promoted from CUST-03, 2026-06-13)
-- [ ] **ENGN-08** *(Phase 10)*: Adapter raw-args passthrough — an explicit escape-hatch field on the adapter contract so engine-specific CLI flags can be passed through without changing Prevue's typed inputs; keeps the abstraction stable as new engines add flags.
+- [x] **ENGN-08** *(Phase 10)*: Adapter raw-args passthrough — an explicit escape-hatch field on the adapter contract so engine-specific CLI flags can be passed through without changing Prevue's typed inputs; keeps the abstraction stable as new engines add flags.
   - *Promoted v2 → v1 on 2026-06-25 (Phase 10). Source: anthropics/claude-code-action `claude_args` passthrough.*
-- [ ] **ENGN-09** *(Phase 10)*: Per-role model tiering — let the adapter select different models per role (cheap classify → strong review → cheap consolidate/dedup) instead of one model for every call; pairs with ENGN-05 multi-call and PERF-01 to cut cost without losing review depth. Enables the cheap dedup/scoring pass QUAL-01 (Phase 13) relies on.
+- [x] **ENGN-09** *(Phase 10)*: Per-role model tiering — let the adapter select different models per role (cheap classify → strong review → cheap consolidate/dedup) instead of one model for every call; pairs with ENGN-05 multi-call and PERF-01 to cut cost without losing review depth. Enables the cheap dedup/scoring pass QUAL-01 (Phase 13) relies on.
   - *Promoted v2 → v1 on 2026-06-25 (Phase 10). Source: bobmatnyc/ai-code-review separate "writer model" for consolidation.*
-- [ ] **ENGN-10** *(Phase 10 — FIRST task)*: Consolidate the CLI engine adapters into a **spec-driven generic adapter** (declarative `CliEngineSpec`: secret env + validator, argv, prompt-delivery {stdin|tempfile-arg}, model-flag {env|argv}, cli_label, cwd, functional flag), or a template-method base at minimum. Today `copilot_cli.py` / `cursor_cli.py` / `claude_code_cli.py` repeat identical `review`/`classify`/`classify_skills` wiring — only ~4 axes vary — and `registry.py` requires a manual import + dict entry per engine. The generic adapter implements those methods once; the registry auto-populates from the spec list; `gemini` skeleton becomes `functional=False` (drops the `SKELETON_ENGINES` special-case). **Must land before PERF-03 / ENGN-08 / ENGN-09**, which are all adapter-contract changes that otherwise cost 4× (one edit per existing adapter) instead of 1×.
+- [x] **ENGN-10** *(Phase 10 — FIRST task)*: Consolidate the CLI engine adapters into a **spec-driven generic adapter** (declarative `CliEngineSpec`: secret env + validator, argv, prompt-delivery {stdin|tempfile-arg}, model-flag {env|argv}, cli_label, cwd, functional flag), or a template-method base at minimum. Today `copilot_cli.py` / `cursor_cli.py` / `claude_code_cli.py` repeat identical `review`/`classify`/`classify_skills` wiring — only ~4 axes vary — and `registry.py` requires a manual import + dict entry per engine. The generic adapter implements those methods once; the registry auto-populates from the spec list; `gemini` skeleton becomes `functional=False` (drops the `SKELETON_ENGINES` special-case). **Must land before PERF-03 / ENGN-08 / ENGN-09**, which are all adapter-contract changes that otherwise cost 4× (one edit per existing adapter) instead of 1×.
   - *Migration caveats: preserve per-engine `AuthError` subclasses (tests assert on type); repoint `copilot_cli.__all__` internal re-exports relied on by tests; `classify_skills` becomes available to every engine for free. Recommend spec-driven; template-method base is the low-risk fallback.*
   - *Source (added 2026-06-25): adapter-layer review — shared flow/prompt/subprocess already factored; remaining per-adapter file is boilerplate shell.*
 - [x] **ENGN-05**: Pipeline supports configurable multi-call review (max_review_calls, default 1 = single call); when more than one call is configured, the diff is split into multiple review requests and findings are merged/deduped across all call results
@@ -68,7 +68,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [x] **OUTP-02**: Review posts inline line-level comments via the Reviews API, with finding positions validated against diff hunks (invalid positions fall back to the summary)
 - [x] **OUTP-03**: Review reports pass/fail/neutral status usable as a merge gate (blocking is opt-in via severity threshold)
 - [x] **OUTP-04**: Summary comment includes token/cost transparency: tokens used, skills loaded vs skipped
-- [ ] **OUTP-05** *(Phase 10)*: Structured machine-readable review output — emit the validated findings result (the existing pydantic `ReviewResult`) as a GitHub Actions job `output:` and/or JSON artifact, so consumers can chain automation (merge gates, dashboards) off the review. Cheap, and core to being a framework other repos build on.
+- [x] **OUTP-05** *(Phase 10)*: Structured machine-readable review output — emit the validated findings result (the existing pydantic `ReviewResult`) as a GitHub Actions job `output:` and/or JSON artifact, so consumers can chain automation (merge gates, dashboards) off the review. Cheap, and core to being a framework other repos build on.
   - *Promoted v2 → v1 on 2026-06-25 (Phase 10). Source: anthropics/claude-code-action structured JSON outputs.*
 
 ### Noise Control
@@ -97,7 +97,7 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Token Optimization
 
-- [ ] **PERF-03** *(Phase 10)*: Actual token accounting — replace the `bytes/4` estimate (`src/prevue/engines/tokens.py`, surfaced as "~est" in OUTP-04) with real token counts captured from each engine adapter's own usage reporting (input / output / cache tokens), falling back to estimation only when an engine does not report usage; optionally compute cost from a pricing database. Turns OUTP-04's "tokens used (~est)" into measured tokens + cost. The existing `token_meta.estimated` / `review_estimated` / `classify_estimated` flags already anticipate this swap.
+- [x] **PERF-03** *(Phase 10)*: Actual token accounting — replace the `bytes/4` estimate (`src/prevue/engines/tokens.py`, surfaced as "~est" in OUTP-04) with real token counts captured from each engine adapter's own usage reporting (input / output / cache tokens), falling back to estimation only when an engine does not report usage; optionally compute cost from a pricing database. Turns OUTP-04's "tokens used (~est)" into measured tokens + cost. The existing `token_meta.estimated` / `review_estimated` / `classify_estimated` flags already anticipate this swap.
   - *Promoted v2 → v1 on 2026-06-25 (Phase 10). Source: junhoyeo/tokscale — aggregates usage AI CLIs already record (Claude Code JSONL `usage`, Codex `token_count`), prices via LiteLLM; no tokenization, no estimation.*
 - [ ] **PERF-04** *(Phase 12)*: Selective cross-file dependency context — when a changed file references a first-party symbol whose definition lives in an **unchanged** file (not in the diff), pull that definition into review context so the engine can catch contract violations it otherwise cannot see. A **whole-framework** gap, not just incremental: Prevue reviews the diff, which never contains unchanged dependencies regardless of incremental mode (demonstrated 2026-06-25 — a PR touching only `checkout.py` could not see `MAX_CHARGE_AMOUNT = 9999.99` in unchanged `processor.py`; review missed the missing-cap bug). Resolution stays **selective** — same discipline as skill-loading: **depth-1, first-party imports of changed files only**, capped (per-file byte budget, max-N files); never transitive/full-graph (Out-of-Scope "full codebase graph/indexing"). Infra already exists: the workflow checks out the consumer base ref to disk (`PREVUE_CONSUMER_ROOT`, trusted), and `src/prevue/importscan.py` already resolves first-party paths — the missing link is `multicall.py` discarding a resolved path not in the changed set (`if target_path in known_paths`) instead of reading it as reference context. Third-party imports stay excluded (importscan returns `[]` for them).
   - *Implementation ladder (earn each step with measured token data): (a) **Capped-A** — inject the whole resolved dependency file as labeled read-only context; dumb-simple, lossless per file, language-agnostic; bound by depth-1 + byte/file caps; ship first and measure. (b) **Symbol-slice (option D)** — only if capped-A's bill is too high: ast-parse, slice the referenced symbol's full body + one-hop module-level name closure + class state + decorator/comment lines; Python-first (stdlib `ast`), JS/TS need tree-sitter (heavy dep → later). Silent-miss boundary for (b): constraint behind a deeper helper call, inherited base method, or dynamic dispatch — out of depth-1 scope by design.*
@@ -240,26 +240,40 @@ Which phases cover which requirements. Updated during roadmap creation.
 | ENGN-05 | Phase 9 | Complete |
 | ENGN-06 | Phase 9 | Complete |
 | ENGN-07 | Phase 9 | Complete |
-| ENGN-10 | Phase 10 | Planned (first task) |
-| WKFL-05 | Phase 10 | Planned |
-| PERF-03 | Phase 10 | Planned |
-| ENGN-08 | Phase 10 | Planned |
-| ENGN-09 | Phase 10 | Planned |
-| OUTP-05 | Phase 10 | Planned |
+| ENGN-10 | Phase 10 | Complete |
+| WKFL-05 | Phase 10 | Complete |
+| PERF-03 | Phase 10 | Complete |
+| ENGN-08 | Phase 10 | Complete |
+| ENGN-09 | Phase 10 | Complete |
+| OUTP-05 | Phase 10 | Complete |
 | SKIL-06 | Phase 11 | Planned |
 | SKIL-07 | Phase 11 | Planned |
 | PERF-04 | Phase 12 | Planned |
 | QUAL-01 | Phase 13 | Planned |
+| CUST-01 | v2 | Deferred |
+| CUST-02 | v2 | Deferred |
+| CUST-03 | v2 | Superseded → ENGN-04 (Phase 5, Complete) |
+| CUST-04 | v2 | Superseded → ENGN-05/06/07 (Phase 9, Complete) |
+| CUST-05 | v2 | Deferred |
+| CUST-06 | v2 | Deferred |
+| QUAL-02 | v2 | Deferred |
+| PERF-01 | v2 | Deferred |
+| PERF-02 | v2 | Deferred |
+| DESC-01 | v2 | Deferred |
+| OUTP-06 | v2 | Deferred |
+| SKIL-05 | v2 | Deferred |
+| LOCL-01 | v2 | Deferred |
 
 **Coverage:**
 
 - v1 requirements: 43 (33 prior + 9 promoted 2026-06-25 + ENGN-10 adapter consolidation)
-- Mapped to phases: 43 (Phases 1–9 Complete; Phases 10–13 Planned)
+- Mapped to phases: 43 (Phases 1–9 Complete; Phase 10 Complete; Phases 11–13 Planned)
+- v2 deferred: 11 (CUST-01/02/05/06, QUAL-02, PERF-01/02, DESC-01, OUTP-06, SKIL-05, LOCL-01) + 2 superseded (CUST-03/04)
 - Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2026-06-12*
-*Last updated: 2026-06-24 — Phase 9 complete; SKIL-01 gap + ENGN-05/06/07 traceability updated to Complete; UAT 14/14 pass*
+*Last updated: 2026-06-29 — Phase 10 complete (ENGN-10/WKFL-05/PERF-03/ENGN-08/ENGN-09/OUTP-05 → Complete); added 13 missing v2 rows to Traceability table (CUST-01/02/03/04/05/06, QUAL-02, PERF-01/02, DESC-01, OUTP-06, SKIL-05, LOCL-01). Phase 9 complete: SKIL-01 gap + ENGN-05/06/07 → Complete; UAT 14/14 pass.*
 *v2 expanded 2026-06-25 — research mining of ai-code-review, claude-code-action, headroom, tokscale: added CUST-06, ENGN-08/09, OUTP-05/06, SKIL-05, WKFL-05, PERF-03 (actual token tracking); folded compression/severity sources into PERF-02 + QUAL-01. Spike + consumer-doc tasks parked in ROADMAP Backlog.*
 *PERF-04 added 2026-06-25 — selective cross-file dependency context (capped-A → symbol-slice ladder, depth-1 first-party); proven a whole-framework (not just incremental) gap via live tier-2 demo on test-sandbox-repo PR #11.*
 *Skills rework 2026-06-25 — added SKIL-06 (skills → dedicated repo as pinned git submodule = default built-in source), SKIL-07 (consumer external skills repo, pin+trust gated), LOCL-01 (interactive slash-command surface); reopened two OOS rows as pinned-not-registry / local-surface. Considered and DROPPED: domain-composite skills + language-axis routing (`/review-web-app`, `--python`) — composites are sugar over existing multi-label routing; not pursued.*
