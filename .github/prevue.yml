@@ -8,3 +8,19 @@ ignore:
 review:
   incremental: false   # one-shot full review to clear carried incremental warnings (PR #16)
   min_severity_to_fail: error
+  max_review_calls: 3      # split large diffs across up to 3 parallel calls
+  review_concurrency: 3    # run all calls in parallel (ThreadPoolExecutor)
+  # Default (120_000) let a whole ~27k-token diff collapse into ONE call — max_review_calls
+  # never kicked in since split_into_calls only splits once a group exceeds this ceiling.
+  # Lowered so same-sized diffs actually split ~2-3 ways and run concurrently, keeping any
+  # single Claude call's generation time (and 600s subprocess budget) well under the wire
+  # instead of one big call risking the whole-run timeout (2026-07-07 CI timeout investigation).
+  max_tokens_per_call: 15000
+
+# Per-role model pin (ENGN-09) — engine name/env-var precedence is unchanged (still set
+# via the PREVUE_ENGINE workflow input); this only fixes which model runs each role so
+# generation latency is consistent instead of whatever claude-code-cli's own default resolves to.
+engine:
+  models:
+    classify: claude-haiku-4-5   # cheap/fast — label-only classification
+    review: claude-sonnet-5      # full review generation

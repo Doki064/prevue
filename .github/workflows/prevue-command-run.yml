@@ -55,7 +55,11 @@ jobs:
           persist-credentials: false
 
       - name: Install engine CLI
-        if: github.event.client_payload.needs_engine
+        # antigravity-cli not yet functional — see spec.py functional=False; mirrored
+        # in prevue-review.yml's "Install engine CLI" step.
+        if: >-
+          github.event.client_payload.needs_engine &&
+          github.event.client_payload.engine != 'antigravity-cli'
         env:
           PREVUE_ENGINE: ${{ github.event.client_payload.engine }}
         run: bash .prevue/.github/scripts/install-engine-cli.sh
@@ -85,9 +89,15 @@ jobs:
           PREVUE_ENGINE: ${{ github.event.client_payload.engine }}
           PREVUE_CONSUMER_ROOT: ${{ github.workspace }}/consumer
           PREVUE_CONFIG_PATH: .github/prevue.yml
+          COPILOT_OTEL_FILE_EXPORTER_PATH: ${{ runner.temp }}/copilot-otel
           COPILOT_GITHUB_TOKEN: >-
             ${{ github.event.client_payload.engine == 'copilot-cli' && secrets.COPILOT_GITHUB_TOKEN || '' }}
-          ANTHROPIC_API_KEY: >-
-            ${{ github.event.client_payload.engine == 'claude-code-cli' && secrets.ANTHROPIC_API_KEY || '' }}
+          CLAUDE_CODE_OAUTH_TOKEN: >-
+            ${{ github.event.client_payload.engine == 'claude-code-cli' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           CURSOR_API_KEY: >-
             ${{ github.event.client_payload.engine == 'cursor-cli' && secrets.CURSOR_API_KEY || '' }}
+          ANTIGRAVITY_API_KEY: >-
+            ${{ github.event.client_payload.engine == 'antigravity-cli' && secrets.ANTIGRAVITY_API_KEY || '' }}
+          GEMINI_API_KEY: >-
+            ${{ github.event.client_payload.engine == 'antigravity-cli' && secrets.GEMINI_API_KEY || '' }}
+          PREVUE_RESULT_FILE: ${{ runner.temp }}/prevue-result.json

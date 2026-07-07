@@ -5,7 +5,7 @@ set -euo pipefail
 
 case "$PREVUE_ENGINE" in
   copilot-cli)
-    npm install -g @github/copilot@1.0.61
+    npm install -g @github/copilot@1.0.67
     command -v copilot
     ;;
   claude-code-cli)
@@ -20,6 +20,16 @@ case "$PREVUE_ENGINE" in
     fi
     bash "$installer"
     command -v cursor-agent
+    ;;
+  antigravity-cli)
+    # Optional PREVUE_ANTIGRAVITY_INSTALL_SHA256 checksum gate (mirrors Cursor pattern).
+    installer="${RUNNER_TEMP}/antigravity-install.sh"
+    curl -fsS https://antigravity.google/cli/install.sh -o "$installer"
+    if [ -n "${PREVUE_ANTIGRAVITY_INSTALL_SHA256:-}" ]; then
+      echo "${PREVUE_ANTIGRAVITY_INSTALL_SHA256}  ${installer}" | sha256sum -c -
+    fi
+    bash "$installer"
+    command -v agy
     ;;
   *)
     echo "Unsupported engine: $PREVUE_ENGINE" >&2
