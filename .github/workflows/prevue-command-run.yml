@@ -22,7 +22,7 @@ jobs:
         run: jq -r '.client_payload.comment_body' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/prevue-comment-body.txt"
 
       - name: Checkout Prevue framework
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: Doki064/prevue
           ref: ${{ vars.PREVUE_REF || 'main' }}
@@ -48,7 +48,7 @@ jobs:
           PREVUE_ENGINE: ${{ vars.PREVUE_ENGINE || 'copilot-cli' }}
 
       - name: Checkout consumer base ref
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: ${{ github.event.client_payload.base_sha }}
           path: consumer
