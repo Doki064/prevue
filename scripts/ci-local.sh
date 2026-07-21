@@ -6,7 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 ACTIONLINT_VERSION="v1.7.12"
-ZIZMOR_VERSION="1.25.2"
+ZIZMOR_VERSION="1.27.0"
 WORKFLOW_FILES=(
   .github/workflows/ci.yml
   .github/workflows/review.yml
@@ -45,7 +45,9 @@ ensure_actionlint() {
 }
 
 run_zizmor() {
-  uvx "zizmor==${ZIZMOR_VERSION}" .github/workflows
+  # Online audits (e.g. ref-version-mismatch) only run with a token; CI has one, so mirror it.
+  GH_TOKEN="${GH_TOKEN:-$(gh auth token 2>/dev/null || true)}" \
+    uvx "zizmor==${ZIZMOR_VERSION}" .github/workflows
 }
 
 step "uv sync --locked"
